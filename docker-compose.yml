@@ -1,10 +1,10 @@
-# 本地一键启动卫生间坑位预约后端
+# 本地一键启动 OfficeSpace 办公空间管理后端
 # 用法：docker compose up -d --build   然后浏览器打开 http://localhost:3000
 services:
-  toilet-reservation:
+  office-space:
     build: .
-    image: toilet-reservation:latest
-    container_name: toilet-reservation
+    image: office-space:latest
+    container_name: office-space
     ports:
       - "3000:3000"
     environment:

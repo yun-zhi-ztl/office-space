@@ -1,175 +1,48 @@
-const express = require('express');
+// =========================================================
+// OfficeSpace · 办公空间管理 — 后端
+// 单文件 Node.js + Express + ws + PostgreSQL(可选，失败降级内存)
+// 模块：会议室预约 / 工具借用 / 物资申领 / 报修
+// =========================================================
+'use strict';
 const http = require('http');
-const crypto = require('crypto');
-const { WebSocketServer } = require('ws');
 const path = require('path');
+const crypto = require('crypto');
+const express = require('express');
+const { WebSocketServer } = require('ws');
 const { Pool } = require('pg');
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
-
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// =========================================================
-// 命名空间（厕所空间）：每个空间拥有自己的一套坑位配置与运行状态
-// 开放加入：任何人可创建空间、可进入任何空间
-// =========================================================
-const spaces = new Map();  // spaceId -> { id,name,squatCount,urinalCount,stalls,reservations,urges,clients }
-const users = new Map();   // userId -> user（user.currentSpace 指向所在空间）
-
-// 预约"确认到坑"允许的时间窗：从预约开始时间起，超过该窗口未确认则预约过期释放。
-// 与下方定时器保持同一来源，避免两处魔法数字漂移。
-const RESERVE_CONFIRM_WINDOW_MS = 5 * 60000;
-
-const ACHIEVEMENT_DEFS = [
-  { id: 'punctual', name: '守时达人', desc: '连续3次准时到坑', icon: '⏰', check: (u) => u.stats.consecutiveOnTime >= 3 },
-  { id: 'endurance', name: '持久战', desc: '单次蹲坑超过20分钟', icon: '🐌', check: (u) => u.stats.maxDuration >= 20 },
-  { id: 'night', name: '夜行者', desc: '凌晨时段使用', icon: '🌙', check: (u) => u.stats.nightVisits >= 1 },
-  { id: 'king', name: '蹲坑之王', desc: '累计使用超过10次', icon: '👑', check: (u) => u.stats.totalVisits >= 10 },
-  { id: 'grabber', name: '抢位达人', desc: '临时抢位成功5次', icon: '⚡', check: (u) => u.stats.grabSuccess >= 5 },
-  { id: 'rater', name: '评论家', desc: '给坑位评分3次', icon: '✍️', check: (u) => u.stats.ratingsGiven >= 3 },
-];
-
-// ============ 工具函数 ============
-function lk(s) { return String(s == null ? '' : s).toLowerCase(); }
-
-function getUsersIn(spaceId) {
-  const out = [];
-  for (const [, u] of users) if (u.currentSpace === spaceId) out.push(u);
-  return out;
-}
-// 统计某人在某空间里当前占用的坑位数（含已预约未到坑、正使用中）。
-// 约定：一次只能占一个坑——要么蹲坑要么尿槽，不许一个人把坑位占满。
-function activeStallCount(space, user) {
-  let n = 0;
-  for (const st of space.stalls) if (st.reservation && st.reservation.userId === user.id) n++;
-  return n;
-}
-function sendToUser(userId, data) {
-  for (const [, user] of users) {
-    if (user.id === userId && user.ws.readyState === 1) user.ws.send(JSON.stringify(data));
-  }
-}
-function broadcastTo(spaceId, data) {
-  const sp = spaces.get(spaceId);
-  if (!sp) return;
-  const msg = JSON.stringify(data);
-  sp.clients.forEach((c) => { if (c.readyState === 1) c.send(msg); });
-}
-// =========================================================
-// 空间内成员身份与显示名解析
-// 身份键：账号（全局唯一、区分大小写）。用户名允许重名；
-// 当同一空间内多个账号的用户名（忽略大小写）相同时，显示名追加账号作区分，
-// 例如「王伟」「王伟(wangwei01)」。
-// =========================================================
-function spaceInfo(spaceId) {
-  const entries = new Map(); // account -> { account, username, avatar, stats, achievements, online }
-  for (const u of getUsersIn(spaceId)) {
-    entries.set(u.account, { account: u.account, username: u.nickname, avatar: u.avatar, stats: u.stats, achievements: u.achievements, online: true });
-  }
-  const prefix = spaceId + '::';
-  for (const [key, p] of profiles) {
-    if (!key.startsWith(prefix)) continue;
-    const account = key.slice(prefix.length);
-    const e = entries.get(account);
-    if (e) { if (p.nick) e.username = p.nick; }
-    else entries.set(account, { account, username: p.nick || account, avatar: p.avatar, stats: p.stats, achievements: p.achievements, online: false });
-  }
-  // 按用户名（忽略大小写）统计是否撞名，撞名则显示名追加账号
-  const count = new Map();
-  for (const d of entries.values()) { const k = lk(d.username); count.set(k, (count.get(k) || 0) + 1); }
-  for (const d of entries.values()) {
-    d.dup = count.get(lk(d.username)) > 1;
-    d.display = d.dup ? `${d.username}(${d.account})` : d.username;
-  }
-  return entries;
-}
-function displayOf(spaceId, account, fallback) {
-  const d = spaceInfo(spaceId).get(account);
-  return (d && d.display) || fallback || '';
-}
-function broadcastStalls(spaceId) {
-  const sp = spaces.get(spaceId);
-  if (!sp) return;
-  const info = spaceInfo(spaceId);
-  broadcastTo(spaceId, {
-    type: 'stalls',
-    stalls: sp.stalls.map((s) => {
-      const o = { id: s.id, type: s.type, name: s.name, status: s.status, urgeCount: sp.urges.get(s.id) || 0, ratings: s.ratings, reservation: null, currentBy: null };
-      if (s.reservation) {
-        const w = info.get(s.reservation.account) || {};
-        const who = { account: s.reservation.account, display: w.display || s.reservation.nickname, dup: !!w.dup, avatar: w.avatar || '🧑' };
-        o.reservation = {
-          by: who, startTime: s.reservation.startTime, endTime: s.reservation.endTime,
-          duration: s.reservation.duration, isGrab: !!s.reservation.isGrab, reservationId: s.reservation.reservationId,
-        };
-        if (s.status === 'occupied' || s.status === 'reserved' || s.status === 'waiting') o.currentBy = who;
-      }
-      return o;
-    }),
-  });
-}
-function broadcastUsers(spaceId) {
-  const info = spaceInfo(spaceId);
-  broadcastTo(spaceId, {
-    type: 'users',
-    users: getUsersIn(spaceId).map((u) => {
-      const w = info.get(u.account) || {};
-      return { id: u.id, account: u.account, display: w.display || u.nickname, dup: !!w.dup, avatar: u.avatar };
-    }),
-  });
-}
-function broadcastLeaderboard(spaceId) {
-  const sp = spaces.get(spaceId);
-  if (!sp) return;
-  const list = [];
-  for (const d of spaceInfo(spaceId).values()) {
-    list.push({ account: d.account, display: d.display, dup: d.dup, avatar: d.avatar, stats: d.stats, achievements: d.achievements });
-  }
-  list.sort((a, b) => (b.stats.totalDuration || 0) - (a.stats.totalDuration || 0));
-  broadcastTo(spaceId, { type: 'leaderboard', rankings: list });
-}
-function checkAchievements(user) {
-  for (const def of ACHIEVEMENT_DEFS) {
-    if (!user.achievements.includes(def.id) && def.check(user)) {
-      user.achievements.push(def.id);
-      sendToUser(user.id, { type: 'achievement', achievement: def });
-      if (user.currentSpace) {
-        const d = displayOf(user.currentSpace, user.account, user.nickname);
-        broadcastTo(user.currentSpace, { type: 'achievementUnlocked', nickname: d, achievement: def });
-      }
-    }
-  }
-}
-function getStats(user) {
-  return {
-    totalVisits: user.stats.totalVisits,
-    totalDuration: user.stats.totalDuration,
-    favoriteStall: user.stats.favoriteStall,
-    onTimeRate: user.stats.onTimeRate,
-    maxDuration: user.stats.maxDuration,
-    grabSuccess: user.stats.grabSuccess,
-    nightVisits: user.stats.nightVisits,
-    consecutiveOnTime: user.stats.consecutiveOnTime,
-    achievements: user.achievements,
-  };
-}
-
-// ============ 空间构建 ============
-function buildStalls(squat, urinal) {
-  const stalls = [];
-  for (let i = 1; i <= squat; i++) stalls.push({ id: i, type: 'squat', name: `蹲坑${i}`, status: 'free', currentUser: null, reservation: null, ratings: [] });
-  for (let j = 1; j <= urinal; j++) stalls.push({ id: squat + j, type: 'urinal', name: `尿槽${j}`, status: 'free', currentUser: null, reservation: null, ratings: [] });
-  return stalls;
-}
-function createSpace(id, name, squat, urinal) {
-  const sp = { id, name, squatCount: squat, urinalCount: urinal, stalls: buildStalls(squat, urinal), reservations: new Map(), urges: new Map(), clients: new Set() };
-  spaces.set(id, sp);
-  return sp;
-}
+// ================= 常量 =================
+const PORT = process.env.PORT || 3000;
+const TOKEN_TTL = 7 * 24 * 60 * 60 * 1000;
 const SPACE_ID_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
+const ROOM_STATUS = ['pending', 'active', 'completed', 'cancelled', 'expired'];
+const BORROW_STATUS = ['borrowed', 'returned'];
+const MATERIAL_STATUS = ['pending', 'fulfilled', 'cancelled'];
+const REPAIR_STATUS = ['reported', 'in_progress', 'resolved', 'cancelled'];
+const REPAIR_CATEGORIES = ['厕所', '灯光', '空调', '其它'];
+const TOOL_CATEGORIES = ['测试电脑', '测试机器', '测试手机', '其它'];
+
+// ================= 内存状态 =================
+// space -> { id, name, admins:Set<account>, rooms:Room[], reservations:Map, tools:Tool[], borrows:Map, materialRequests:Map, repairs:Map, invites:Set, clients:Set }
+const spaces = new Map();
+const users = new Map();        // userId -> user（在线会话，含 currentSpace）
+const accounts = new Map();     // account(原样) -> { account, passwordHash, username, avatar }
+const tokens = new Map();       // token -> { account, expiresAt }
+
+// ================= 基础工具 =================
+function genId(prefix, set) {
+  let id;
+  do {
+    id = prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  } while (set && set.has(id));
+  return id;
+}
 function genSpaceId() {
   let id;
   do {
@@ -178,186 +51,155 @@ function genSpaceId() {
   } while (spaces.has(id));
   return id;
 }
+function sendTo(ws, obj) {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+}
+function broadcastTo(spaceId, obj) {
+  const sp = spaces.get(spaceId);
+  if (!sp) return;
+  const msg = JSON.stringify(obj);
+  for (const c of sp.clients) if (c.readyState === 1) c.send(msg);
+}
+function sendToUser(userId, obj) {
+  for (const [, u] of users) if (u.id === userId && u.ws && u.ws.readyState === 1) u.ws.send(JSON.stringify(obj));
+}
+function getUsersIn(spaceId) {
+  const out = [];
+  for (const [, u] of users) if (u.currentSpace === spaceId) out.push(u);
+  return out;
+}
+function requireSpace(sp) {
+  return sp ? null : { type: 'error', message: '请先选择空间' };
+}
+function requireLogin(ws) {
+  return users.get(ws._userId) || null;
+}
+function isAdmin(space, account) {
+  return !!space.admins.has(account);
+}
+function serError(message) {
+  return { type: 'error', message };
+}
 
-// ============ HTTP：空间列表 / 创建 ============
-app.get('/api/spaces', (req, res) => {
-  const list = [];
-  for (const sp of spaces.values()) list.push({ id: sp.id, name: sp.name, squat_count: sp.squatCount, urinal_count: sp.urinalCount });
-  res.json(list);
-});
-app.post('/api/spaces', (req, res) => {
-  const name = (req.body.name || '').trim().slice(0, 30);
-  const squat = parseInt(req.body.squat_count, 10);
-  const urinal = parseInt(req.body.urinal_count, 10);
-  if (!name) return res.status(400).json({ error: '请输入空间名' });
-  if (!Number.isInteger(squat) || squat < 1 || squat > 10 || !Number.isInteger(urinal) || urinal < 0 || urinal > 10) {
-    return res.status(400).json({ error: '蹲坑数 1-10，尿槽数 0-10' });
+// 昵称显示名唯一化（同空间同用户名追加账号区分）
+function lk(s) { return String(s == null ? '' : s).toLowerCase(); }
+function spaceUserInfo(spaceId) {
+  const info = new Map();
+  for (const u of getUsersIn(spaceId)) {
+    info.set(u.account, { account: u.account, username: u.nickname, avatar: u.avatar, online: true, role: isAdmin(spaces.get(spaceId), u.account) ? 'admin' : 'member' });
   }
-  const id = genSpaceId();
-  const sp = createSpace(id, name, squat, urinal);
-  saveSpace(sp);
-  res.json({ id: sp.id, name: sp.name, squat_count: sp.squatCount, urinal_count: sp.urinalCount });
-});
+  // 统计撞名并生成 display
+  const count = new Map();
+  for (const d of info.values()) { const k = lk(d.username); count.set(k, (count.get(k) || 0) + 1); }
+  for (const d of info.values()) {
+    d.dup = count.get(lk(d.username)) > 1;
+    d.display = d.dup ? `${d.username}(${d.account})` : d.username;
+  }
+  return info;
+}
 
-// ============ 账号注册 ============
-app.post('/api/register', (req, res) => {
-  const account = String(req.body.account || '').trim();
-  const password = String(req.body.password || '');
-  const username = String(req.body.username || '').trim();
-  const avatar = String(req.body.avatar || '🧑').trim().slice(0, 4) || '🧑';
-  if (!account) return res.status(400).json({ error: '请输入账号' });
-  if (account.length > 24) return res.status(400).json({ error: '账号最长 24 个字符' });
-  if (!password) return res.status(400).json({ error: '请输入密码' });
-  if (password.length > 72) return res.status(400).json({ error: '密码最长 72 个字符' });
-  if (!username) return res.status(400).json({ error: '请输入用户名' });
-  if (username.length > 12) return res.status(400).json({ error: '用户名最长 12 个字符' });
-  if (accounts.has(account)) return res.status(409).json({ error: '账号已被占用，请换一个' });
-  const acct = { account, passwordHash: hashPassword(password), username, avatar };
-  accounts.set(account, acct);
-  saveAccount(acct);
-  res.json({ ok: true, account, username, avatar });
-});
-
-// ============ PostgreSQL 持久化（空间 / 战绩 / 评分） ============
+// ================= PostgreSQL =================
 const pool = new Pool({
   host: process.env.PGHOST || '127.0.0.1',
   port: +(process.env.PGPORT || 5432),
   user: process.env.PGUSER || 'postgres',
   password: process.env.PGPASSWORD || 'toilet_dev',
-  database: process.env.PGDATABASE || 'toilet',
+  database: process.env.PGDATABASE || process.env.PGDATABASE || 'toilet',
 });
 pool.on('error', (err) => console.error('⚠️  Postgres 池错误:', err.message));
+let usePg = false;
 
-// 持久化用户战绩，键：`${spaceId}::${小写昵称}`
-const profiles = new Map();
-
-// ============ 账号体系 ============
-// 账号全局唯一且区分大小写（"Alice" 与 "alice" 是两个账号）；
-// 登录用 账号+密码；密码按原始字节哈希（大小写敏感）；会话签发 token，刷新/重连不记明文密码
-const accounts = new Map(); // account(原样) -> { account, passwordHash, username, avatar }
-const tokens = new Map();   // token -> { account, expiresAt }
-const TOKEN_TTL = 7 * 24 * 60 * 60 * 1000;
-
-function hashPassword(pw) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const derived = crypto.scryptSync(String(pw), salt, 64).toString('hex');
-  return `scrypt$${salt}$${derived}`;
-}
-function verifyPassword(pw, stored) {
-  const parts = String(stored || '').split('$');
-  if (parts.length !== 3 || parts[0] !== 'scrypt') return false;
-  try {
-    const derived = crypto.scryptSync(String(pw), parts[1], 64);
-    return crypto.timingSafeEqual(Buffer.from(parts[2], 'hex'), derived);
-  } catch { return false; }
-}
-function issueToken(account) {
-  const token = 't' + crypto.randomBytes(16).toString('hex');
-  tokens.set(token, { account, expiresAt: Date.now() + TOKEN_TTL });
-  // 定期清理过期 token
-  setInterval(() => { for (const [k, v] of tokens) if (v.expiresAt < Date.now()) tokens.delete(k); }, 3600000).unref();
-  return token;
-}
-function accountByLogin(account) {
-  return accounts.get(String(account || '').trim()) || null;
-}
-function saveAccount(acct) {
-  pool.query(
-    `INSERT INTO accounts(account, password_hash, username, avatar) VALUES($1,$2,$3,$4)
-     ON CONFLICT(account) DO UPDATE SET password_hash=EXCLUDED.password_hash, username=EXCLUDED.username, avatar=EXCLUDED.avatar`,
-    [acct.account, acct.passwordHash, acct.username, acct.avatar]
-  ).catch(() => {});
-}
-function saveSpace(sp) {
-  pool.query(
-    `INSERT INTO spaces(id, name, squat_count, urinal_count) VALUES($1,$2,$3,$4)
-     ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, squat_count=EXCLUDED.squat_count, urinal_count=EXCLUDED.urinal_count`,
-    [sp.id, sp.name, sp.squatCount, sp.urinalCount]
-  ).catch(() => {});
-}
-function saveProfile(user) {
-  const ns = user.currentSpace;
-  if (!ns || !spaces.has(ns)) return;
-  // 身份键用账号（全局唯一）；nick 仅作显示名展示
-  const key = ns + '::' + user.account;
-  profiles.set(key, { account: user.account, nick: user.nickname, avatar: user.avatar, stats: { ...user.stats }, achievements: [...user.achievements] });
-  pool.query(
-    `INSERT INTO profiles(ns_id, account, nick, avatar, stats, achievements) VALUES($1,$2,$3,$4,$5,$6)
-     ON CONFLICT(ns_id, account) DO UPDATE SET nick=EXCLUDED.nick, avatar=EXCLUDED.avatar, stats=EXCLUDED.stats, achievements=EXCLUDED.achievements, updated_at=now()`,
-    [ns, user.account, user.nickname, user.avatar, JSON.stringify(user.stats), user.achievements]
-  ).catch(() => {});
-}
-function saveStallRating(ns, stallId, r) {
-  pool.query(
-    `INSERT INTO stall_ratings(ns_id, stall_id, nickname, cleanliness, signal, paper) VALUES($1,$2,$3,$4,$5,$6)`,
-    [ns, stallId, r.nickname, r.cleanliness, r.signal, r.paper]
-  ).catch(() => {});
-}
+// ================= 持久化（幂等建表，不销毁数据） =================
 async function initDb() {
-  // 幂等建表；不再在启动时 DROP 业务表，避免重启清空战绩/评分（持久化数据需跨重启保留）
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS spaces(
-      id text PRIMARY KEY,
-      name text NOT NULL,
-      squat_count int NOT NULL DEFAULT 4,
-      urinal_count int NOT NULL DEFAULT 3,
-      created_at timestamptz NOT NULL DEFAULT now()
-    )`);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS profiles(
-      ns_id text NOT NULL,
-      account text NOT NULL,
-      nick text DEFAULT '',
-      avatar text NOT NULL DEFAULT '🧑',
-      stats jsonb NOT NULL DEFAULT '{}'::jsonb,
-      achievements text[] NOT NULL DEFAULT '{}',
-      updated_at timestamptz NOT NULL DEFAULT now(),
-      PRIMARY KEY(ns_id, account)
-    )`);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS accounts(
-      id serial PRIMARY KEY,
-      account text NOT NULL,
-      password_hash text NOT NULL,
-      username text NOT NULL,
-      avatar text NOT NULL DEFAULT '🧑',
-      created_at timestamptz NOT NULL DEFAULT now(),
-      CONSTRAINT accounts_account_key UNIQUE (account)
-    )`);
-  // 迁移：去掉旧的大小写折叠列，确保 account 原样唯一
-  await pool.query('ALTER TABLE accounts DROP COLUMN IF EXISTS account_ci');
+  await pool.query(`CREATE TABLE IF NOT EXISTS spaces(
+    id text PRIMARY KEY, name text NOT NULL,
+    admins jsonb NOT NULL DEFAULT '[]'::jsonb,
+    squat_count int NOT NULL DEFAULT 4, urinal_count int NOT NULL DEFAULT 3,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS accounts(
+    account text PRIMARY KEY, password_hash text NOT NULL,
+    username text NOT NULL, avatar text NOT NULL DEFAULT '🧑',
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS profiles(
+    space text NOT NULL, account text NOT NULL,
+    nick text DEFAULT '', avatar text NOT NULL DEFAULT '🧑',
+    stats jsonb NOT NULL DEFAULT '{}'::jsonb, achievements text[] NOT NULL DEFAULT '{}',
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY(space, account)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS stall_ratings(
+    space text NOT NULL, stall_id int NOT NULL, account text DEFAULT '',
+    nickname text DEFAULT '', cleanliness int NOT NULL, signal int NOT NULL, paper int NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS entities(
+    space text NOT NULL, kind text NOT NULL, id text NOT NULL, data jsonb NOT NULL,
+    PRIMARY KEY(space, kind, id)
+  )`);
+
+  // 幂等迁移：兼容旧「坑位雷达」时期已存在的表结构
+  // 1) spaces 补 admins 列
+  await pool.query(`ALTER TABLE spaces ADD COLUMN IF NOT EXISTS admins jsonb NOT NULL DEFAULT '[]'::jsonb`);
+  // 2) profiles / stall_ratings 旧列名 ns_id -> space（并给 stall_ratings 补 account 列）
   await pool.query(`DO $$ BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='accounts_account_key' AND conrelid='accounts'::regclass) THEN
-        ALTER TABLE accounts ADD CONSTRAINT accounts_account_key UNIQUE (account);
-      END IF;
-    END $$`);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS stall_ratings(
-      ns_id text NOT NULL,
-      stall_id int NOT NULL,
-      nickname text DEFAULT '',
-      cleanliness int NOT NULL,
-      signal int NOT NULL,
-      paper int NOT NULL,
-      created_at timestamptz NOT NULL DEFAULT now()
-    )`);
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='profiles' AND column_name='ns_id') THEN
+      ALTER TABLE profiles RENAME COLUMN ns_id TO space;
+    ELSIF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='profiles' AND column_name='space') THEN
+      ALTER TABLE profiles ADD COLUMN space text;
+    END IF;
+  END $$`);
+  await pool.query(`DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='stall_ratings' AND column_name='ns_id') THEN
+      ALTER TABLE stall_ratings RENAME COLUMN ns_id TO space;
+    END IF;
+  END $$`);
+  await pool.query(`ALTER TABLE stall_ratings ADD COLUMN IF NOT EXISTS account text DEFAULT ''`);
+
   // 载入空间
-  const spRows = await pool.query('SELECT id, name, squat_count, urinal_count FROM spaces');
-  for (const r of spRows.rows) createSpace(r.id, r.name, r.squat_count, r.urinal_count);
-  // 载入账号（账号体系全局唯一、区分大小写）
-  const accRows = await pool.query('SELECT account, password_hash, username, avatar FROM accounts');
+  const spRows = await pool.query('SELECT id,name,admins,squat_count,urinal_count FROM spaces');
+  for (const r of spRows.rows) {
+    const sp = createSpace(r.id, r.name, r.squat_count, r.urinal_count);
+    sp.admins = new Set(r.admins || []);
+  }
+  // 载入账号
+  const accRows = await pool.query('SELECT account,password_hash,username,avatar FROM accounts');
   for (const r of accRows.rows) accounts.set(r.account, { account: r.account, passwordHash: r.password_hash, username: r.username, avatar: r.avatar || '🧑' });
   // 载入战绩
-  const pr = await pool.query('SELECT ns_id, account, nick, avatar, stats, achievements FROM profiles');
-  for (const r of pr.rows) profiles.set(`${r.ns_id}::${r.account}`, { account: r.account, nick: r.nick, avatar: r.avatar, stats: r.stats || {}, achievements: r.achievements || [] });
-  // 载入评分（按空间+坑位分组挂回）
-  const rat = await pool.query('SELECT ns_id, stall_id, nickname, cleanliness, signal, paper, created_at FROM stall_ratings ORDER BY created_at ASC');
-  const byKey = {};
+  const pr = await pool.query('SELECT space,account,nick,avatar,stats,achievements FROM profiles');
+  for (const r of pr.rows) profiles.set(`${r.space}::${r.account}`, { account: r.account, nick: r.nick, avatar: r.avatar, stats: r.stats || {}, achievements: r.achievements || [] });
+  // 载入评分（挂回坑位）
+  const rat = await pool.query('SELECT space,stall_id,account,nickname,cleanliness,signal,paper,created_at FROM stall_ratings ORDER BY created_at ASC');
+  const byStall = {};
   for (const r of rat.rows) {
-    const k = `${r.ns_id}::${r.stall_id}`;
-    (byKey[k] = byKey[k] || []).push({ nickname: r.nickname, cleanliness: r.cleanliness, signal: r.signal, paper: r.paper, timestamp: Date.parse(r.created_at) });
+    const k = `${r.space}::${r.stall_id}`;
+    (byStall[k] = byStall[k] || []).push({ account: r.account || '', nickname: r.nickname, cleanliness: r.cleanliness, signal: r.signal, paper: r.paper, timestamp: Date.parse(r.created_at) });
   }
-  for (const [key, ratings] of Object.entries(byKey)) {
+  // 载入通用实体（rooms/tools/borrows/materials/repairs/room_reservations）
+  const ent = await pool.query('SELECT space,kind,id,data FROM entities');
+  for (const r of ent.rows) {
+    const sp = spaces.get(r.space);
+    if (!sp) continue;
+    const data = r.data;
+    if (r.kind === 'room') {
+      sp.rooms.push(data);
+      sp.roomReservations.set(data.id, data);
+    } else if (r.kind === 'tool') {
+      sp.tools.push(data);
+    } else if (r.kind === 'borrow') {
+      sp.borrows.set(data.id, data);
+    } else if (r.kind === 'material') {
+      sp.materialRequests.set(data.id, data);
+    } else if (r.kind === 'repair') {
+      sp.repairs.set(data.id, data);
+    } else if (r.kind === 'stall') {
+      const st = sp.stalls.find((s) => s.id === data.id);
+      if (st) st.ratings = (data.ratings || []).slice(-60);
+    }
+  }
+  // 把评分挂回坑位
+  for (const [key, ratings] of Object.entries(byStall)) {
     const [ns, sid] = key.split('::');
     const sp = spaces.get(ns);
     if (!sp) continue;
@@ -365,24 +207,693 @@ async function initDb() {
     if (st) st.ratings = ratings.slice(-60);
   }
 }
+const profiles = new Map(); // `${space}::${account}` -> { account, nick, avatar, stats, achievements }
 
-// ============ 进入某个空间 ============
-function joinSpace(ws, spaceId) {
-  const sp = spaces.get(String(spaceId));
-  if (!sp) return ws.send(JSON.stringify({ type: 'error', message: '空间不存在' }));
-  if (ws._ns && spaces.get(ws._ns)) spaces.get(ws._ns).clients.delete(ws);
-  ws._ns = sp.id;
-  sp.clients.add(ws);
-  const u = users.get(ws._userId);
-  if (u) u.currentSpace = sp.id;
-  ws.send(JSON.stringify({ type: 'joined', space: { id: sp.id, name: sp.name, squat_count: sp.squatCount, urinal_count: sp.urinalCount } }));
-  broadcastStalls(sp.id);
-  broadcastUsers(sp.id);
-  broadcastLeaderboard(sp.id);
-  if (u) sendToUser(u.id, { type: 'stats', stats: getStats(u) });
+function saveSpace(sp) {
+  if (!usePg) return;
+  pool.query(
+    `INSERT INTO spaces(id,name,admins,squat_count,urinal_count) VALUES($1,$2,$3,$4,$5)
+     ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, admins=EXCLUDED.admins, squat_count=EXCLUDED.squat_count, urinal_count=EXCLUDED.urinal_count`,
+    [sp.id, sp.name, JSON.stringify([...sp.admins]), sp.squatCount, sp.urinalCount]
+  ).catch(() => {});
+}
+function saveAccount(acct) {
+  if (!usePg) return;
+  pool.query(`INSERT INTO accounts(account,password_hash,username,avatar) VALUES($1,$2,$3,$4)
+    ON CONFLICT(account) DO UPDATE SET username=EXCLUDED.username, avatar=EXCLUDED.avatar`,
+    [acct.account, acct.passwordHash, acct.username, acct.avatar]).catch(() => {});
+}
+function saveProfile(user) {
+  const ns = user.currentSpace;
+  if (!ns || !spaces.has(ns)) return;
+  const key = ns + '::' + user.account;
+  profiles.set(key, { account: user.account, nick: user.nickname, avatar: user.avatar, stats: { ...user.stats }, achievements: [...user.achievements] });
+  if (!usePg) return;
+  pool.query(`INSERT INTO profiles(space,account,nick,avatar,stats,achievements) VALUES($1,$2,$3,$4,$5,$6)
+    ON CONFLICT(space,account) DO UPDATE SET nick=EXCLUDED.nick, avatar=EXCLUDED.avatar, stats=EXCLUDED.stats, achievements=EXCLUDED.achievements, updated_at=now()`,
+    [ns, user.account, user.nickname, user.avatar, JSON.stringify(user.stats), user.achievements]).catch(() => {});
+}
+function saveEntity(spaceId, kind, id, data) {
+  if (!usePg) return;
+  pool.query(`INSERT INTO entities(space,kind,id,data) VALUES($1,$2,$3,$4)
+    ON CONFLICT(space,kind,id) DO UPDATE SET data=EXCLUDED.data`, [spaceId, kind, id, JSON.stringify(data)]).catch(() => {});
+}
+function deleteEntity(spaceId, kind, id) {
+  if (!usePg) return;
+  pool.query(`DELETE FROM entities WHERE space=$1 AND kind=$2 AND id=$3`, [spaceId, kind, id]).catch(() => {});
+}
+function saveStallRating(spaceId, stallId, r) {
+  if (!usePg) return;
+  pool.query(`INSERT INTO stall_ratings(space,stall_id,account,nickname,cleanliness,signal,paper) VALUES($1,$2,$3,$4,$5,$6,$7)`,
+    [spaceId, stallId, r.account || '', r.nickname, r.cleanliness, r.signal, r.paper]).catch(() => {});
 }
 
-// ============ WebSocket 处理 ============
+// ================= 账号 / 认证 =================
+function hashPassword(pw) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(String(pw), salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
+function verifyPassword(pw, stored) {
+  try {
+    const [salt, hash] = String(stored).split(':');
+    const calc = crypto.scryptSync(String(pw), salt, 64).toString('hex');
+    return crypto.timingSafeEqual(Buffer.from(calc, 'hex'), Buffer.from(hash, 'hex'));
+  } catch { return false; }
+}
+function issueToken(account) {
+  const token = crypto.randomBytes(24).toString('base64url');
+  tokens.set(token, { account, expiresAt: Date.now() + TOKEN_TTL });
+  return token;
+}
+setInterval(() => { for (const [k, v] of tokens) if (v.expiresAt < Date.now()) tokens.delete(k); }, 3600000).unref();
+function accountByLogin(account) { return accounts.get(account); }
+
+// ================= 空间 =================
+function newStats() {
+  return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, requestCount: 0, repairCount: 0 };
+}
+function createSpace(id, name, squat, urinal) {
+  const sp = {
+    id, name, squatCount: squat == null ? 4 : squat, urinalCount: urinal == null ? 3 : urinal,
+    admins: new Set(),
+    clients: new Set(),
+    rooms: [],                               // Room[]
+    roomReservations: new Map(),             // id -> RoomReservation（会议室预约）
+    reservations: new Map(),                 // id -> StallReservation（坑位预约/抢位，供过期清理）
+    tools: [],                               // Tool[]
+    borrows: new Map(),                      // id -> Borrow
+    materialRequests: new Map(),             // id -> MaterialRequest
+    repairs: new Map(),                      // id -> Repair
+    urges: new Map(),                        // stallId -> count
+  };
+  sp.stalls = buildStalls(squat == null ? 4 : squat, urinal == null ? 3 : urinal);
+  spaces.set(id, sp);
+  return sp;
+}
+function buildStalls(squat, urinal) {
+  const stalls = [];
+  for (let i = 1; i <= squat; i++) stalls.push({ id: i, type: 'squat', name: `蹲坑${i}`, status: 'free', currentUser: null, reservation: null, ratings: [] });
+  for (let j = 1; j <= urinal; j++) stalls.push({ id: squat + j, type: 'urinal', name: `尿槽${j}`, status: 'free', currentUser: null, reservation: null, ratings: [] });
+  return stalls;
+}
+
+// ================= HTTP 路由 =================
+app.get('/api/spaces', (req, res) => {
+  const list = [];
+  for (const sp of spaces.values()) list.push({ id: sp.id, name: sp.name, admin_count: sp.admins.size });
+  res.json(list);
+});
+app.post('/api/spaces', (req, res) => {
+  const name = (req.body.name || '').trim().slice(0, 30);
+  const squat = parseInt(req.body.squat_count, 10);
+  const urinal = parseInt(req.body.urinal_count, 10);
+  if (!name) return res.status(400).json({ error: '请输入空间名' });
+  const id = genSpaceId();
+  const sp = createSpace(id, name, Number.isInteger(squat) ? Math.max(0, Math.min(10, squat)) : 4, Number.isInteger(urinal) ? Math.max(0, Math.min(10, urinal)) : 3);
+  saveSpace(sp);
+  res.json({ id: sp.id, name: sp.name, squat_count: sp.squatCount, urinal_count: sp.urinalCount });
+});
+app.post('/api/register', (req, res) => {
+  const account = (req.body.account || '').trim();
+  const username = (req.body.username || '').trim().slice(0, 12);
+  const avatar = (req.body.avatar || '🧑').slice(0, 4);
+  const password = String(req.body.password || '');
+  if (!account || !password) return res.status(400).json({ error: '请输入账号和密码' });
+  if (accounts.has(account)) return res.status(409).json({ error: '账号已被占用' });
+  const acct = { account, passwordHash: hashPassword(password), username: username || account, avatar };
+  accounts.set(account, acct);
+  saveAccount(acct);
+  res.json({ ok: true, account, username: acct.username, avatar: acct.avatar });
+});
+
+// ============ 广播序列化 ============
+function roomPublic(r) {
+  return { id: r.id, name: r.name, capacity: r.capacity, location: r.location, description: r.description };
+}
+function reservationPublic(res, info) {
+  const who = info.get(res.ownerAccount);
+  return {
+    id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount,
+    ownerName: who ? who.display : res.ownerName, title: res.title,
+    startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status,
+  };
+}
+function toolsPublic(sp, info) {
+  return sp.tools.map((t) => {
+    const active = [...sp.borrows.values()].filter((b) => b.toolId === t.id && b.status === 'borrowed');
+    return {
+      id: t.id, name: t.name, category: t.category, total: t.total, available: t.available,
+      location: t.location, description: t.description,
+      borrowedCount: active.reduce((s, b) => s + b.qty, 0),
+      activeBorrows: active.map((b) => ({ id: b.id, qty: b.qty, borrowerAccount: b.borrowerAccount, borrowerName: info.get(b.borrowerAccount) ? info.get(b.borrowerAccount).display : b.borrowerName, borrowedAt: b.borrowedAt })),
+    };
+  });
+}
+function materialsPublic(sp, info) {
+  return [...sp.materialRequests.values()].map((m) => ({
+    id: m.id, name: m.name, qty: m.qty, unit: m.unit, reason: m.reason, status: m.status,
+    requesterAccount: m.requesterAccount,
+    requesterName: info.get(m.requesterAccount) ? info.get(m.requesterAccount).display : m.requesterName,
+    createdAt: m.createdAt, handledAt: m.handledAt,
+  })).sort((a, b) => (b.createdAt - a.createdAt));
+}
+function repairsPublic(sp, info) {
+  return [...sp.repairs.values()].map((r) => ({
+    id: r.id, category: r.category, location: r.location, description: r.description, status: r.status,
+    reporterAccount: r.reporterAccount,
+    reporterName: info.get(r.reporterAccount) ? info.get(r.reporterAccount).display : r.reporterName,
+    createdAt: r.createdAt, updatedAt: r.updatedAt,
+  })).sort((a, b) => (b.createdAt - a.createdAt));
+}
+function stallsPublic(sp, info) {
+  return sp.stalls.map((s) => {
+    const o = { id: s.id, type: s.type, name: s.name, status: s.status, urgeCount: sp.urges.get(s.id) || 0, ratings: s.ratings, reservation: null, currentBy: null };
+    if (s.reservation) {
+      const w = info.get(s.reservation.account) || {};
+      const who = { account: s.reservation.account, display: w.display || s.reservation.nickname, avatar: w.avatar || '🧑' };
+      o.reservation = {
+        by: who, startTime: s.reservation.startTime, endTime: s.reservation.endTime,
+        duration: s.reservation.duration, isGrab: !!s.reservation.isGrab, reservationId: s.reservation.reservationId,
+      };
+      if (s.status === 'occupied' || s.status === 'reserved' || s.status === 'waiting') o.currentBy = who;
+    }
+    return o;
+  });
+}
+function leaderboardPublic(sp) {
+  const rows = [];
+  for (const [key, p] of profiles) {
+    if (!key.startsWith(sp.id + '::')) continue;
+    if (!key.slice(sp.id.length + 2)) continue;
+    rows.push({ account: p.account, username: p.nick || p.account, avatar: p.avatar || '🧑', stats: p.stats || {}, achievements: p.achievements || [] });
+  }
+  const score = (s) => (s.totalVisits || 0) + (s.borrowCount || 0) + (s.requestCount || 0) + (s.repairCount || 0);
+  rows.sort((a, b) => score(b.stats) - score(a.stats));
+  return { rankings: rows.slice(0, 30) };
+}
+
+// ============ 广播 ============
+function broadcast(spaceId, type, payload) { broadcastTo(spaceId, Object.assign({ type }, payload)); }
+function broadcastAll(sp) {
+  const info = spaceUserInfo(sp.id);
+  broadcast(sp.id, 'rooms', { rooms: sp.rooms.map(roomPublic), reservations: [...sp.roomReservations.values()].map((r) => reservationPublic(r, info)) });
+  broadcast(sp.id, 'tools', { tools: toolsPublic(sp, info) });
+  broadcast(sp.id, 'materials', { requests: materialsPublic(sp, info) });
+  broadcast(sp.id, 'repairs', { repairs: repairsPublic(sp, info) });
+  broadcast(sp.id, 'stalls', { squat_count: sp.squatCount, urinal_count: sp.urinalCount, stalls: stallsPublic(sp, info) });
+  broadcastUsers(sp);
+  broadcastLeaderboard(sp);
+}
+function broadcastUsers(sp) {
+  const info = spaceUserInfo(sp.id);
+  const arr = [];
+  for (const [, u] of users) {
+    if (u.currentSpace !== sp.id) continue;
+    const d = info.get(u.account) || {};
+    arr.push({ account: u.account, online: true, username: u.nickname, avatar: u.avatar, role: d.role || 'member', display: d.display || u.nickname });
+  }
+  broadcast(sp.id, 'users', { users: arr });
+}
+function broadcastLeaderboard(sp) { broadcast(sp.id, 'leaderboard', leaderboardPublic(sp)); }
+
+// ============ 统计隔离：切空间时保存旧空间、加载目标空间 ============
+function saveStatsToSpace(user, spaceId) {
+  const ns = spaceId;
+  if (!ns || !spaces.has(ns)) return;
+  const key = ns + '::' + user.account;
+  profiles.set(key, { account: user.account, nick: user.nickname, avatar: user.avatar, stats: { ...user.stats }, achievements: [...user.achievements] });
+  if (!usePg) return;
+  pool.query(`INSERT INTO profiles(space,account,nick,avatar,stats,achievements) VALUES($1,$2,$3,$4,$5,$6)
+    ON CONFLICT(space,account) DO UPDATE SET nick=EXCLUDED.nick, avatar=EXCLUDED.avatar, stats=EXCLUDED.stats, achievements=EXCLUDED.achievements, updated_at=now()`,
+    [ns, user.account, user.nickname, user.avatar, JSON.stringify(user.stats), user.achievements]).catch(() => {});
+}
+function applyProfileToUser(user, spaceId) {
+  user.stats = newStats();
+  user.achievements = [];
+  const pk = spaceId + '::' + user.account;
+  if (profiles.has(pk)) {
+    const p = profiles.get(pk);
+    user.stats = Object.assign(newStats(), p.stats || {});
+    user.achievements = [...(p.achievements || [])];
+    if (p.avatar) user.avatar = p.avatar;
+  }
+}
+
+// ============ 加入空间 / 切换 ============
+function joinSpace(ws, spaceId) {
+  const sp = spaces.get(String(spaceId));
+  if (!sp) return sendTo(ws, serError('空间不存在'));
+  const u = users.get(ws._userId);
+  const oldSp = ws._ns ? spaces.get(ws._ns) : null;
+  if (u && oldSp && oldSp.id !== sp.id) {
+    const busy = oldSp.stalls.some((s) => s.reservation && s.reservation.account === u.account);
+    if (busy) return sendTo(ws, serError('你仍占用着坑位，请先释放或取消再切换空间'));
+    saveStatsToSpace(u, oldSp.id);
+    applyProfileToUser(u, sp.id);
+  }
+  if (oldSp) oldSp.clients.delete(ws);
+  ws._ns = sp.id;
+  sp.clients.add(ws);
+  if (u) u.currentSpace = sp.id;
+  sendTo(ws, { type: 'joined', space: { id: sp.id, name: sp.name, squat_count: sp.squatCount, urinal_count: sp.urinalCount, isAdmin: u ? isAdmin(sp, u.account) : false } });
+  if (u) {
+    if (sp.admins.size === 0) { sp.admins.add(u.account); saveSpace(sp); }
+  }
+  broadcastAll(sp);
+}
+
+// ============ 登录 ============
+function handleLogin(ws, msg, space) {
+  let account = null;
+  if (msg.token) {
+    const tok = tokens.get(msg.token);
+    if (tok && tok.expiresAt > Date.now()) account = tok.account;
+    if (!account) return sendTo(ws, serError('登录已过期，请重新登录'));
+  } else {
+    account = (msg.account || '').trim();
+    const password = (msg.password || '');
+    if (!account || !password) return sendTo(ws, serError('请输入账号和密码'));
+    const acct = accountByLogin(account);
+    if (!acct) return sendTo(ws, serError('账号不存在，请先注册'));
+    if (!verifyPassword(password, acct.passwordHash)) return sendTo(ws, serError('账号或密码错误'));
+    account = acct.account;
+  }
+  const acct = accounts.get(account);
+  if (!acct) return sendTo(ws, serError('账号不存在，请先注册'));
+  const userId = 'u' + Date.now() + Math.random().toString(36).slice(2, 6);
+  const token = issueToken(account);
+  if (space.admins.size === 0) { space.admins.add(account); saveSpace(space); }
+  const user = {
+    id: userId, account, token, nickname: acct.username, avatar: acct.avatar || '🧑',
+    currentSpace: space.id, ws, stats: newStats(), achievements: [],
+    currentStall: null, emergencyMode: false, wasOnTime: true,
+  };
+  applyProfileToUser(user, space.id);
+  users.set(userId, user);
+  ws._userId = userId;
+  sendTo(ws, { type: 'loginSuccess', userId, account, nickname: user.nickname, avatar: user.avatar, token, role: isAdmin(space, account) ? 'admin' : 'member', spaceId: space.id });
+  broadcastAll(space);
+}
+
+// ============ 会议室模块 ============
+function roomReservationsPublic(space) {
+  const info = spaceUserInfo(space.id);
+  return [...space.roomReservations.values()].map((r) => reservationPublic(r, info)).sort((a, b) => a.startAt - b.startAt);
+}
+function roomsBroadcast(space) {
+  broadcast(space.id, 'rooms', { rooms: space.rooms.map(roomPublic), reservations: roomReservationsPublic(space) });
+}
+function handleRooms(ws, user, space, msg) {
+  const info = spaceUserInfo(space.id);
+  if (msg.type === 'roomCreate') {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可新增会议室'));
+    const name = (msg.name || '').trim().slice(0, 30);
+    const capacity = parseInt(msg.capacity, 10);
+    if (!name) return sendTo(ws, serError('请输入会议室名称'));
+    if (!Number.isInteger(capacity) || capacity < 1) return sendTo(ws, serError('请输入有效容纳人数'));
+    const room = { id: genId('rm', null), name, capacity, location: (msg.location || '').trim().slice(0, 40), description: (msg.description || '').trim().slice(0, 100) };
+    space.rooms.push(room);
+    saveEntity(space.id, 'room', room.id, room);
+    roomsBroadcast(space);
+  } else if (msg.type === 'roomRemove') {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可删除会议室'));
+    const idx = space.rooms.findIndex((r) => r.id === msg.roomId);
+    if (idx < 0) return sendTo(ws, serError('会议室不存在'));
+    const room = space.rooms[idx];
+    const hasActive = [...space.roomReservations.values()].some((r) => r.roomId === room.id && (r.status === 'pending' || r.status === 'active'));
+    if (hasActive) return sendTo(ws, serError('该会议室仍有进行/待开始的预约，无法删除'));
+    space.rooms.splice(idx, 1);
+    for (const r of [...space.roomReservations.values()]) if (r.roomId === room.id) { space.roomReservations.delete(r.id); deleteEntity(space.id, 'room_reservation', r.id); }
+    deleteEntity(space.id, 'room', room.id);
+    roomsBroadcast(space);
+  } else if (msg.type === 'roomBook') {
+    const room = space.rooms.find((r) => r.id === msg.roomId);
+    if (!room) return sendTo(ws, serError('会议室不存在'));
+    const startAt = Math.floor(+msg.startAt || 0);
+    const endAt = Math.floor(+msg.endAt || 0);
+    if (!(startAt > 0) || !(endAt > startAt)) return sendTo(ws, serError('请选择有效的时间段'));
+    if (endAt - startAt < 5 * 60000) return sendTo(ws, serError('至少预约 5 分钟'));
+    const clash = [...space.roomReservations.values()].some((r) => r.roomId === room.id && (r.status === 'pending' || r.status === 'active') && startAt < r.endAt && endAt > r.startAt);
+    if (clash) return sendTo(ws, serError('该时段已被预约，请另选时间'));
+    const res = { id: genId('res', null), roomId: room.id, ownerAccount: user.account, ownerName: user.nickname, title: (msg.title || '').trim().slice(0, 40) || '会议', startAt, endAt, note: (msg.note || '').trim().slice(0, 120), status: 'pending' };
+    space.roomReservations.set(res.id, res);
+    saveEntity(space.id, 'room_reservation', res.id, res);
+    roomsBroadcast(space);
+  } else if (msg.type === 'reservationCancel') {
+    const res = space.roomReservations.get(msg.reservationId);
+    if (!res) return sendTo(ws, serError('预约不存在'));
+    if (res.ownerAccount !== user.account) return sendTo(ws, serError('只能取消自己的预约'));
+    if (res.status !== 'pending') return sendTo(ws, serError('该预约已不能取消'));
+    res.status = 'cancelled';
+    saveEntity(space.id, 'room_reservation', res.id, res);
+    roomsBroadcast(space);
+  } else if (msg.type === 'roomStart' || msg.type === 'roomEnd') {
+    const res = space.roomReservations.get(msg.reservationId);
+    if (!res) return sendTo(ws, serError('预约不存在'));
+    if (res.ownerAccount !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('只能操作自己的预约'));
+    if (msg.type === 'roomStart' && res.status === 'pending' && res.startAt <= Date.now()) res.status = 'active';
+    if (msg.type === 'roomEnd' && res.status === 'active') res.status = 'completed';
+    saveEntity(space.id, 'room_reservation', res.id, res);
+    roomsBroadcast(space);
+  }
+  void info;
+}
+
+// ============ 工具借用模块 ============
+function toolsBroadcast(space) {
+  const info = spaceUserInfo(space.id);
+  broadcast(space.id, 'tools', { tools: toolsPublic(space, info) });
+}
+function handleTools(ws, user, space, msg) {
+  if (msg.type === 'toolCreate') {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可新增设备'));
+    const name = (msg.name || '').trim().slice(0, 30);
+    const total = parseInt(msg.total, 10);
+    if (!name) return sendTo(ws, serError('请输入设备名称'));
+    if (!Number.isInteger(total) || total < 1) return sendTo(ws, serError('请输入有效库存数量'));
+    const category = TOOL_CATEGORIES.includes(msg.category) ? msg.category : '其它';
+    const tool = { id: genId('tl', null), name, category, total, available: total, location: (msg.location || '').trim().slice(0, 40), description: (msg.description || '').trim().slice(0, 100) };
+    space.tools.push(tool);
+    saveEntity(space.id, 'tool', tool.id, tool);
+    toolsBroadcast(space);
+  } else if (msg.type === 'toolDelete') {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可删除设备'));
+    const idx = space.tools.findIndex((t) => t.id === msg.toolId);
+    if (idx < 0) return sendTo(ws, serError('设备不存在'));
+    const tool = space.tools[idx];
+    const hasBorrowed = [...space.borrows.values()].some((b) => b.toolId === tool.id && b.status === 'borrowed');
+    if (hasBorrowed) return sendTo(ws, serError('该设备仍有未归还的借用，无法删除'));
+    space.tools.splice(idx, 1);
+    for (const b of [...space.borrows.values()]) if (b.toolId === tool.id) { space.borrows.delete(b.id); deleteEntity(space.id, 'borrow', b.id); }
+    deleteEntity(space.id, 'tool', tool.id);
+    toolsBroadcast(space);
+  } else if (msg.type === 'toolAdjust') {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可调整库存'));
+    const tool = space.tools.find((t) => t.id === msg.toolId);
+    if (!tool) return sendTo(ws, serError('设备不存在'));
+    const total = parseInt(msg.total, 10);
+    if (!Number.isInteger(total) || total < 1) return sendTo(ws, serError('请输入有效库存数量'));
+    const diff = total - tool.total;
+    if (tool.available + diff < 0) return sendTo(ws, serError('无法将库存调低到少于当前在借数量'));
+    tool.total = total;
+    tool.available += diff;
+    saveEntity(space.id, 'tool', tool.id, tool);
+    toolsBroadcast(space);
+  } else if (msg.type === 'toolBorrow') {
+    const tool = space.tools.find((t) => t.id === msg.toolId);
+    if (!tool) return sendTo(ws, serError('设备不存在'));
+    const qty = parseInt(msg.qty, 10);
+    if (!Number.isInteger(qty) || qty < 1) return sendTo(ws, serError('请输入有效借用数量'));
+    if (qty > tool.available) return sendTo(ws, serError('库存不足，当前可用 ' + tool.available));
+    tool.available -= qty;
+    const borrow = { id: genId('bw', null), toolId: tool.id, borrowerAccount: user.account, borrowerName: user.nickname, qty, borrowedAt: Date.now(), returnedAt: null, status: 'borrowed' };
+    space.borrows.set(borrow.id, borrow);
+    user.stats.borrowCount = (user.stats.borrowCount || 0) + 1;
+    saveProfile(user);
+    saveEntity(space.id, 'tool', tool.id, tool);
+    saveEntity(space.id, 'borrow', borrow.id, borrow);
+    toolsBroadcast(space);
+    broadcastLeaderboard(space);
+  } else if (msg.type === 'toolReturn') {
+    const borrow = space.borrows.get(msg.borrowId);
+    if (!borrow) return sendTo(ws, serError('借用记录不存在'));
+    if (borrow.status !== 'borrowed') return sendTo(ws, serError('该借用已归还'));
+    if (borrow.borrowerAccount !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('只能归还自己的借用'));
+    const tool = space.tools.find((t) => t.id === borrow.toolId);
+    if (!tool) return sendTo(ws, serError('设备不存在'));
+    borrow.status = 'returned';
+    borrow.returnedAt = Date.now();
+    tool.available = Math.min(tool.total, tool.available + borrow.qty);
+    saveEntity(space.id, 'tool', tool.id, tool);
+    saveEntity(space.id, 'borrow', borrow.id, borrow);
+    toolsBroadcast(space);
+  }
+}
+
+// ============ 物资申领模块 ============
+function materialsBroadcast(space) {
+  const info = spaceUserInfo(space.id);
+  broadcast(space.id, 'materials', { requests: materialsPublic(space, info) });
+}
+function handleMaterials(ws, user, space, msg) {
+  if (msg.type === 'materialRequest') {
+    const name = (msg.name || '').trim().slice(0, 30);
+    const qty = parseInt(msg.qty, 10);
+    if (!name) return sendTo(ws, serError('请输入物资名称'));
+    if (!Number.isInteger(qty) || qty < 1) return sendTo(ws, serError('请输入有效数量'));
+    const req = { id: genId('mt', null), requesterAccount: user.account, requesterName: user.nickname, name, qty, unit: (msg.unit || '个').trim().slice(0, 10), reason: (msg.reason || '').trim().slice(0, 120), status: 'pending', createdAt: Date.now(), handledAt: null };
+    space.materialRequests.set(req.id, req);
+    user.stats.requestCount = (user.stats.requestCount || 0) + 1;
+    saveProfile(user);
+    saveEntity(space.id, 'material', req.id, req);
+    materialsBroadcast(space);
+    broadcastLeaderboard(space);
+  } else if (msg.type === 'materialCancel') {
+    const req = space.materialRequests.get(msg.requestId);
+    if (!req) return sendTo(ws, serError('申领记录不存在'));
+    if (req.requesterAccount !== user.account) return sendTo(ws, serError('只能取消自己的申领'));
+    if (req.status !== 'pending') return sendTo(ws, serError('该申领已处理，无法取消'));
+    req.status = 'cancelled';
+    saveEntity(space.id, 'material', req.id, req);
+    materialsBroadcast(space);
+  } else if (msg.type === 'materialFulfill') {
+    const req = space.materialRequests.get(msg.requestId);
+    if (!req) return sendTo(ws, serError('申领记录不存在'));
+    if (req.requesterAccount === user.account) return sendTo(ws, serError('不能处理自己的申领'));
+    if (req.status !== 'pending') return sendTo(ws, serError('该申领已处理'));
+    req.status = 'fulfilled';
+    req.handledAt = Date.now();
+    saveEntity(space.id, 'material', req.id, req);
+    materialsBroadcast(space);
+  }
+}
+
+// ============ 报修模块 ============
+function repairsBroadcast(space) {
+  const info = spaceUserInfo(space.id);
+  broadcast(space.id, 'repairs', { repairs: repairsPublic(space, info) });
+}
+function handleRepairs(ws, user, space, msg) {
+  if (msg.type === 'repairCreate') {
+    const category = REPAIR_CATEGORIES.includes(msg.category) ? msg.category : '其它';
+    const location = (msg.location || '').trim().slice(0, 40);
+    const description = (msg.description || '').trim().slice(0, 160);
+    if (!location || !description) return sendTo(ws, serError('请填写故障位置与描述'));
+    const rep = { id: genId('rp', null), reporterAccount: user.account, reporterName: user.nickname, category, location, description, status: 'reported', createdAt: Date.now(), updatedAt: Date.now() };
+    space.repairs.set(rep.id, rep);
+    user.stats.repairCount = (user.stats.repairCount || 0) + 1;
+    saveProfile(user);
+    saveEntity(space.id, 'repair', rep.id, rep);
+    repairsBroadcast(space);
+    broadcastLeaderboard(space);
+  } else if (msg.type === 'repairUpdate') {
+    const rep = space.repairs.get(msg.repairId);
+    if (!rep) return sendTo(ws, serError('报修记录不存在'));
+    const to = msg.status;
+    const from = rep.status;
+    const isReporter = rep.reporterAccount === user.account;
+    if (to === 'cancelled') {
+      if (!isReporter || from !== 'reported') return sendTo(ws, serError('仅上报人可取消未处理的报修'));
+    } else if (to === 'in_progress') {
+      if (from !== 'reported') return sendTo(ws, serError('仅可从未处理的报修进入处理中'));
+    } else if (to === 'resolved') {
+      if (from !== 'reported' && from !== 'in_progress') return sendTo(ws, serError('仅可从处理中/未处理置为已解决'));
+    } else {
+      return sendTo(ws, serError('无效的报修状态'));
+    }
+    rep.status = to;
+    rep.updatedAt = Date.now();
+    saveEntity(space.id, 'repair', rep.id, rep);
+    repairsBroadcast(space);
+  }
+}
+
+// ============ 坑位看板模块（原坑位雷达） ============
+const RESERVE_CONFIRM_WINDOW_MS = 5 * 60000;
+function broadcastStalls(space) {
+  const info = spaceUserInfo(space.id);
+  broadcast(space.id, 'stalls', { squat_count: space.squatCount, urinal_count: space.urinalCount, stalls: stallsPublic(space, info) });
+}
+function activeStallCount(space, user) {
+  let n = 0;
+  for (const st of space.stalls) if (st.reservation && st.reservation.account === user.account) n++;
+  return n;
+}
+const ACHIEVEMENT_DEFS = [
+  { id: 'punctual', name: '守时达人', desc: '连续3次准时到坑', icon: '⏰', check: (u) => u.stats.consecutiveOnTime >= 3 },
+  { id: 'endurance', name: '持久战', desc: '单次蹲坑超过20分钟', icon: '🐌', check: (u) => u.stats.maxDuration >= 20 },
+  { id: 'night', name: '夜行者', desc: '凌晨时段使用', icon: '🌙', check: (u) => u.stats.nightVisits >= 1 },
+  { id: 'king', name: '蹲坑之王', desc: '累计使用超过10次', icon: '👑', check: (u) => u.stats.totalVisits >= 10 },
+  { id: 'grabber', name: '抢位达人', desc: '临时抢位成功5次', icon: '⚡', check: (u) => u.stats.grabSuccess >= 5 },
+  { id: 'rater', name: '评论家', desc: '给坑位评分3次', icon: '✍️', check: (u) => u.stats.ratingsGiven >= 3 },
+];
+function checkAchievements(user) {
+  let changed = false;
+  for (const a of ACHIEVEMENT_DEFS) {
+    if (a.check(user) && !user.achievements.includes(a.id)) { user.achievements.push(a.id); changed = true; }
+  }
+  return changed;
+}
+function notifyUrge(space, stallId, count, account) {
+  for (const [, u] of users) if (u.currentSpace === space.id && u.account === account && u.ws && u.ws.readyState === 1) u.ws.send(JSON.stringify({ type: 'urgeNotification', stallId, count }));
+}
+function handleStalls(ws, user, space, msg) {
+  const type = msg.type;
+  const stall = space.stalls.find((x) => x.id === msg.stallId);
+
+  if (type === 'stallConfig') {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可配置坑位'));
+    const squat = parseInt(msg.squat_count, 10);
+    const urinal = parseInt(msg.urinal_count, 10);
+    const sq = Number.isInteger(squat) ? Math.max(0, Math.min(10, squat)) : space.squatCount;
+    const ur = Number.isInteger(urinal) ? Math.max(0, Math.min(10, urinal)) : space.urinalCount;
+    const oldRatings = {};
+    for (const s of space.stalls) oldRatings[s.id] = s.ratings || [];
+    space.squatCount = sq;
+    space.urinalCount = ur;
+    space.stalls = buildStalls(sq, ur);
+    for (const s of space.stalls) if (oldRatings[s.id]) s.ratings = oldRatings[s.id].slice(-60);
+    space.reservations.clear();
+    saveSpace(space);
+    broadcastStalls(space);
+    return;
+  }
+
+  if (type === 'reserve') {
+    if (!stall) return sendTo(ws, serError('坑位不存在'));
+    if (stall.status !== 'free') return sendTo(ws, serError('该坑位已被占用'));
+    if (activeStallCount(space, user) >= 1) return sendTo(ws, serError('你已占着一个坑位，一次只能用一个'));
+    const durOpts = stall.type === 'urinal' ? [1, 2, 5] : [15, 30, 45];
+    const duration = durOpts.includes(msg.duration) ? msg.duration : durOpts[0];
+    const startTime = Date.now() + 60000;
+    const endTime = startTime + duration * 60000;
+    const reservationId = genId('r', null);
+    const res = { id: reservationId, stallId: stall.id, userId: user.id, account: user.account, nickname: user.nickname, startTime, endTime, duration, status: 'pending' };
+    space.reservations.set(reservationId, res);
+    stall.status = 'reserved';
+    stall.currentUser = null;
+    stall.reservation = { userId: user.id, account: user.account, nickname: user.nickname, startTime, endTime, duration, reservationId, isGrab: false };
+    sendTo(ws, { type: 'reservation', reservation: { id: reservationId, stallId: stall.id, startTime, endTime, duration, status: 'pending' } });
+    broadcastStalls(space);
+    return;
+  }
+
+  if (type === 'cancel') {
+    const reservation = space.reservations.get(msg.reservationId);
+    if (!reservation || reservation.account !== user.account) return sendTo(ws, serError('预约不存在'));
+    const target = space.stalls.find((x) => x.id === reservation.stallId);
+    if (!target) return sendTo(ws, serError('预约不存在'));
+    if (target.status === 'occupied') return sendTo(ws, serError('正在使用中，无法取消'));
+    target.status = 'free'; target.reservation = null;
+    reservation.status = 'cancelled';
+    space.reservations.delete(reservation.id);
+    sendTo(ws, { type: 'cancelSuccess', reservationId: reservation.id });
+    broadcastStalls(space);
+    return;
+  }
+
+  if (type === 'grab') {
+    if (!stall) return sendTo(ws, serError('坑位不存在'));
+    if (stall.status !== 'free') return sendTo(ws, serError('手慢了，已被抢'));
+    if (activeStallCount(space, user) >= 1) return sendTo(ws, serError('你已占着一个坑位，一次只能用一个'));
+    stall.status = 'occupied';
+    stall.currentUser = user.account;
+    const gmin = stall.type === 'urinal' ? 1 : 5;
+    const now = Date.now();
+    stall.reservation = { userId: user.id, account: user.account, nickname: user.nickname, startTime: now, endTime: now + gmin * 60000, duration: gmin, reservationId: 'g' + Date.now(), isGrab: true };
+    user.currentStall = stall.id;
+    user.stats.grabSuccess++;
+    user.stats.totalVisits++;
+    checkAchievements(user);
+    saveProfile(user);
+    broadcastStalls(space);
+    broadcastLeaderboard(space);
+    sendToUser(user.id, { type: 'stats', stats: user.stats });
+    return;
+  }
+
+  if (type === 'startUse') {
+    if (!stall || !stall.reservation) return sendTo(ws, serError('无有效预约'));
+    if (stall.reservation.account !== user.account) return sendTo(ws, serError('这不是你的预约'));
+    if (stall.status === 'occupied') return sendTo(ws, serError('坑位正在使用中'));
+    if (Date.now() < stall.reservation.startTime) return sendTo(ws, serError('尚未到预约时间，请到点后再确认到坑'));
+    if (Date.now() > stall.reservation.startTime + RESERVE_CONFIRM_WINDOW_MS) return sendTo(ws, serError('预约已过期，未在规定时间内确认到坑'));
+    stall.status = 'occupied';
+    stall.currentUser = user.account;
+    const r = space.reservations.get(stall.reservation.reservationId);
+    if (r) r.status = 'active';
+    user.currentStall = stall.id;
+    user.wasOnTime = true;
+    broadcastStalls(space);
+    return;
+  }
+
+  if (type === 'finish' || type === 'release') {
+    if (!stall || !stall.reservation) return sendTo(ws, serError('无有效预约'));
+    if (stall.reservation.account !== user.account) return sendTo(ws, serError('只有当前使用者可操作'));
+    const wasReserve = stall.reservation.reservationId && space.reservations.get(stall.reservation.reservationId);
+    if (type === 'finish') {
+      const duration = Math.round((Date.now() - stall.reservation.startTime) / 60000);
+      user.stats.totalDuration += duration;
+      user.stats.maxDuration = Math.max(user.stats.maxDuration, duration);
+      if (user.stats.favoriteStall === null) user.stats.favoriteStall = stall.id;
+      user.stats.totalVisits++;
+      const hour = new Date().getHours();
+      if (hour < 6 || hour > 22) user.stats.nightVisits++;
+      if (user.wasOnTime) user.stats.consecutiveOnTime++; else user.stats.consecutiveOnTime = 0;
+      user.stats.onTimeRate = user.stats.totalVisits > 0 ? 1 : 0;
+    }
+    if (wasReserve) { wasReserve.status = 'completed'; space.reservations.delete(wasReserve.id); }
+    stall.status = 'free'; stall.currentUser = null; stall.reservation = null;
+    user.currentStall = null; user.wasOnTime = true;
+    space.urges.delete(stall.id);
+    checkAchievements(user);
+    broadcast(space.id, 'stallReleased', { stallId: stall.id });
+    broadcastStalls(space);
+    broadcastLeaderboard(space);
+    sendToUser(user.id, { type: 'stats', stats: user.stats });
+    saveProfile(user);
+    return;
+  }
+
+  if (type === 'urge') {
+    if (!stall || stall.status !== 'occupied') return sendTo(ws, serError('坑位空闲，无需催促'));
+    const count = (space.urges.get(stall.id) || 0) + 1;
+    space.urges.set(stall.id, count);
+    notifyUrge(space, stall.id, count, stall.reservation.account);
+    broadcastStalls(space);
+    return;
+  }
+
+  if (type === 'rate') {
+    if (!stall) return sendTo(ws, serError('坑位不存在'));
+    const s = (v) => { const n = Number(v); return Number.isInteger(n) ? n : NaN; };
+    const cleanliness = s(msg.cleanliness);
+    const signal = s(msg.signal);
+    const paper = s(msg.paper);
+    if (![cleanliness, signal, paper].every((n) => n >= 1 && n <= 5)) return sendTo(ws, serError('评分需为 1-5 的整数'));
+    if (stall.ratings.some((r) => r.account && r.account === user.account)) return sendTo(ws, serError('你已为该坑位评过分'));
+    stall.ratings.push({ account: user.account, nickname: user.nickname, cleanliness, signal, paper, timestamp: Date.now() });
+    if (stall.ratings.length > 60) stall.ratings = stall.ratings.slice(-60);
+    user.stats.ratingsGiven++;
+    checkAchievements(user);
+    saveProfile(user);
+    saveStallRating(space.id, stall.id, { account: user.account, nickname: user.nickname, cleanliness, signal, paper });
+    broadcastStalls(space);
+    sendToUser(user.id, { type: 'stats', stats: user.stats });
+    return;
+  }
+
+  if (type === 'toggleEmergency') {
+    user.emergencyMode = !!msg.enabled;
+    sendTo(ws, { type: 'emergencyToggled', enabled: user.emergencyMode });
+    broadcastUsers(space);
+    return;
+  }
+}
+
+// ================= WebSocket 分发 =================
 wss.on('connection', (ws) => {
   ws._userId = null;
   ws._ns = null;
@@ -391,281 +902,95 @@ wss.on('connection', (ws) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
-    // 加入空间（连接后第一件事；切换空间也走这里）
     if (msg.type === 'join') { joinSpace(ws, msg.spaceId); return; }
 
     const space = ws._ns ? spaces.get(ws._ns) : null;
+    if (!space) return sendTo(ws, serError('请先选择空间'));
 
-    // --- 登录（必须在已 join 空间后；支持账号+密码，或凭 token 恢复会话） ---
-    if (msg.type === 'login') {
-      if (!space) return ws.send(JSON.stringify({ type: 'error', message: '请先选择厕所空间' }));
-      let account = null;
-      if (msg.token) {
-        const tok = tokens.get(msg.token);
-        if (tok && tok.expiresAt > Date.now()) account = tok.account;
-        if (!account) return ws.send(JSON.stringify({ type: 'error', message: '登录已过期，请重新登录' }));
-      } else {
-        account = (msg.account || '').trim();
-        const password = (msg.password || '');
-        if (!account || !password) return ws.send(JSON.stringify({ type: 'error', message: '请输入账号和密码' }));
-        const acct = accountByLogin(account);
-        if (!acct) return ws.send(JSON.stringify({ type: 'error', message: '账号不存在，请先注册' }));
-        if (!verifyPassword(password, acct.passwordHash)) return ws.send(JSON.stringify({ type: 'error', message: '账号或密码错误' }));
-        account = acct.account;
-      }
-      const acct = accounts.get(account);
-      const nickname = acct.username;
-      const avatar = acct.avatar || '🧑';
-      const userId = 'u' + Date.now() + Math.random().toString(36).slice(2, 6);
-      const token = issueToken(account);
-      const user = {
-        id: userId, account, token, nickname, avatar, currentSpace: space.id,
-        stats: { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0 },
-        achievements: [], currentStall: null, emergencyMode: false, wasOnTime: true,
-      };
-      users.set(userId, user);
-      // 恢复该空间下此账号的历史战绩（账号全局唯一，避免重名用户之间互相覆盖）
-      const pk = space.id + '::' + account;
-      if (profiles.has(pk)) {
-        const p = profiles.get(pk);
-        user.stats = { ...user.stats, ...(p.stats || {}) };
-        user.achievements = [...(p.achievements || [])];
-        if (p.avatar) user.avatar = p.avatar;
-      }
-      profiles.set(pk, { account, nick: nickname, avatar: user.avatar, stats: { ...user.stats }, achievements: [...user.achievements] });
-      ws._userId = userId;
-      user.ws = ws;
-      const selfInfo = spaceInfo(space.id).get(account) || {};
-      ws.send(JSON.stringify({ type: 'loginSuccess', userId, account, nickname, display: selfInfo.display || nickname, dup: !!selfInfo.dup, avatar, token }));
-      broadcastStalls(space.id);
-      broadcastUsers(space.id);
-      broadcastLeaderboard(space.id);
-      sendToUser(userId, { type: 'stats', stats: getStats(user) });
-      return;
-    }
-
-    // --- 退出登录：吊销 token ---
-    if (msg.type === 'logout') {
-      const lg = users.get(ws._userId);
-      if (lg && lg.token) tokens.delete(lg.token);
-      return;
-    }
+    if (msg.type === 'login') { handleLogin(ws, msg, space); return; }
 
     const user = users.get(ws._userId);
-    if (!user) return ws.send(JSON.stringify({ type: 'error', message: '请先登录' }));
-    const s = space; // 当前所在空间
-    if (!s) return ws.send(JSON.stringify({ type: 'error', message: '请先选择厕所空间' }));
+    if (!user) return sendTo(ws, serError('请先登录'));
 
-    const stall = s.stalls.find((x) => x.id === msg.stallId);
+    if (msg.type === 'logout') { if (user.token) tokens.delete(user.token); return; }
+    if (msg.type === 'getStats') { sendToUser(user.id, { type: 'stats', stats: user.stats }); return; }
 
-    // --- 预约 ---
-    if (msg.type === 'reserve') {
-      if (!stall) return ws.send(JSON.stringify({ type: 'error', message: '坑位不存在' }));
-      if (stall.status !== 'free') return ws.send(JSON.stringify({ type: 'error', message: '该坑位已被占用' }));
-      if (activeStallCount(s, user) >= 1) return ws.send(JSON.stringify({ type: 'error', message: '你已占着一个坑位，一次只能用一个，先释放或取消再去下一个' }));
-      const durOpts = stall.type === 'urinal' ? [1, 2, 5] : [15, 30, 45];
-      const duration = durOpts.includes(msg.duration) ? msg.duration : durOpts[0];
-      const startTime = Date.now() + 60000;
-      const endTime = startTime + duration * 60000;
-      const reservationId = 'r' + Date.now();
-      stall.reservation = { userId: user.id, account: user.account, nickname: user.nickname, startTime, endTime, duration, reservationId };
-      stall.status = 'reserved';
-      const reservation = { id: reservationId, userId: user.id, nickname: user.nickname, stallId: stall.id, startTime, endTime, duration, status: 'pending' };
-      s.reservations.set(reservationId, reservation);
-      ws.send(JSON.stringify({ type: 'reservation', reservation }));
-      broadcastStalls(s.id);
-      return;
-    }
-
-    // --- 取消预约 ---
-    if (msg.type === 'cancel') {
-      const reservation = s.reservations.get(msg.reservationId);
-      if (!reservation || reservation.userId !== user.id) return ws.send(JSON.stringify({ type: 'error', message: '预约不存在' }));
-      const st = s.stalls.find((x) => x.id === reservation.stallId);
-      if (st) { st.status = 'free'; st.reservation = null; }
-      reservation.status = 'cancelled';
-      s.reservations.delete(msg.reservationId);
-      ws.send(JSON.stringify({ type: 'cancelSuccess', reservationId: msg.reservationId }));
-      broadcastStalls(s.id);
-      return;
-    }
-
-    // --- 临时抢位 ---
-    if (msg.type === 'grab') {
-      if (!stall) return ws.send(JSON.stringify({ type: 'error', message: '坑位不存在' }));
-      if (stall.status !== 'free') return ws.send(JSON.stringify({ type: 'error', message: '手慢了，已被抢' }));
-      if (activeStallCount(s, user) >= 1) return ws.send(JSON.stringify({ type: 'error', message: '你已占着一个坑位，一次只能用一个，先释放或取消再去下一个' }));
-      stall.status = 'occupied';
-      stall.currentUser = user.account;
-      const gmin = stall.type === 'urinal' ? 1 : 5;
-      stall.reservation = { userId: user.id, account: user.account, nickname: user.nickname, startTime: Date.now(), endTime: Date.now() + gmin * 60000, duration: gmin, reservationId: 'g' + Date.now(), isGrab: true };
-      user.currentStall = stall.id;
-      user.stats.grabSuccess++;
-      user.stats.totalVisits++;
-      checkAchievements(user);
-      saveProfile(user);
-      broadcastStalls(s.id);
-      broadcastLeaderboard(s.id);
-      sendToUser(user.id, { type: 'stats', stats: getStats(user) });
-      return;
-    }
-
-    // --- 确认到坑（开始使用） ---
-    if (msg.type === 'startUse') {
-      if (!stall || !stall.reservation) return ws.send(JSON.stringify({ type: 'error', message: '无有效预约' }));
-      if (stall.reservation.userId !== user.id) return ws.send(JSON.stringify({ type: 'error', message: '这不是你的预约' }));
-      if (stall.status === 'occupied') return ws.send(JSON.stringify({ type: 'error', message: '坑位正在使用中' }));
-      // 仅允许在"确认到坑"时间窗内开始使用：开始时间前拒绝，超窗未确认则预约已过期
-      if (Date.now() < stall.reservation.startTime) {
-        return ws.send(JSON.stringify({ type: 'error', message: '尚未到预约时间，请到点后再确认到坑' }));
-      }
-      if (Date.now() > stall.reservation.startTime + RESERVE_CONFIRM_WINDOW_MS) {
-        return ws.send(JSON.stringify({ type: 'error', message: '预约已过期，未在规定时间内确认到坑' }));
-      }
-      stall.status = 'occupied';
-      stall.currentUser = user.account;
-      if (stall.reservation.reservationId) {
-        const r = s.reservations.get(stall.reservation.reservationId);
-        if (r) r.status = 'active';
-      }
-      user.currentStall = stall.id;
-      user.wasOnTime = true;
-      broadcastStalls(s.id);
-      return;
-    }
-
-    // --- 完成使用 ---
-    if (msg.type === 'finish') {
-      if (!stall || !stall.reservation || stall.reservation.account !== user.account) return ws.send(JSON.stringify({ type: 'error', message: '只有当前使用者可操作' }));
-      const duration = stall.reservation ? Math.round((Date.now() - stall.reservation.startTime) / 60000) : 0;
-      user.stats.totalDuration += duration;
-      user.stats.maxDuration = Math.max(user.stats.maxDuration, duration);
-      if (user.stats.favoriteStall === null) user.stats.favoriteStall = stall.id;
-      user.stats.totalVisits++;
-      const hour = new Date().getHours();
-      if (hour < 6 || hour >= 24) user.stats.nightVisits++;
-      if (user.wasOnTime) user.stats.consecutiveOnTime++;
-      else user.stats.consecutiveOnTime = 0;
-      user.stats.onTimeRate = user.stats.totalVisits > 0 ? 1 : 0;
-      if (stall.reservation && stall.reservation.reservationId) {
-        const r = s.reservations.get(stall.reservation.reservationId);
-        if (r) { r.status = 'completed'; s.reservations.delete(r.id); }
-      }
-      stall.status = 'free'; stall.currentUser = null; stall.reservation = null;
-      user.currentStall = null; user.wasOnTime = true;
-      s.urges.delete(stall.id);
-      checkAchievements(user);
-      broadcastTo(s.id, { type: 'stallReleased', stallId: stall.id });
-      broadcastStalls(s.id);
-      broadcastLeaderboard(s.id);
-      sendToUser(user.id, { type: 'stats', stats: getStats(user) });
-      saveProfile(user);
-      return;
-    }
-
-    // --- 评分 ---
-    if (msg.type === 'rate') {
-      if (!stall) return ws.send(JSON.stringify({ type: 'error', message: '坑位不存在' }));
-      const { cleanliness, signal, paper } = msg;
-      if (!cleanliness || !signal || !paper) return ws.send(JSON.stringify({ type: 'error', message: '请完成所有评分' }));
-      stall.ratings.push({ userId: user.id, nickname: user.nickname, cleanliness, signal, paper, timestamp: Date.now() });
-      user.stats.ratingsGiven++;
-      checkAchievements(user);
-      saveProfile(user);
-      saveStallRating(s.id, stall.id, { nickname: user.nickname, cleanliness, signal, paper });
-      broadcastStalls(s.id);
-      sendToUser(user.id, { type: 'stats', stats: getStats(user) });
-      return;
-    }
-
-    // --- 催促 ---
-    if (msg.type === 'urge') {
-      if (!stall || stall.status !== 'occupied') return ws.send(JSON.stringify({ type: 'error', message: '坑位空闲，无需催促' }));
-      const count = (s.urges.get(stall.id) || 0) + 1;
-      s.urges.set(stall.id, count);
-      sendToUser(stall.reservation?.userId || '', { type: 'urgeNotification', stallId: stall.id, count });
-      broadcastStalls(s.id);
-      return;
-    }
-
-    // --- 紧急模式 ---
-    if (msg.type === 'toggleEmergency') {
-      user.emergencyMode = !!msg.enabled;
-      ws.send(JSON.stringify({ type: 'emergencyToggled', enabled: user.emergencyMode }));
-      return;
-    }
-
-    // --- 提前释放 ---
-    if (msg.type === 'release') {
-      if (!stall || stall.status !== 'occupied') return ws.send(JSON.stringify({ type: 'error', message: '坑位空闲' }));
-      if (!stall.reservation || stall.reservation.account !== user.account) return ws.send(JSON.stringify({ type: 'error', message: '只有当前使用者可释放' }));
-      const duration = stall.reservation ? Math.round((Date.now() - stall.reservation.startTime) / 60000) : 0;
-      user.stats.totalDuration += duration;
-      user.stats.totalVisits++;
-      if (stall.reservation && stall.reservation.reservationId) {
-        const r = s.reservations.get(stall.reservation.reservationId);
-        if (r) { r.status = 'completed'; s.reservations.delete(r.id); }
-      }
-      stall.status = 'free'; stall.currentUser = null; stall.reservation = null;
-      user.currentStall = null;
-      s.urges.delete(stall.id);
-      broadcastTo(s.id, { type: 'stallReleased', stallId: stall.id });
-      broadcastStalls(s.id);
-      broadcastLeaderboard(s.id);
-      sendToUser(user.id, { type: 'stats', stats: getStats(user) });
-      saveProfile(user);
-      return;
-    }
-
-    // --- 获取统计 ---
-    if (msg.type === 'getStats') {
-      sendToUser(user.id, { type: 'stats', stats: getStats(user) });
-      return;
+    switch (msg.type) {
+      case 'roomCreate': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'roomStart': case 'roomEnd':
+        handleRooms(ws, user, space, msg); break;
+      case 'toolCreate': case 'toolDelete': case 'toolAdjust': case 'toolBorrow': case 'toolReturn':
+        handleTools(ws, user, space, msg); break;
+      case 'materialRequest': case 'materialCancel': case 'materialFulfill':
+        handleMaterials(ws, user, space, msg); break;
+      case 'repairCreate': case 'repairUpdate':
+        handleRepairs(ws, user, space, msg); break;
+      case 'reserve': case 'cancel': case 'grab': case 'startUse': case 'finish': case 'release': case 'urge': case 'rate': case 'toggleEmergency': case 'stallConfig':
+        handleStalls(ws, user, space, msg); break;
+      default:
+        sendTo(ws, serError('未知操作'));
     }
   });
 
   ws.on('close', () => {
-    if (ws._ns && spaces.get(ws._ns)) spaces.get(ws._ns).clients.delete(ws);
-    if (ws._userId) {
-      const user = users.get(ws._userId);
-      if (user) {
-        saveProfile(user);
-        const sp = user.currentSpace ? spaces.get(user.currentSpace) : null;
-        if (sp && user.currentStall) {
-          const stall = sp.stalls.find((x) => x.id === user.currentStall);
-          if (stall) { stall.status = 'free'; stall.currentUser = null; stall.reservation = null; user.currentStall = null; }
+    const sp = ws._ns ? spaces.get(ws._ns) : null;
+    if (sp) sp.clients.delete(ws);
+    const u = users.get(ws._userId);
+    if (u) {
+      saveProfile(u);
+      if (sp) {
+        // 释放 connection 占用中的坑位
+        if (u.currentStall !== null) {
+          const stall = sp.stalls.find((s) => s.id === u.currentStall && s.reservation && s.reservation.account === u.account);
+          if (stall) {
+            const rr = stall.reservation.reservationId ? sp.reservations.get(stall.reservation.reservationId) : null;
+            stall.status = 'free'; stall.currentUser = null; stall.reservation = null;
+            if (rr) sp.reservations.delete(rr.id);
+            sp.urges.delete(stall.id);
+            broadcastStalls(sp);
+          }
+          u.currentStall = null;
         }
-        users.delete(ws._userId);
-        if (sp) { broadcastStalls(sp.id); broadcastUsers(sp.id); broadcastLeaderboard(sp.id); }
+        // 取消该账号所有待开始/已预约的坑位预约
+        for (const [rid, r] of [...sp.reservations]) {
+          if (r.account === u.account && r.status === 'pending') {
+            const stall = sp.stalls.find((s) => s.id === r.stallId);
+            if (stall && stall.reservation && stall.reservation.reservationId === rid) { stall.status = 'free'; stall.reservation = null; }
+            sp.reservations.delete(rid);
+          }
+        }
+        broadcastUsers(sp);
+        broadcastLeaderboard(sp);
       }
+      users.delete(u.id);
     }
   });
 });
 
-// ============ 定时器：过期释放（按空间） ============
+// ============ 定时器：过期释放（每 15 秒） ============
 setInterval(() => {
   const now = Date.now();
   for (const sp of spaces.values()) {
-    // 1) 未到坑的预约：超时未确认则释放
-    for (const [rid, r] of sp.reservations) {
-      if (r.status === 'pending' && now > r.startTime + RESERVE_CONFIRM_WINDOW_MS) {
+    // 1) 坑位：预约未确认到坑 → 进入等待(waiting)，超窗 → 过期释放
+    for (const [rid, r] of [...sp.reservations]) {
+      if (r.status !== 'pending') continue;
+      if (now > r.startTime + RESERVE_CONFIRM_WINDOW_MS) {
         r.status = 'expired';
-        const stall = sp.stalls.find((x) => x.id === r.stallId);
-        if (stall && stall.reservation && stall.reservation.reservationId === rid) {
+        const stall = sp.stalls.find((s) => s.id === r.stallId);
+        if (stall && stall.reservation && stall.reservation.reservationId === rid && stall.status !== 'occupied') {
           stall.status = 'free'; stall.reservation = null;
-          broadcastTo(sp.id, { type: 'reservationExpired', stallId: stall.id });
-          broadcastTo(sp.id, { type: 'stallReleased', stallId: stall.id });
-          broadcastStalls(sp.id);
+          broadcast(sp.id, 'reservationExpired', { stallId: stall.id });
+          broadcast(sp.id, 'stallReleased', { stallId: stall.id });
+          broadcastStalls(sp);
         }
+        sp.reservations.delete(rid);
         const user = users.get(r.userId);
         if (user) { user.wasOnTime = false; user.stats.consecutiveOnTime = 0; }
-      }
-      if (r.status === 'pending' && now >= r.startTime && now < r.startTime + RESERVE_CONFIRM_WINDOW_MS) {
-        const stall = sp.stalls.find((x) => x.id === r.stallId);
+      } else if (now >= r.startTime) {
+        const stall = sp.stalls.find((s) => s.id === r.stallId);
         if (stall && stall.status === 'reserved') stall.status = 'waiting';
       }
     }
-    // 2) 已在使用的坑位：超过预定结束时间则自动释放（抢位倒计时 / 预约时段到期）
+    // 2) 坑位：占用超时自动释放
     for (const stall of sp.stalls) {
       if (stall.status !== 'occupied' || !stall.reservation) continue;
       if (now < (stall.reservation.endTime || 0)) continue;
@@ -675,38 +1000,40 @@ setInterval(() => {
         user.stats.totalDuration += duration;
         user.stats.maxDuration = Math.max(user.stats.maxDuration, duration);
         user.stats.totalVisits++;
-        if (user.wasOnTime) user.stats.consecutiveOnTime++; else user.stats.consecutiveOnTime = 0;
         user.stats.onTimeRate = user.stats.totalVisits > 0 ? 1 : 0;
         checkAchievements(user);
         saveProfile(user);
         user.currentStall = null;
       }
-      if (stall.reservation.reservationId) sp.reservations.delete(stall.reservation.reservationId);
+      const rr = stall.reservation.reservationId ? sp.reservations.get(stall.reservation.reservationId) : null;
+      if (rr) sp.reservations.delete(rr.id);
       stall.status = 'free'; stall.currentUser = null; stall.reservation = null;
       sp.urges.delete(stall.id);
-      broadcastTo(sp.id, { type: 'autoRelease', stallId: stall.id });
-      broadcastTo(sp.id, { type: 'stallReleased', stallId: stall.id });
-      broadcastStalls(sp.id);
-      broadcastLeaderboard(sp.id);
-      if (user) sendToUser(user.id, { type: 'stats', stats: getStats(user) });
+      broadcast(sp.id, 'autoRelease', { stallId: stall.id });
+      broadcast(sp.id, 'stallReleased', { stallId: stall.id });
+      broadcastStalls(sp);
+      broadcastLeaderboard(sp);
     }
+    // 3) 会议室：预约自动流转（开始→进行中，超时→过期）
+    let roomsChanged = false;
+    for (const res of [...sp.roomReservations.values()]) {
+      if (res.status === 'pending') {
+        if (now >= res.endAt) { res.status = 'expired'; roomsChanged = true; }
+        else if (now >= res.startAt) { res.status = 'active'; roomsChanged = true; }
+      }
+    }
+    if (roomsChanged) roomsBroadcast(sp);
   }
 }, 15000);
 
 // ============ 启动 ============
-const PORT = process.env.PORT || 3000;
 initDb()
   .then(() => {
-    server.listen(PORT, '0.0.0.0', () => {
-      console.log(`卫生间坑位预约系统运行在 http://localhost:${PORT}`);
-      console.log(`PostgreSQL 已连接；已载入 ${spaces.size} 个空间，${profiles.size} 份历史战绩`);
-    });
+    usePg = true;
+    console.log(`PostgreSQL 已连接；已载入 ${spaces.size} 个空间`);
+    server.listen(PORT, '0.0.0.0', () => console.log(`OfficeSpace · 办公空间管理 运行在 http://localhost:${PORT}`));
   })
   .catch((err) => {
     console.error('❌ 无法连接 PostgreSQL，仅以内存运行:', err.message);
-    server.listen(PORT, '0.0.0.0', () => {
-      console.log(`卫生间坑位预约系统运行在 http://localhost:${PORT}（内存模式）`);
-    });
+    server.listen(PORT, '0.0.0.0', () => console.log(`OfficeSpace · 办公空间管理 运行在 http://localhost:${PORT}（内存模式）`));
   });
-
-module.exports = { app, server, spaces, users, ACHIEVEMENT_DEFS };

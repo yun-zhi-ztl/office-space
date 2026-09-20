@@ -1,7 +1,7 @@
 {
-  "name": "toilet-reservation",
-  "version": "1.0.0",
-  "description": "办公室卫生间坑位预约系统",
+  "name": "office-space",
+  "version": "2.0.0",
+  "description": "OfficeSpace · 办公空间管理：会议室预约 / 工具借用 / 物资申领 / 报修 / 坑位看板",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

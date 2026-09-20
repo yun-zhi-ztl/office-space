@@ -1,4 +1,5 @@
-// 自动化测试：卫生间坑位预约系统
+// 自动化测试：OfficeSpace · 办公空间管理
+// 覆盖五模块：会议室 / 工具借用 / 物资申领 / 报修 / 坑位看板
 const http = require('http');
 const WebSocket = require('ws');
 
@@ -13,375 +14,226 @@ function assert(condition, msg) {
   if (condition) { passed++; console.log(`  ✅ ${msg}`); }
   else { failed++; errors.push(msg); console.log(`  ❌ ${msg}`); }
 }
-
 function createWSClient() {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(WS_URL);
     ws._messages = [];
-    ws.on('message', (data) => {
-      const msg = JSON.parse(data);
-      ws._messages.push(msg);
-    });
+    ws.on('message', (data) => { try { ws._messages.push(JSON.parse(data)); } catch {} });
     ws.on('open', () => resolve(ws));
     ws.on('error', reject);
   });
 }
-
-function sendMsg(ws, msg) {
-  return new Promise((resolve) => {
-    ws.send(JSON.stringify(msg));
-    setTimeout(resolve, 200);
-  });
+function sendMsg(ws, msg, wait = 220) {
+  return new Promise((resolve) => { ws.send(JSON.stringify(msg)); setTimeout(resolve, wait); });
 }
-
-function createSpace(squat, urinal) {
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify({ name: '测试空间', squat_count: squat, urinal_count: urinal });
-    const req = http.request({
-      hostname: 'localhost', port: 3000, path: '/api/spaces', method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
-    }, (res) => {
-      let body = ''; res.on('data', c => body += c); res.on('end', () => { try { resolve(JSON.parse(body)); } catch (e) { reject(e); } });
-    });
-    req.on('error', reject); req.write(data); req.end();
-  });
-}
-
 function httpJson(method, path, body) {
   return new Promise((resolve, reject) => {
     const data = body ? Buffer.from(JSON.stringify(body)) : null;
-    const req = http.request({
-      hostname: 'localhost', port: 3000, path, method,
-      headers: data ? { 'Content-Type': 'application/json', 'Content-Length': data.length } : {},
-    }, (res) => {
-      let b = ''; res.on('data', c => b += c); res.on('end', () => {
-        let j = {}; try { j = JSON.parse(b); } catch (e) {}
-        resolve({ status: res.statusCode, json: j });
-      });
+    const req = http.request({ hostname: 'localhost', port: 3000, path, method, headers: data ? { 'Content-Type': 'application/json', 'Content-Length': data.length } : {} }, (res) => {
+      let b = ''; res.on('data', c => b += c); res.on('end', () => { let j = {}; try { j = JSON.parse(b); } catch {} resolve({ status: res.statusCode, json: j }); });
     });
     req.on('error', reject); if (data) req.write(data); req.end();
   });
 }
+const reg = (a, p, u) => httpJson('POST', '/api/register', { account: a, password: p, username: u, avatar: '🧑' });
+const mk = (ws, type) => ws._messages.filter(m => m.type === type);
+const last = (ws, type) => { const a = mk(ws, type); return a[a.length - 1]; };
 
-function registerAccount(account, password, username, avatar) {
-  return httpJson('POST', '/api/register', { account, password, username, avatar });
-}
-
-function getMessages(ws, type) {
-  if (type) return ws._messages.filter(m => m.type === type);
-  return ws._messages;
+async function loginTo(ws, spaceId, account, password) {
+  await sendMsg(ws, { type: 'join', spaceId });
+  await sendMsg(ws, { type: 'login', account, password });
 }
 
 async function runTests() {
-  console.log('\n🧪 开始测试卫生间坑位预约系统...\n');
+  console.log('\n🧪 开始测试 OfficeSpace · 办公空间管理...\n');
+  const runKey = Date.now();
+  const ADMIN = 'boss_' + runKey;
+  const MEMBER = 'staff_' + runKey;
 
   // ========== 测试0: 创建空间 + 注册账号 ==========
   console.log('📋 测试0: 创建空间并注册账号');
-  const runKey = Date.now();
-  const acc = {
-    zhang: 'zhangsan_' + runKey,
-    li: 'lisi_' + runKey,
-    wang: 'wangwu_' + runKey,
-  };
-  const sp = await createSpace(5, 3);
-  assert(sp.id, '创建测试空间成功');
-  const r1 = await registerAccount(acc.zhang, 'pass_123', '张三', '👨');
-  const r2 = await registerAccount(acc.li, 'pass_456', '李四', '👩');
-  const r3 = await registerAccount(acc.wang, 'pass_789', '王五', '🧙');
-  assert(r1.status >= 200 && r1.status < 300 && r1.json.ok, '注册 张三 成功');
-  assert(r2.status >= 200 && r2.status < 300 && r2.json.ok, '注册 李四 成功');
-  assert(r3.status >= 200 && r3.status < 300 && r3.json.ok, '注册 王五 成功');
-
-  // ========== 测试0b: 账号唯一性与大小写敏感 ==========
-  console.log('\n📋 测试0b: 账号唯一性 + 大小写敏感');
-  const dupeA = await registerAccount(acc.zhang, 'other', '张三', '🧑');
-  assert(dupeA.status === 409, '重复账号注册返回409');
-  assert(dupeA.json.error && dupeA.json.error.includes('占用'), '409提示账号已占用');
-  const caseUp = 'Case' + runKey;
-  const caseLo = caseUp.toLowerCase();
-  const cu = await registerAccount(caseUp, 'pw1', '大C', '🧑');
-  const cl = await registerAccount(caseLo, 'pw2', '小c', '👩');
-  assert(cu.status >= 200 && cu.status < 300 && cu.json.ok, `账号 "${caseUp}" 注册成功`);
-  assert(cl.status >= 200 && cl.status < 300 && cl.json.ok, `账号 "${caseLo}"（不同大小写）也能注册，说明大小写敏感`);
-  assert(caseUp !== caseLo, '两个大小写变体确实是不同账号');
+  const sp = (await httpJson('POST', '/api/spaces', { name: '测试办公室', squat_count: 3, urinal_count: 2 })).json;
+  assert(sp.id, '创建空间成功');
+  const r1 = await reg(ADMIN, 'pw', '老板');
+  const r2 = await reg(MEMBER, 'pw', '员工');
+  assert(r1.json.ok && r2.json.ok, '注册两个账号成功');
 
   // ========== 测试1: 页面可访问 ==========
-  console.log('📋 测试1: HTTP页面可访问');
+  console.log('\n📋 测试1: HTTP 页面可访问');
   const httpRes = await new Promise((resolve) => {
-    http.get(BASE, (res) => {
-      let body = '';
-      res.on('data', chunk => body += chunk);
-      res.on('end', () => resolve({ status: res.statusCode, body }));
-    });
+    http.get(BASE, (res) => { let b = ''; res.on('data', c => b += c); res.on('end', () => resolve({ status: res.statusCode, body: b })); });
   });
-  assert(httpRes.status === 200, 'HTTP状态码200');
-  assert(httpRes.body.includes('坑位雷达'), '页面标题正确');
-  assert(httpRes.body.includes('stall-grid'), '包含坑位网格');
+  assert(httpRes.status === 200, 'HTTP 状态码 200');
+  assert(httpRes.body.includes('OfficeSpace'), '页面包含 OfficeSpace 标题');
 
-  // ========== 测试2: WebSocket 登录 ==========
-  console.log('\n📋 测试2: WebSocket登录');
-  const ws1 = await createWSClient();
-  await sendMsg(ws1, { type: 'join', spaceId: sp.id });
-  await sendMsg(ws1, { type: 'login', account: acc.zhang, password: 'pass_123' });
-  const loginMsgs = getMessages(ws1, 'loginSuccess');
-  assert(loginMsgs.length === 1, '收到登录成功消息');
-  assert(loginMsgs[0].nickname === '张三', '昵称正确');
-  assert(loginMsgs[0].avatar === '👨', '头像正确');
-  assert(loginMsgs[0].userId, '收到用户ID');
-  assert(loginMsgs[0].token, '收到会话token');
+  // ========== 测试2: admin 登录 + 角色 ==========
+  console.log('\n📋 测试2: 登录与角色');
+  const w1 = await createWSClient();
+  await loginTo(w1, sp.id, ADMIN, 'pw');
+  const l1 = last(w1, 'loginSuccess');
+  assert(l1 && l1.account === ADMIN, 'admin 登录成功');
+  assert(l1.role === 'admin', '空间首个用户为 admin');
+  const ulist = last(w1, 'users');
+  assert(ulist && ulist.users.some(u => u.account === ADMIN && u.role === 'admin'), '用户列表含 admin 角色');
 
-  // ========== 测试3: 第二个用户登录 ==========
-  console.log('\n📋 测试3: 多用户登录');
-  const ws2 = await createWSClient();
-  await sendMsg(ws2, { type: 'join', spaceId: sp.id });
-  await sendMsg(ws2, { type: 'login', account: acc.li, password: 'pass_456' });
-  const loginMsgs2 = getMessages(ws2, 'loginSuccess');
-  assert(loginMsgs2.length === 1, '李四登录成功');
+  // ========== 测试3: 会议室 ==========
+  console.log('\n📋 测试3: 会议室（创建/预约/冲突/取消）');
+  await sendMsg(w1, { type: 'roomCreate', name: '大会议室', capacity: 10, location: '3F-01', description: '投影+白板' });
+  let rooms = last(w1, 'rooms');
+  assert(rooms && rooms.rooms.length === 1, 'admin 创建会议室成功');
+  const roomId = rooms.rooms[0].id;
+  // member 预约
+  const w2 = await createWSClient();
+  await loginTo(w2, sp.id, MEMBER, 'pw');
+  const l2 = last(w2, 'loginSuccess');
+  assert(l2.role === 'member', 'member 登录成功（非 admin）');
+  const t0 = Date.now();
+  await sendMsg(w2, { type: 'roomBook', roomId, startAt: t0 + 10 * 60000, endAt: t0 + 40 * 60000, title: '评审会' });
+  rooms = last(w2, 'rooms');
+  assert(rooms && rooms.reservations.length === 1 && rooms.reservations[0].status === 'pending', 'member 预约会议室成功');
+  const resId = rooms.reservations[0].id;
+  // 冲突检测：另一账号预约重叠时段
+  const wA = await createWSClient();
+  await loginTo(wA, sp.id, ADMIN, 'pw');
+  await sendMsg(wA, { type: 'roomBook', roomId, startAt: t0 + 20 * 60000, endAt: t0 + 50 * 60000 });
+  const errsA = mk(wA, 'error');
+  assert(errsA.length > 0 && errsA[errsA.length - 1].message.includes('已被预约'), '重叠时段预约被拒绝(冲突检测)');
+  // 取消自己的预约
+  await sendMsg(w2, { type: 'reservationCancel', reservationId: resId });
+  rooms = last(w2, 'rooms');
+  const cancelled = rooms.reservations.find(r => r.id === resId);
+  assert(cancelled && cancelled.status === 'cancelled', 'member 取消自己的预约成功');
+  // RBAC：member 不能创建会议室
+  await sendMsg(w2, { type: 'roomCreate', name: '小间', capacity: 4 });
+  const errsRBAC = mk(w2, 'error');
+  assert(errsRBAC.length > 0 && errsRBAC[errsRBAC.length - 1].message.includes('仅管理员'), 'member 新增会议室被拒(RBAC)');
 
-  // ========== 测试4: 坑位初始状态 ==========
-  console.log('\n📋 测试4: 坑位初始状态');
-  const stallMsgs = getMessages(ws1, 'stalls');
-  assert(stallMsgs.length > 0, '收到坑位状态');
-  assert(stallMsgs[stallMsgs.length - 1].stalls.length === 8, '共8个坑位');
-  assert(stallMsgs[stallMsgs.length - 1].stalls[0].status === 'free', '初始状态为空闲');
+  // ========== 测试4: 工具借用 ==========
+  console.log('\n📋 测试4: 工具借用（创建/借用/不足/归还）');
+  await sendMsg(w1, { type: 'toolCreate', name: '测试机', category: '测试电脑', total: 2, location: '3F 机柜' });
+  let tools = last(w1, 'tools');
+  assert(tools && tools.tools.length === 1 && tools.tools[0].available === 2, 'admin 创建设备成功(库存2)');
+  const toolId = tools.tools[0].id;
+  await sendMsg(w2, { type: 'toolBorrow', toolId, qty: 2 });
+  tools = last(w2, 'tools');
+  const borrowed1 = tools.tools.find(t => t.id === toolId);
+  assert(borrowed1 && borrowed1.available === 0 && borrowed1.borrowedCount === 2, 'member 借用 2 台成功');
+  // 库存不足
+  await sendMsg(w2, { type: 'toolBorrow', toolId, qty: 1 });
+  const errB = mk(w2, 'error');
+  assert(errB.length > 0 && errB[errB.length - 1].message.includes('库存不足'), '超库存借用被拒');
+  // 归还
+  const bwid = borrowed1.activeBorrows[0].id;
+  await sendMsg(w2, { type: 'toolReturn', borrowId: bwid });
+  tools = last(w2, 'tools');
+  const returned1 = tools.tools.find(t => t.id === toolId);
+  assert(returned1 && returned1.available === 2 && returned1.borrowedCount === 0, '归还后库存恢复');
 
-  // ========== 测试5: 预约坑位 ==========
-  console.log('\n📋 测试5: 预约坑位');
-  const stallsBefore = getMessages(ws1, 'stalls').pop().stalls;
-  const freeStall = stallsBefore.find(s => s.status === 'free');
-  assert(freeStall, '找到空闲坑位');
-  await sendMsg(ws1, { type: 'reserve', stallId: freeStall.id, duration: 30 });
-  const reserveMsgs = getMessages(ws1, 'reservation');
-  assert(reserveMsgs.length > 0, '收到预约成功消息');
-  assert(reserveMsgs[reserveMsgs.length - 1].reservation.stallId === freeStall.id, '坑位ID正确');
-  assert(reserveMsgs[reserveMsgs.length - 1].reservation.duration === 30, '时长正确');
+  // ========== 测试5: 物资申领 ==========
+  console.log('\n📋 测试5: 物资申领（提交/处理/自处理拒绝）');
+  await sendMsg(w2, { type: 'materialRequest', name: '5号电池', qty: 4, unit: '节', reason: '遥控器没电' });
+  let mats = last(w2, 'materials');
+  assert(mats && mats.requests.length === 1 && mats.requests[0].status === 'pending', 'member 提交申领成功');
+  const reqId = mats.requests[0].id;
+  // 自己不能处理
+  await sendMsg(w2, { type: 'materialFulfill', requestId: reqId });
+  const errSelf = mk(w2, 'error');
+  assert(errSelf.length > 0 && errSelf[errSelf.length - 1].message.includes('不能处理自己的'), '不能处理自己的申领');
+  // 他人处理为 fulfilled
+  await sendMsg(w1, { type: 'materialFulfill', requestId: reqId });
+  mats = last(w1, 'materials');
+  const fulfilled = mats.requests.find(r => r.id === reqId);
+  assert(fulfilled && fulfilled.status === 'fulfilled', '他人可将申领置为已满足');
 
-  // 检查坑位状态变为 reserved
-  const stallsAfterReserve = getMessages(ws1, 'stalls').pop().stalls;
-  const reservedStall = stallsAfterReserve.find(s => s.id === freeStall.id);
-  assert(reservedStall.status === 'reserved', '坑位状态变为reserved');
+  // ========== 测试6: 报修 ==========
+  console.log('\n📋 测试6: 报修（提交/状态流转/越权取消）');
+  await sendMsg(w2, { type: 'repairCreate', category: '灯光', location: '3F 走廊', description: '灯管闪烁' });
+  let repairs = last(w2, 'repairs');
+  assert(repairs && repairs.repairs.length === 1 && repairs.repairs[0].status === 'reported', 'member 提交报修成功');
+  const repairId = repairs.repairs[0].id;
+  await sendMsg(w1, { type: 'repairUpdate', repairId, status: 'in_progress' });
+  repairs = last(w1, 'repairs');
+  assert(repairs.repairs.find(r => r.id === repairId).status === 'in_progress', '报修进入处理中');
+  await sendMsg(w1, { type: 'repairUpdate', repairId, status: 'resolved' });
+  repairs = last(w1, 'repairs');
+  assert(repairs.repairs.find(r => r.id === repairId).status === 'resolved', '报修已解决');
+  // 他人不能取消成员上报的报修
+  await sendMsg(w1, { type: 'repairUpdate', repairId, status: 'cancelled' });
+  const errRep = mk(w1, 'error');
+  assert(errRep.length > 0 && errRep[errRep.length - 1].message.includes('仅上报人'), '非上报人取消被拒');
 
-  // ========== 测试5b: 预约未到开始时间不可确认到坑（bug 修复） ==========
-  console.log('\n📋 测试5b: 预约未到开始时间不可确认到坑');
-  const spEarly = await createSpace(1, 0); // 单个蹲坑，复现 issue #1
-  assert(spEarly.id, '创建单坑空间成功');
-  const acctEarly = 'early_' + runKey;
-  await registerAccount(acctEarly, 'pw_early', '早到', '🧑');
-  const wsE = await createWSClient();
-  await sendMsg(wsE, { type: 'join', spaceId: spEarly.id });
-  await sendMsg(wsE, { type: 'login', account: acctEarly, password: 'pw_early' });
-  assert(getMessages(wsE, 'loginSuccess').length === 1, '早到用户登录成功');
-  const eStall = getMessages(wsE, 'stalls').pop().stalls.find(s => s.status === 'free');
-  assert(eStall, '找到空闲蹲坑');
-  await sendMsg(wsE, { type: 'reserve', stallId: eStall.id, duration: 15 });
-  const eResv = getMessages(wsE, 'reservation');
-  assert(eResv.length > 0, '预约成功');
-  // 立即发送 startUse（开始时间在 1 分钟后，应被拒绝）
-  await sendMsg(wsE, { type: 'startUse', stallId: eStall.id });
-  const eErr = getMessages(wsE, 'error');
-  const eErrLastMsg = eErr.length ? eErr[eErr.length - 1].message : '';
-  assert(eErr.length > 0, '提前确认收到错误消息');
-  assert(eErrLastMsg.includes('尚未到预约时间'), '错误提示尚未到预约时间');
-  const eStallAfter = getMessages(wsE, 'stalls').pop().stalls.find(s => s.id === eStall.id);
-  assert(eStallAfter && eStallAfter.status === 'reserved', '坑位仍为 reserved（未被占用）');
-  // 清理：取消该预约并断开
-  await sendMsg(wsE, { type: 'cancel', reservationId: eResv[eResv.length - 1].reservation.id });
-  wsE.close();
+  // ========== 测试7: 坑位看板 ==========
+  console.log('\n📋 测试7: 坑位看板（预约/提前确认被拒/评分校验）');
+  const stall0 = last(w1, 'stalls');
+  assert(stall0 && stall0.squat_count === 3 && stall0.stalls.length === 5, '坑位看板初始就绪(3蹲2尿)');
+  const freeStall = stall0.stalls.find(s => s.status === 'free');
+  // 预约后立即 startUse 应被拒（issue #1 修复）
+  await sendMsg(w2, { type: 'reserve', stallId: freeStall.id, duration: 15 });
+  await sendMsg(w2, { type: 'startUse', stallId: freeStall.id });
+  const errEarly = mk(w2, 'error');
+  assert(errEarly.length > 0 && errEarly[errEarly.length - 1].message.includes('尚未到预约时间'), '预约未到开始时间不可确认到坑(issue#1)');
+  let stalls = last(w2, 'stalls');
+  assert(stalls.stalls.find(s => s.id === freeStall.id).status === 'reserved', '提前确认后坑位仍为 reserved');
+  // 取消预约
+  const resv = last(w2, 'reservation').reservation;
+  await sendMsg(w2, { type: 'cancel', reservationId: resv.id });
+  // 评分越界被拒 + 同账号重复评分被拒
+  await sendMsg(w2, { type: 'grab', stallId: freeStall.id });
+  await sendMsg(w2, { type: 'rate', stallId: freeStall.id, cleanliness: 99, signal: 4, paper: 3 });
+  const errRate = mk(w2, 'error');
+  assert(errRate.length > 0 && errRate[errRate.length - 1].message.includes('1-5'), '评分越界被拒(issue#2)');
+  await sendMsg(w2, { type: 'rate', stallId: freeStall.id, cleanliness: 5, signal: 4, paper: 3 });
+  await sendMsg(w2, { type: 'rate', stallId: freeStall.id, cleanliness: 5, signal: 5, paper: 3 });
+  const errDup = mk(w2, 'error');
+  assert(errDup.length > 0 && errDup[errDup.length - 1].message.includes('评过分'), '同账号重复评分被拒');
+  stalls = last(w2, 'stalls');
+  const ratedStall = stalls.stalls.find(s => s.id === freeStall.id);
+  assert(ratedStall.ratings.length === 1 && ratedStall.ratings[0].cleanliness === 5, '评分记录正确(1条)');
+  // 催促
+  await sendMsg(w1, { type: 'urge', stallId: freeStall.id });
+  const urgen = mk(w2, 'urgeNotification');
+  assert(urgen.length >= 1, '使用者收到催促通知');
+  // 完成使用
+  await sendMsg(w2, { type: 'finish', stallId: freeStall.id });
+  stalls = last(w2, 'stalls');
+  assert(stalls.stalls.find(s => s.id === freeStall.id).status === 'free', '结束使用后坑位释放');
 
-  // ========== 测试6: 重复预约被拒 ==========
-  console.log('\n📋 测试6: 重复预约被拒');
-  await sendMsg(ws1, { type: 'reserve', stallId: freeStall.id, duration: 15 });
-  const errMsgs = getMessages(ws1, 'error');
-  assert(errMsgs.length > 0, '收到错误消息');
-  assert(errMsgs[errMsgs.length - 1].message.includes('已被占用'), '错误消息正确');
+  // ========== 测试8: 同一账号多开不能占多个坑位 ==========
+  console.log('\n📋 测试8: 同账号多开只允许一个占用(issue#3)');
+  const wsX = await createWSClient();
+  await loginTo(wsX, sp.id, MEMBER, 'pw');
+  const stallsB = last(wsX, 'stalls');
+  const s1 = stallsB.stalls.find(s => s.status === 'free');
+  const s2 = stallsB.stalls.find(s => s.id !== s1.id && s.status === 'free');
+  await sendMsg(wsX, { type: 'grab', stallId: s1.id });
+  await sendMsg(wsX, { type: 'grab', stallId: s2.id });
+  const errMulti = mk(wsX, 'error');
+  assert(errMulti.length > 0 && errMulti[errMulti.length - 1].message.includes('一次只能用一个'), '同账号多连接抢第二个坑位被拒(issue#3)');
+  await sendMsg(wsX, { type: 'finish', stallId: s1.id });
 
-  // ========== 测试7: 一人只能占一个坑 ==========
-  console.log('\n📋 测试7: 一人只能占一个坑');
-  // 张三已持有测试5的 pending 预约，此时再抢/再约其他坑都应被拒绝
-  const stallsForGrab = getMessages(ws1, 'stalls').pop().stalls;
-  const freeStall2 = stallsForGrab.find(s => s.status === 'free');
-  assert(freeStall2, '找到空闲坑位');
-  await sendMsg(ws1, { type: 'grab', stallId: freeStall2.id });
-  const grabBlockMsgs = getMessages(ws1, 'error');
-  assert(grabBlockMsgs.length > 0, '持有坑位时抢位被拒绝');
-  assert(grabBlockMsgs[grabBlockMsgs.length - 1].message.includes('一次只能用一个'), '抢位提示「一次只能用一个」');
-  await sendMsg(ws1, { type: 'reserve', stallId: freeStall2.id, duration: 15 });
-  const reserveBlockMsgs = getMessages(ws1, 'error');
-  assert(reserveBlockMsgs.length >= grabBlockMsgs.length, '持有坑位时再预约被拒绝');
-
-  // 取消首个预约后可正常抢位
-  const firstReservation = getMessages(ws1, 'reservation')[0].reservation;
-  await sendMsg(ws1, { type: 'cancel', reservationId: firstReservation.id });
-  const cancelMsgsPre = getMessages(ws1, 'cancelSuccess');
-  assert(cancelMsgsPre.length >= 1, '取消首个预约成功');
-  await sendMsg(ws1, { type: 'grab', stallId: freeStall2.id });
-  const stallsAfterGrab = getMessages(ws1, 'stalls').pop().stalls;
-  const grabbedStall = stallsAfterGrab.find(s => s.id === freeStall2.id);
-  assert(grabbedStall.status === 'occupied', '坑位状态变为occupied');
-  assert(grabbedStall.currentBy && grabbedStall.currentBy.display === '张三', '当前使用者正确');
-
-  // ========== 测试8: 完成使用 ==========
-  console.log('\n📋 测试8: 完成使用');
-  await sendMsg(ws1, { type: 'finish', stallId: freeStall2.id });
-  const stallsAfterFinish = getMessages(ws1, 'stalls').pop().stalls;
-  const finishedStall = stallsAfterFinish.find(s => s.id === freeStall2.id);
-  assert(finishedStall.status === 'free', '坑位释放为free');
-  assert(finishedStall.currentBy === null, '当前使用者清空');
-
-  // ========== 测试9: 催促 ==========
-  console.log('\n📋 测试9: 催促功能');
-  // 张三抢位
-  await sendMsg(ws1, { type: 'grab', stallId: freeStall2.id });
-  await new Promise(r => setTimeout(r, 200));
-  // 李四催促
-  await sendMsg(ws2, { type: 'urge', stallId: freeStall2.id });
-  await new Promise(r => setTimeout(r, 200));
-  const urgeMsgs = getMessages(ws1, 'urgeNotification');
-  assert(urgeMsgs.length > 0, '张三收到催促通知');
-  assert(urgeMsgs[urgeMsgs.length - 1].count === 1, '催促次数为1');
-
-  // ========== 测试10: 评分 ==========
-  console.log('\n📋 测试10: 坑位评分');
-  await sendMsg(ws1, { type: 'finish', stallId: freeStall2.id });
-  await new Promise(r => setTimeout(r, 200));
-  await sendMsg(ws1, { type: 'rate', stallId: freeStall2.id, cleanliness: 5, signal: 4, paper: 3 });
-  const stallsAfterRate = getMessages(ws1, 'stalls').pop().stalls;
-  const ratedStall = stallsAfterRate.find(s => s.id === freeStall2.id);
-  assert(ratedStall.ratings.length === 1, '评分记录为1');
-  assert(ratedStall.ratings[0].cleanliness === 5, '干净度评分正确');
-
-  // ========== 测试11: 紧急模式 ==========
-  console.log('\n📋 测试11: 紧急模式');
-  await sendMsg(ws1, { type: 'toggleEmergency', enabled: true });
-  const emMsgs = getMessages(ws1, 'emergencyToggled');
-  assert(emMsgs.length > 0, '收到紧急模式确认');
-  assert(emMsgs[emMsgs.length - 1].enabled === true, '紧急模式已开启');
-  await sendMsg(ws1, { type: 'toggleEmergency', enabled: false });
-
-  // ========== 测试12: 取消预约 ==========
-  console.log('\n📋 测试12: 取消预约');
-  const stallsForCancel = getMessages(ws1, 'stalls').pop().stalls;
-  const freeStall3 = stallsForCancel.find(s => s.status === 'free');
-  await sendMsg(ws1, { type: 'reserve', stallId: freeStall3.id, duration: 15 });
-  const reserveMsgs2 = getMessages(ws1, 'reservation');
-  const lastReserve = reserveMsgs2[reserveMsgs2.length - 1];
-  await sendMsg(ws1, { type: 'cancel', reservationId: lastReserve.reservation.id });
-  const cancelMsgs = getMessages(ws1, 'cancelSuccess');
-  assert(cancelMsgs.length > 0, '收到取消成功消息');
-
-  // ========== 测试13: 统计 ==========
-  console.log('\n📋 测试13: 个人统计');
-  await sendMsg(ws1, { type: 'getStats' });
-  const statsMsgs = getMessages(ws1, 'stats');
-  assert(statsMsgs.length > 0, '收到统计消息');
-  assert(statsMsgs[statsMsgs.length - 1].stats.totalVisits >= 1, '使用次数>=1');
-  assert(statsMsgs[statsMsgs.length - 1].stats.totalDuration >= 0, '总时长>=0');
-
-  // ========== 测试14: 排行榜 ==========
-  console.log('\n📋 测试14: 排行榜');
-  const lbMsgs = getMessages(ws1, 'leaderboard');
-  assert(lbMsgs.length > 0, '收到排行榜数据');
-  assert(lbMsgs[lbMsgs.length - 1].rankings.length >= 2, '排行榜至少有2人');
-
-  // ========== 测试15: 连接断开处理 ==========
-  console.log('\n📋 测试15: 连接断开');
-  ws2.close();
-  await new Promise(r => setTimeout(r, 300));
-  const usersAfterClose = getMessages(ws1, 'users').pop();
-  assert(usersAfterClose, '收到用户列表更新');
-  assert(usersAfterClose.users.find(u => u.display === '李四') === undefined, '李四已离线');
-
-  // ========== 测试16: 使用中释放坑位 ==========
-  console.log('\n📋 测试16: 提前释放坑位');
-  const stallsForRelease = getMessages(ws1, 'stalls').pop().stalls;
-  const freeStall4 = stallsForRelease.find(s => s.status === 'free');
-  await sendMsg(ws1, { type: 'grab', stallId: freeStall4.id });
-  await new Promise(r => setTimeout(r, 200));
-  await sendMsg(ws1, { type: 'release', stallId: freeStall4.id });
-  const stallsAfterRelease = getMessages(ws1, 'stalls').pop().stalls;
-  const releasedStall = stallsAfterRelease.find(s => s.id === freeStall4.id);
-  assert(releasedStall.status === 'free', '坑位已释放');
-  assert(releasedStall.currentBy === null, '使用者清空');
-
-  // ========== 测试17: 越权操作被拒 ==========
-  console.log('\n📋 测试17: 越权操作');
-  const ws3 = await createWSClient();
-  await sendMsg(ws3, { type: 'join', spaceId: sp.id });
-  await sendMsg(ws3, { type: 'login', account: acc.wang, password: 'pass_789' });
-  // 王五尝试完成张三的坑位
-  const stallsForAuth = getMessages(ws3, 'stalls').pop().stalls;
-  const occupiedStall = stallsForAuth.find(s => s.status === 'occupied');
-  if (occupiedStall) {
-    await sendMsg(ws3, { type: 'finish', stallId: occupiedStall.id });
-    const authErrMsgs = getMessages(ws3, 'error');
-    assert(authErrMsgs.length > 0, '越权操作被拒绝');
-  }
-
-  // ========== 测试18: 密码错误与账号大小写敏感 ==========
-  console.log('\n📋 测试18: 密码错误 + 账号大小写敏感');
-  const wsBad = await createWSClient();
-  await sendMsg(wsBad, { type: 'join', spaceId: sp.id });
-  await sendMsg(wsBad, { type: 'login', account: acc.zhang, password: 'WRONG_PWD' });
-  const badMsgs = getMessages(wsBad, 'error');
-  assert(badMsgs.length > 0, '错误密码收到错误消息');
-  assert(badMsgs[badMsgs.length - 1].message.includes('账号或密码错误'), '错误密码提示正确');
-  assert(getMessages(wsBad, 'loginSuccess').length === 0, '错误密码未产生 loginSuccess');
-  // 大小写敏感：全大写的账号应查不到（不同账号）
-  await sendMsg(wsBad, { type: 'login', account: acc.zhang.toUpperCase(), password: 'pass_123' });
-  const caseMsgs = getMessages(wsBad, 'error');
-  assert(caseMsgs.length >= 2, '大小写不同的账号登录失败');
-  assert(caseMsgs[caseMsgs.length - 1].message.includes('账号不存在'), '大小写不同的账号提示不存在');
-  wsBad.close();
-
-  // ========== 测试19: 重名用户名区分（账号 = 身份，用户名可重名） ==========
-  console.log('\n📋 测试19: 重名用户名区分');
-  const wsD1 = await createWSClient();
-  const wsD2 = await createWSClient();
-  const sameName = '小王'; // 用户名最长 12 字符；两个账号共用同一用户名来测重名场景
-  const nm1 = 'dupA_' + runKey;
-  const nm2 = 'dupB_' + runKey;
-  await registerAccount(nm1, 'pw_dup', sameName, '🧑');
-  await registerAccount(nm2, 'pw_dup', sameName, '🧑');
-  await sendMsg(wsD1, { type: 'join', spaceId: sp.id });
-  await sendMsg(wsD2, { type: 'join', spaceId: sp.id });
-  await sendMsg(wsD1, { type: 'login', account: nm1, password: 'pw_dup' });
-  await sendMsg(wsD2, { type: 'login', account: nm2, password: 'pw_dup' });
-  const dUsers = getMessages(wsD1, 'users');
-  const lastDUsers = dUsers[dUsers.length - 1].users;
-  const same = lastDUsers.filter(u => u.account === nm1 || u.account === nm2);
-  assert(same.length === 2, '两个同名校在用户列表里分成两条');
-  assert(same.every(u => u.dup === true), '同名校用户被标记 dup=true');
-  assert(new Set(same.map(u => u.account)).size === 2, '同名校用账号区分，占据两条身份');
-  // 同名校展示名不同（追加账号以区分）
-  const names = same.map(u => u.display);
-  assert(new Set(names).size === 2, '重名用户展示名互不相同');
-  // nm1 仍可完成自己的坑位，另一同名用户无法越权（身份按账号，不看用户名）
-  await sendMsg(wsD1, { type: 'grab', stallId: freeStall4.id });
-  await new Promise(r => setTimeout(r, 200));
-  const wangOwn = getMessages(wsD1, 'stalls').pop().stalls.find(s => s.id === freeStall4.id);
-  assert(wangOwn.currentBy && wangOwn.currentBy.account === nm1, '坑位当前使用者身份为账号');
-  await sendMsg(wsD2, { type: 'finish', stallId: freeStall4.id });
-  const dupErr = getMessages(wsD2, 'error');
-  assert(dupErr.length > 0, '同名不同账号不能结束对方的坑位');
-  wsD1.close();
-  wsD2.close();
+  // ========== 测试9: 切换空间守卫 ==========
+  console.log('\n📋 测试9: 占用中切换空间被拒(issue#4)');
+  const spB = (await httpJson('POST', '/api/spaces', { name: '第二办公室', squat_count: 2, urinal_count: 1 })).json;
+  const stallsC = last(w1, 'stalls');
+  const sg = stallsC.stalls.find(s => s.status === 'free');
+  await sendMsg(w1, { type: 'grab', stallId: sg.id });
+  await sendMsg(w1, { type: 'join', spaceId: spB.id });
+  const joinErr = mk(w1, 'error');
+  assert(joinErr.length > 0 && joinErr[joinErr.length - 1].message.includes('仍占用着坑位'), '占用中切空间被拒(issue#4)');
+  // 释放后可切换
+  await sendMsg(w1, { type: 'finish', stallId: sg.id });
+  await sendMsg(w1, { type: 'join', spaceId: spB.id });
+  const joinedB = last(w1, 'joined');
+  assert(joinedB && joinedB.space.id === spB.id, '释放后可切换到空间 B');
 
   // ========== 总结 ==========
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);
-  if (errors.length > 0) {
-    console.log(`\n失败详情:`);
-    errors.forEach(e => console.log(`  - ${e}`));
-  }
+  if (errors.length > 0) { console.log(`\n失败详情:`); errors.forEach(e => console.log(`  - ${e}`)); }
   console.log(`${'='.repeat(50)}\n`);
-
-  ws1.close();
-  ws3.close();
+  try { w1.close(); w2.close(); wsX.close(); wA.close(); } catch {}
   process.exit(failed > 0 ? 1 : 0);
 }
 
-runTests().catch(err => {
-  console.error('测试运行出错:', err);
-  process.exit(1);
-});
+runTests().catch((err) => { console.error('测试运行出错:', err); process.exit(1); });

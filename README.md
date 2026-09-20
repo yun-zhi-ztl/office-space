@@ -1,67 +1,53 @@
-# 🚻 坑位雷达 · 办公室卫生间实时看板
+# 🏢 OfficeSpace · 办公空间管理
 
-> 一个给办公室/部门用的卫生间坑位预约与实时看板：预约、抢位、催促、评分、成就与排行榜，全部实时同步。
+> 一个给办公室 / 部门 / 楼层 **共用一个空间** 的实时管理看板：会议室预约、测试工具借用、物资申领、报修、卫生间坑位看板，全部实时同步。
 
-🛠 **开发方式：本项目完全由 [AStudio](https://astudio.com) 以 vibe coding 方式（全程自然语言对话驱动）开发完成。** 从需求梳理、前后端实现、到重构与部署，均由 AStudio 智能体在大模型对话中逐步完成。关于 vibe coding 可参考：[什么是 vibe coding？](https://mp.weixin.qq.com/s/Oe8wEFhFmppMJWyGyesGng)
+多人在同一局域网打开即可使用。由「坑位雷达」终极改造而来，沿用其账号体系、空间隔离、WebSocket 实时同步与 PostgreSQL 持久化方案。
 
-多人在同一局域网打开即可使用。
+详细设计与协议见 [docs/spec.md](docs/spec.md)。
 
 ---
 
 ## ✨ 功能一览
 
-| 能力 | 说明 |
+| 模块 | 说明 |
 | --- | --- |
-| 空间看板 | 任意创建/加入「厕所空间」，每空间独立配置蹲坑/尿槽数量 |
-| 账号体系 | 账号唯一、大小写敏感，密码 scrypt 加盐哈希，会话用 token |
-| 预约 / 抢位 | 预约到点锁定；着急可抢空闲坑位（尿槽 1 / 蹲坑 5 分钟倒计时） |
-| 催促 | 蹲太久别人可催促，本人收到提醒，超时自动释放 |
-| 评分 | 干净度 / 信号 / 纸巾 三维评分，展示在每个坑位 |
-| 排行榜 + 成就 | 按时率、时长、蹲坑次数等维度排名，可解锁徽章 |
-| 重名区分 | 用户名可重名；按账号区分身份，展示名追加账号 + 彩色标识 |
-| 个人统计 | 累计时长、最爱坑位、准时率等趣味年度报告 |
+| 会议室预约 | 预约时段、自动冲突检测、取消；逾期自动流转 |
+| 工具借用 | 登记在库设备（测试电脑 / 测试机器 / 测试手机等），借用与归还、库存实时扣减 |
+| 物资申领 | 提出需要电池等物资的请求，同事/管理员可处理为已满足 |
+| 报修 | 上报厕所 / 灯光 / 空调等故障，并推进状态 |
+| 坑位看板 | 卫生间坑位实时占用、预约、抢位、催促、三维评分，含排行榜与成就 |
 
-支持桌面与手机两种布局（响应式）。
-
-![桌面看板](docs/screenshots/desktop-board.png)
-
-<details>
-<summary>查看更多界面截图</summary>
-
-| 登录 | 使用中看板 | 排行榜 | 评分 | 个人统计 |
-| --- | --- | --- | --- | --- |
-| ![登录](docs/screenshots/desktop-login.png) | ![使用中](docs/screenshots/desktop-board-active.png) | ![排行榜](docs/screenshots/desktop-leaderboard.png) | ![评分](docs/screenshots/desktop-rating.png) | ![统计](docs/screenshots/desktop-stats.png) |
-
-</details>
+- **空间隔离**：每个空间即一个办公室 / 层 / 组织，拥有独立的会议室、设备、物资、报修与坑位数据。
+- **账号体系**：账号唯一且大小写敏感，scrypt 加盐哈希；空间首个登录用户自动成为**管理员**（可配置资源）。
+- **实时同步**：任何变更通过 WebSocket 广播给该空间所有在线成员。
+- **响应式**：桌面与手机两套布局。
 
 ---
 
 ## 🧱 技术栈
 
 - **后端**：Node.js + Express + `ws`（WebSocket 实时推送）
-- **存储**：PostgreSQL（可选）；连接失败时自动降级为进程内内存模式，适合本地演示
-- **前端**：原生 HTML / CSS / JS 单页（无构建步骤），静态文件由 Express 托管
+- **存储**：PostgreSQL（保存空间 / 战绩 / 评分 / 各业务实体）；连接失败自动降级为进程内内存模式
+- **前端**：原生 HTML / CSS / JS 单页（无构建步骤），由 Express 托管
 - **部署**：Dockerfile + docker-compose
-
-> 说明：PostgreSQL 主要负责持久化「空间 / 战绩 / 评分」，运行状态（坑位占用、预约、在线用户）实时保存在内存并由 WebSocket 广播。
 
 ---
 
 ## 📁 项目结构
 
 ```
-坑位雷达/
-├── server.js                # 后端：HTTP + WebSocket + 业务逻辑
+OfficeSpace/
+├── server.js                # 后端：HTTP + WebSocket + 五模块业务逻辑 + PostgreSQL
 ├── public/
 │   └── index.html           # 前端单页应用（原生三件套）
 ├── test/
-│   └── test.js              # 端到端冒烟测试（需先启动服务）
+│   └── test.js              # 端到端冒烟测试（覆盖五模块，需先启动服务）
 ├── docs/
-│   └── screenshots/         # 界面截图（供 README 使用）
+│   └── spec.md              # 产品/数据模型/协议设计规格
 ├── Dockerfile               # 后端容器镜像
 ├── docker-compose.yml       # 一键本地启动
 ├── package.json
-├── .dockerignore
 └── .gitignore
 ```
 
@@ -76,7 +62,7 @@ npm install        # 安装依赖
 npm start          # 启动，默认 http://localhost:3000
 ```
 
-浏览器打开 http://localhost:3000，注册一个账号即可。
+浏览器打开 http://localhost:3000，创建一个空间并注册账号即可（空间首个登录用户为管理员）。
 
 ### 方式二：Docker
 
@@ -87,61 +73,64 @@ docker compose up -d --build
 
 ### 可选：连接 PostgreSQL
 
-默认会尝试连接 `127.0.0.1:5432`（用户 `postgres`、库 `toilet`、密码 `toilet_dev`）。连接失败会自动切到内存模式，不影响功能演示。可通过环境变量覆盖：
+默认尝试连接 `127.0.0.1:5432`（用户 `postgres`、库 `toilet`、密码 `toilet_dev`）。连接失败自动切到内存模式，不影响功能。可通过环境变量覆盖：
 
 ```
 PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE / PORT
 ```
+
+> 说明：PostgreSQL 持久化「空间 / 账号 / 战绩 / 评分 / 会议室 / 工具 / 申领 / 报修」；
+> 运行状态（坑位占用、在线用户）实时保存在内存并由 WebSocket 广播。重启不再清空历史数据。
 
 ---
 
 ## 🧪 运行测试
 
 ```bash
-# 先在一个终端启动服务（内存模式即可）
+# 先在一个终端启动服务
 npm start
 
 # 另开一个终端跑测试
 npm test
 ```
 
-包含了账号唯一性、大小写敏感、预约/抢位/催促/评分、越权拦截，以及**重名用户名区分**等 60+ 项断言。
+包含会议室（冲突检测 / 取消 / RBAC）、工具借用（借用 / 不足 / 归还）、物资申领（提交 / 处理 / 自处理限制）、报修（状态流转 / 越权取消）、坑位看板（预约时间窗、评分越界、重复评分、同账号多开限制、切换空间守卫）等 30+ 项断言。
 
 ---
 
 ## 🔌 交互协议简述
 
-前端通过单向 WebSocket（`/ws`）与后端通信，服务端按类型广播状态：
+前端通过 WebSocket（`/ws`）与服务端通信；先 `join` 进入空间，再 `login`（账号+密码 或 token 恢复会话）。业务消息统一按类型下发：
 
-| 消息类型 | 方向 | 说明 |
-| --- | --- | --- |
-| `join` | 客户端→服务端 | 进入某空间（`spaceId`） |
-| `login` | 客户端→服务端 | 账号+密码，或 `token` 恢复会话 |
-| `register` | HTTP POST `/api/register` | 注册（账号唯一） |
-| `reserve` / `cancel` | …… | 预约 / 取消预约 |
-| `grab` / `startUse` / `finish` / `release` | …… | 抢位 / 到坑 / 完成 / 释放 |
-| `urge` / `rate` / `toggleEmergency` | …… | 催促 / 评分 / 紧急模式 |
-| `stalls` 等 | 服务端→客户端 | 全量推送坑位 / 用户 / 排行榜 |
+| 模块 | 客户端→服务端消息 |
+| --- | --- |
+| 会议室 | `roomCreate` / `roomRemove`(admin) · `roomBook` · `reservationCancel` |
+| 工具借用 | `toolCreate` / `toolDelete` / `toolAdjust`(admin) · `toolBorrow` / `toolReturn` |
+| 物资申领 | `materialRequest` / `materialCancel` / `materialFulfill` |
+| 报修 | `repairCreate` / `repairUpdate` |
+| 坑位看板 | `reserve` / `cancel` / `grab` / `startUse` / `finish` / `release` / `urge` / `rate` / `toggleEmergency` · `stallConfig`(admin) |
 
-身份模型：**坑位占用与战绩一律以全局唯一的 `account` 为身份键**；`display` 是发给前端的展示名（重名时自动追加账号，如 `王伟(ww1)`），并带 `dup` 标记与稳定的按账号颜色。
+服务端广播全量列表：`rooms`、`tools`、`materials`、`repairs`、`stalls`、`users`、`leaderboard`（均含 `account` 身份、`role`、`display`）。
 
----
-
-## 📝 命名约定
-
-- **账号 `account`**：登录身份，全局唯一，大小写敏感。
-- **用户名 `username`**：对外展示名，**允许重名**。
-- **展示名 `display`**：服务端计算后下发的展示标签，重名时自动区分。
-- **空间 `space`**：独立看板单元，各有坑位配置与运行状态。
+**命名约定**：`account` 为全局唯一身份键（区分大小写）；`display` 为展示名（重名时自动追加账号区分）。
 
 ---
 
-## 🛠 开发方式
+## 🚻 坑位看板（原坑位雷达）
 
-本项目完全在 **AStudio**（AI 开发工作台）里、以 **vibe coding** 的方式开发完成：
+卫生间坑位实时看板作为独立模块保留：
 
-- 全程通过自然语言对话与 AStudio 智能体协作，从需求、架构、前端 UI，到后端逻辑、数据库、测试与 Docker 部署，均由智能体逐步实现。
-- 过程中反复通过对话迭代（如「账号唯一、用户名可重名、展示要区分」「加个色块角标」「整理项目、写 README」等），每一条都成了真实功能。
-- 没有手写脚手架：代码、测试、文档都由 AStudio 生成并验证。
+- 预约到点锁定 / 临时抢位（蹲坑 5 分钟、尿槽 1 分钟倒计时）
+- 确认到坑需在时间窗内（预约开始后 5 分钟内超时释放）
+- 主观催促，超时自动释放
+- 干净度 / 信号 / 纸巾三维评分（1-5 整数校验，同一账号同一坑位只记一次）
+- 同账号多开连接也只能占一个坑位；占用中不可切换空间（跨空间统计隔离）
+- 按时率 / 时长 / 抢位等维度排行榜与成就
 
-> 想了解 vibe coding，可参考：[什么是 vibe coding？](https://mp.weixin.qq.com/s/Oe8wEFhFmppMJWyGyesGng)
+---
+
+## 📝 开发方式
+
+从「坑位雷达」以 vibe coding 方式迭代而来：先落地单模块，再在对话中逐条重构为多模块平台，并针对评审发现的真实 bug 逐个修复、验证、合入。
+
+仓库链接：https://github.com/yun-zhi-ztl/office-space
