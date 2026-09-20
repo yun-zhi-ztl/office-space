@@ -804,7 +804,7 @@ function handleStalls(ws, user, space, msg) {
     stall.reservation = { userId: user.id, account: user.account, nickname: user.nickname, startTime: now, endTime: now + gmin * 60000, duration: gmin, reservationId: 'g' + Date.now(), isGrab: true };
     user.currentStall = stall.id;
     user.stats.grabSuccess++;
-    user.stats.totalVisits++;
+    // 不在此处累计 totalVisits：一次抢位由 finish / 自动释放各计一次，避免“抢位+结束”重复计数（issue #8）
     checkAchievements(user);
     saveProfile(user);
     broadcastStalls(space);

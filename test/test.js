@@ -197,6 +197,10 @@ async function runTests() {
   await sendMsg(w2, { type: 'finish', stallId: freeStall.id });
   stalls = last(w2, 'stalls');
   assert(stalls.stalls.find(s => s.id === freeStall.id).status === 'free', '结束使用后坑位释放');
+  // 抢位+结束只计一次 totalVisits（issue #8）
+  await sendMsg(w2, { type: 'getStats' });
+  const stAfter = last(w2, 'stats').stats;
+  assert(stAfter.totalVisits === 1, '抢位+结束只计一次使用次数(issue#8)');
 
   // ========== 测试8: 同一账号多开不能占多个坑位 ==========
   console.log('\n📋 测试8: 同账号多开只允许一个占用(issue#3)');
