@@ -1,0 +1,11 @@
+# 依赖
+node_modules/
+
+# 日志与系统文件
+*.log
+npm-debug.log*
+.DS_Store
+
+# 编辑器
+.idea/
+.vscode/
