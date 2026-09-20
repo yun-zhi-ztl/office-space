@@ -161,6 +161,33 @@ async function runTests() {
   const reservedStall = stallsAfterReserve.find(s => s.id === freeStall.id);
   assert(reservedStall.status === 'reserved', '坑位状态变为reserved');
 
+  // ========== 测试5b: 预约未到开始时间不可确认到坑（bug 修复） ==========
+  console.log('\n📋 测试5b: 预约未到开始时间不可确认到坑');
+  const spEarly = await createSpace(1, 0); // 单个蹲坑，复现 issue #1
+  assert(spEarly.id, '创建单坑空间成功');
+  const acctEarly = 'early_' + runKey;
+  await registerAccount(acctEarly, 'pw_early', '早到', '🧑');
+  const wsE = await createWSClient();
+  await sendMsg(wsE, { type: 'join', spaceId: spEarly.id });
+  await sendMsg(wsE, { type: 'login', account: acctEarly, password: 'pw_early' });
+  assert(getMessages(wsE, 'loginSuccess').length === 1, '早到用户登录成功');
+  const eStall = getMessages(wsE, 'stalls').pop().stalls.find(s => s.status === 'free');
+  assert(eStall, '找到空闲蹲坑');
+  await sendMsg(wsE, { type: 'reserve', stallId: eStall.id, duration: 15 });
+  const eResv = getMessages(wsE, 'reservation');
+  assert(eResv.length > 0, '预约成功');
+  // 立即发送 startUse（开始时间在 1 分钟后，应被拒绝）
+  await sendMsg(wsE, { type: 'startUse', stallId: eStall.id });
+  const eErr = getMessages(wsE, 'error');
+  const eErrLastMsg = eErr.length ? eErr[eErr.length - 1].message : '';
+  assert(eErr.length > 0, '提前确认收到错误消息');
+  assert(eErrLastMsg.includes('尚未到预约时间'), '错误提示尚未到预约时间');
+  const eStallAfter = getMessages(wsE, 'stalls').pop().stalls.find(s => s.id === eStall.id);
+  assert(eStallAfter && eStallAfter.status === 'reserved', '坑位仍为 reserved（未被占用）');
+  // 清理：取消该预约并断开
+  await sendMsg(wsE, { type: 'cancel', reservationId: eResv[eResv.length - 1].reservation.id });
+  wsE.close();
+
   // ========== 测试6: 重复预约被拒 ==========
   console.log('\n📋 测试6: 重复预约被拒');
   await sendMsg(ws1, { type: 'reserve', stallId: freeStall.id, duration: 15 });
