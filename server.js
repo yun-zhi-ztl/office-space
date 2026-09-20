@@ -19,6 +19,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 const spaces = new Map();  // spaceId -> { id,name,squatCount,urinalCount,stalls,reservations,urges,clients }
 const users = new Map();   // userId -> user（user.currentSpace 指向所在空间）
 
+// 预约"确认到坑"允许的时间窗：从预约开始时间起，超过该窗口未确认则预约过期释放。
+// 与下方定时器保持同一来源，避免两处魔法数字漂移。
+const RESERVE_CONFIRM_WINDOW_MS = 5 * 60000;
+
 const ACHIEVEMENT_DEFS = [
   { id: 'punctual', name: '守时达人', desc: '连续3次准时到坑', icon: '⏰', check: (u) => u.stats.consecutiveOnTime >= 3 },
   { id: 'endurance', name: '持久战', desc: '单次蹲坑超过20分钟', icon: '🐌', check: (u) => u.stats.maxDuration >= 20 },
@@ -512,6 +516,13 @@ wss.on('connection', (ws) => {
       if (!stall || !stall.reservation) return ws.send(JSON.stringify({ type: 'error', message: '无有效预约' }));
       if (stall.reservation.userId !== user.id) return ws.send(JSON.stringify({ type: 'error', message: '这不是你的预约' }));
       if (stall.status === 'occupied') return ws.send(JSON.stringify({ type: 'error', message: '坑位正在使用中' }));
+      // 仅允许在"确认到坑"时间窗内开始使用：开始时间前拒绝，超窗未确认则预约已过期
+      if (Date.now() < stall.reservation.startTime) {
+        return ws.send(JSON.stringify({ type: 'error', message: '尚未到预约时间，请到点后再确认到坑' }));
+      }
+      if (Date.now() > stall.reservation.startTime + RESERVE_CONFIRM_WINDOW_MS) {
+        return ws.send(JSON.stringify({ type: 'error', message: '预约已过期，未在规定时间内确认到坑' }));
+      }
       stall.status = 'occupied';
       stall.currentUser = user.account;
       if (stall.reservation.reservationId) {
@@ -638,7 +649,7 @@ setInterval(() => {
   for (const sp of spaces.values()) {
     // 1) 未到坑的预约：超时未确认则释放
     for (const [rid, r] of sp.reservations) {
-      if (r.status === 'pending' && now > r.startTime + 5 * 60000) {
+      if (r.status === 'pending' && now > r.startTime + RESERVE_CONFIRM_WINDOW_MS) {
         r.status = 'expired';
         const stall = sp.stalls.find((x) => x.id === r.stallId);
         if (stall && stall.reservation && stall.reservation.reservationId === rid) {
@@ -650,7 +661,7 @@ setInterval(() => {
         const user = users.get(r.userId);
         if (user) { user.wasOnTime = false; user.stats.consecutiveOnTime = 0; }
       }
-      if (r.status === 'pending' && now >= r.startTime && now < r.startTime + 5 * 60000) {
+      if (r.status === 'pending' && now >= r.startTime && now < r.startTime + RESERVE_CONFIRM_WINDOW_MS) {
         const stall = sp.stalls.find((x) => x.id === r.stallId);
         if (stall && stall.status === 'reserved') stall.status = 'waiting';
       }
