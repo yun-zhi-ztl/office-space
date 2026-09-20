@@ -294,8 +294,7 @@ function saveStallRating(ns, stallId, r) {
   ).catch(() => {});
 }
 async function initDb() {
-  // 开发期 schema 演进，重建两张业务表（数据为空，安全）
-  await pool.query('DROP TABLE IF EXISTS profiles').then(() => pool.query('DROP TABLE IF EXISTS stall_ratings'));
+  // 幂等建表；不再在启动时 DROP 业务表，避免重启清空战绩/评分（持久化数据需跨重启保留）
   await pool.query(`
     CREATE TABLE IF NOT EXISTS spaces(
       id text PRIMARY KEY,
