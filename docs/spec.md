@@ -139,9 +139,25 @@
 | 徽章与段位 | 现有成就 + 每个坑位按评分/使用量形成段位（青铜→王者「坑位传说榜」） | 排行榜/坑位 `tier` |
 | 设备催还与占用王榜 | 借用超过 7 天标记「逾期」，他人可一键提醒借用人归还；逾期列表即「占用王榜」 | `remindReturn` |
 | 一键智能选房 | 按时段+人数自动列出空闲会议室并推荐 | `suggestRoom` |
-| 电视墙大屏 | 独立只读页 `public/screen.html`，展示会议室「现在/接下来」+ 空间总览 + 公告 + 在线状态 | 复用现有广播 |
+| 电视墙大屏 | 独立只读页 `public/screen.html`，展示会议室「现在/接下来」+ 空间总览 + 坑位占用 + 公告 + 在线状态；支持全屏切换与多视图自动轮播（可暂停/手动切换） | 复用现有广播 |
 | 每日看点 | 登录后推送今日要点：今天会议、逾期借用、我的未还、待处理申领/报修、本周之星 | 登录时下发 `digest` |
 
 ### 客户端→服务端新增消息
 `setStatus`、`announce`、`suggestRoom`、`remindReturn`；服务端相应广播/单发
 `users`(含 `status`) 、`notices`、`suggestRooms`、`borrowReminder`、`digest`。
+
+## 9. 代码架构（多模块拆分）
+
+后端按领域拆分到 `src/`，`server.js` 只做组装，降低单文件维护成本：
+
+```
+server.js        入口：Express + WS 分发 + 定时器 + 心跳 + 优雅停机 + 启动
+src/context.js   共享上下文：状态 + 常量 + 基础工具 + 持久化(写合并) + 认证 + 序列化 + 广播 + 坑位成就 + 每日看点
+src/http.js      HTTP 路由：/api/spaces、/api/register
+src/session.js   会话：进入/切换空间、登录（含 digest）
+src/modules/     rooms / tools / materials / repairs / stalls / extras（各领域处理函数）
+```
+
+- 各领域模块是纯函数工厂 `module.exports = (api)=>({...})`，由 `server.js` 注入共享上下文 `api`，无全局状态、便于单测。
+- 定时器、心跳、优雅停机属于进程级关注点，保留在入口。
+- 该拆分不改变任何对外协议与行为，e2e（48 项）在内存与 PostgreSQL 双模式下均通过。

@@ -6,87 +6,155 @@
 <title>OfficeSpace · 大屏</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;}
-  body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:radial-gradient(1200px 600px at 20% -10%,#1e3a5f,transparent),linear-gradient(160deg,#0f172a 0%,#0b1020 100%);color:#e2e8f0;min-height:100vh;padding:24px 34px;overflow:hidden;}
-  .head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:22px;flex-wrap:wrap;gap:8px;}
-  .head h1{font-size:26px;letter-spacing:.5px;}
+  html,body{height:100%;}
+  body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:radial-gradient(1200px 600px at 20% -10%,#1e3a5f,transparent),linear-gradient(160deg,#0f172a 0%,#0b1020 100%);color:#e2e8f0;height:100%;display:flex;flex-direction:column;overflow:hidden;padding:18px 28px;}
+  .toolbar{display:flex;justify-content:space-between;align-items:center;padding-bottom:14px;border-bottom:1px solid #1e293b;gap:10px;flex-wrap:wrap;}
+  .toolbar h1{font-size:22px;letter-spacing:.5px;}
   .clock{font-size:34px;font-weight:800;color:#38bdf8;font-variant-numeric:tabular-nums;}
-  .cols{display:grid;grid-template-columns:2fr 1fr;gap:20px;}
-  .col{display:flex;flex-direction:column;gap:16px;}
-  .panel{background:rgba(30,41,59,.7);border:1px solid #334155;border-radius:16px;padding:18px;}
-  .panel h2{font-size:15px;color:#94a3b8;margin-bottom:12px;letter-spacing:1px;}
-  .roomrow{display:flex;justify-content:space-between;align-items:center;padding:10px 4px;border-bottom:1px solid #1e293b;font-size:16px;}
+  .controls{display:flex;align-items:center;gap:8px;}
+  .btn{background:rgba(56,189,248,.12);border:1px solid #334155;color:#e2e8f0;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:14px;}
+  .btn:hover{background:rgba(56,189,248,.22);}
+  .btn.active{background:var(--accent,#0ea5e9);color:#04222f;}
+  .dots{display:flex;gap:8px;}
+  .dot{width:10px;height:10px;border-radius:50%;background:#334155;cursor:pointer;transition:.2s;}
+  .dot.on{background:#38bdf8;transform:scale(1.2);}
+  .stage{flex:1;position:relative;margin-top:10px;}
+  .view{position:absolute;inset:0;display:none;opacity:0;transition:opacity .6s;}
+  .view.show{display:flex;flex-direction:column;gap:16px;opacity:1;overflow:auto;}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+  .panel{background:rgba(30,41,59,.72);border:1px solid #334155;border-radius:16px;padding:18px;animation:fadeIn .5s;}
+  .panel h2{font-size:16px;color:#94a3b8;margin-bottom:12px;letter-spacing:1px;}
+  .roomrow{display:flex;justify-content:space-between;align-items:center;padding:12px 4px;border-bottom:1px solid #1e293b;font-size:20px;}
   .roomrow:last-child{border-bottom:none;}
   .roomrow .now{color:#34d399;font-weight:600;}
   .roomrow .next{color:#94a3b8;}
-  .chips{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
-  .chip{background:rgba(30,41,59,.7);border:1px solid #334155;border-radius:14px;padding:16px;text-align:center;}
-  .chip .n{font-size:34px;font-weight:800;color:#38bdf8;}
-  .chip .t{font-size:13px;color:#94a3b8;margin-top:2px;}
-  .notices{max-height:220px;overflow:hidden;}
-  .notices .n{padding:6px 0;border-bottom:1px dashed #1e293b;font-size:15px;}
-  .notices .n b{color:#fbbf24;}
-  .mvp{display:flex;align-items:center;gap:10px;font-size:20px;}
+  .chips{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;flex:1;align-items:center;}
+  .chip{background:rgba(30,41,59,.72);border:1px solid #334155;border-radius:14px;padding:20px;text-align:center;}
+  .chip .n{font-size:44px;font-weight:800;color:#38bdf8;}
+  .chip .t{font-size:15px;color:#94a3b8;margin-top:4px;}
+  .mvp{display:flex;align-items:center;gap:12px;font-size:24px;}
   .mvp b{color:#fbbf24;}
-  .statusline{display:flex;gap:8px;flex-wrap:wrap;font-size:15px;}
-  .statusline span{background:rgba(56,189,248,.12);padding:4px 10px;border-radius:16px;}
+  .stallgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;}
+  .ss{background:rgba(30,41,59,.72);border:1px solid #334155;border-radius:12px;padding:12px;text-align:center;}
+  .ss .nm{font-weight:700;font-size:17px;}
+  .ss .st{font-size:13px;padding:3px 8px;border-radius:12px;margin-top:4px;display:inline-block;}
+  .ss .ok{background:rgba(52,211,153,.18);color:#34d399;}
+  .ss .bad{background:rgba(251,113,133,.18);color:#fb7185;}
+  .ss .wait{background:rgba(251,191,36,.18);color:#fbbf24;}
+  .notices{max-height:60vh;overflow:auto;}
+  .notices .n{padding:12px 0;border-bottom:1px dashed #1e293b;font-size:22px;}
+  .notices .n b{color:#fbbf24;}
+  .statusline{display:flex;gap:10px;flex-wrap:wrap;font-size:19px;}
+  .statusline span{background:rgba(56,189,248,.12);padding:5px 12px;border-radius:16px;}
+  .empty{color:#64748b;font-size:18px;padding:20px 4px;}
 </style>
 </head>
 <body>
-<div class="head"><h1><span id="spaceName">OfficeSpace</span> · 大屏</h1><div class="clock" id="clock"></div></div>
-<div class="cols">
-  <div class="col">
-    <div class="panel"><h2>🏢 会议室 · 现在 / 接下来</h2><div id="rooms"></div></div>
-    <div class="panel"><h2>📢 公告</h2><div class="notices" id="notices"></div></div>
+<div class="toolbar">
+  <h1><span id="spaceName">OfficeSpace</span> · 大屏</h1>
+  <div class="clock" id="clock">--:--:--</div>
+  <div class="controls">
+    <div class="dots" id="dots"></div>
+    <button class="btn" id="pauseBtn" onclick="togglePlay()">⏸ 暂停</button>
+    <button class="btn" id="fsBtn" onclick="toggleFullscreen()">⛶ 全屏</button>
   </div>
-  <div class="col">
-    <div class="chips" id="chips"></div>
-    <div class="panel"><h2>👑 本周之星</h2><div class="mvp" id="mvp">--</div></div>
-    <div class="panel"><h2>🟢 在线状态</h2><div class="statusline" id="status"></div></div>
-  </div>
+</div>
+<div class="stage">
+  <!-- 视图1: 会议室 now/next -->
+  <section class="view" id="view-rooms"><div class="panel"><h2>🏢 会议室 · 现在 / 接下来</h2><div id="rooms"></div></div></section>
+  <!-- 视图2: 空间总览 + 本周之星 -->
+  <section class="view" id="view-overview"><div class="chips" id="chips"></div><div class="panel"><h2>👑 本周之星</h2><div class="mvp" id="mvp">--</div></div></section>
+  <!-- 视图3: 坑位占用 + 在线状态 -->
+  <section class="view" id="view-stalls"><div class="panel"><h2>🚻 坑位实时占用</h2><div class="stallgrid" id="stallgrid"></div></div><div class="panel"><h2>🟢 在线状态</h2><div class="statusline" id="status"></div></div></section>
+  <!-- 视图4: 公告 -->
+  <section class="view" id="view-notices"><div class="panel"><h2>📢 公告</h2><div class="notices" id="notices"></div></div></section>
 </div>
 <script>
 var DB={rooms:[],reservations:[],stalls:[],tools:[],requests:[],repairs:[],users:[],leaderboard:[],notices:[]};
+var STATE={view:0,count:4,paused:false,ms:12000};
 var ws=null;
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function pad(n){return (n<10?'0':'')+n;}
 function tt(ms){ var d=new Date(ms); return pad(d.getHours())+':'+pad(d.getMinutes()); }
+function qs(s){return document.querySelector(s);}
 function connect(){
   var id=new URLSearchParams(location.search).get('space')||'';
   ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
   ws.onopen=function(){ if(id) ws.send(JSON.stringify({type:'join',spaceId:id})); };
-  ws.onmessage=function(ev){ try{var m=JSON.parse(ev.data); if(m.type==='joined'){ document.title='OfficeSpace · '+m.space.name+' 大屏'; document.getElementById('spaceName').textContent=m.space.name; } if(m.type==='rooms'){DB.rooms=m.rooms;DB.reservations=m.reservations;} if(m.type==='tools')DB.tools=m.tools; if(m.type==='stalls')DB.stalls=m.stalls; if(m.type==='materials')DB.requests=m.requests; if(m.type==='repairs')DB.repairs=m.repairs; if(m.type==='users')DB.users=m.users; if(m.type==='leaderboard')DB.leaderboard=m.rankings||[]; if(m.type==='notices')DB.notices=m.notices||[]; render(); }catch(e){}};
+  ws.onmessage=function(ev){ try{var m=JSON.parse(ev.data);
+    if(m.type==='joined'){ document.title='OfficeSpace · '+m.space.name+' 大屏'; document.getElementById('spaceName').textContent=m.space.name; }
+    if(m.type==='rooms'){DB.rooms=m.rooms;DB.reservations=m.reservations;}
+    if(m.type==='tools')DB.tools=m.tools;
+    if(m.type==='stalls')DB.stalls=m.stalls;
+    if(m.type==='materials')DB.requests=m.requests;
+    if(m.type==='repairs')DB.repairs=m.repairs;
+    if(m.type==='users')DB.users=m.users;
+    if(m.type==='leaderboard')DB.leaderboard=m.rankings||[];
+    if(m.type==='notices')DB.notices=m.notices||[];
+    renderAll();
+  }catch(e){}};
   ws.onclose=function(){ setTimeout(connect,1500); };
 }
-function render(){
+/* ---- 轮播 ---- */
+function show(i){
+  STATE.view=(i+STATE.count)%STATE.count;
+  [0,1,2,3].forEach(function(k){
+    var el=document.getElementById('view-'+['rooms','overview','stalls','notices'][k]);
+    if(el){ el.classList.toggle('show', k===STATE.view); }
+  });
+  var dots=document.querySelectorAll('#dots .dot');
+  [].forEach.call(dots,function(d,k){ d.classList.toggle('on', k===STATE.view); });
+}
+function togglePlay(){ STATE.paused=!STATE.paused; var b=document.getElementById('pauseBtn'); b.textContent=STATE.paused?'▶ 播放':'⏸ 暂停'; }
+function toggleFullscreen(){
+  var el=document.documentElement;
+  if(!document.fullscreenElement){ if(el.requestFullscreen) el.requestFullscreen(); }
+  else { if(document.exitFullscreen) document.exitFullscreen(); }
+}
+/* ---- 渲染 ---- */
+function buildRooms(){
   var now=Date.now();
-  // 会议室 now/next
   var html=DB.rooms.length?DB.rooms.map(function(r){
     var rel=DB.reservations.filter(function(x){return x.roomId===r.id;});
     var cur=rel.find(function(x){return x.status==='active'||(x.status==='pending'&&x.startAt<=now&&x.endAt>now);});
     var nxt=rel.filter(function(x){return x.status==='pending'&&x.startAt>now;}).sort(function(a,b){return a.startAt-b.startAt;})[0];
-    return '<div class="roomrow"><span>'+esc(r.name)+' ('+r.capacity+'人)</span>'
-      +'<span>'+(cur?'<span class="now">现在：'+esc(cur.title)+' · '+esc(cur.ownerName)+'</span>':(nxt?'<span class="next">接下来 '+tt(nxt.startAt)+' '+esc(nxt.title)+'</span>':'<span class="next">空闲</span>'))+'</span></div>';
-  }).join(''):'<div class="roomrow"><span class="next">还没有会议室</span></div>';
-  document.getElementById('rooms').innerHTML=html;
-  // chips
+    return '<div class="roomrow"><span>'+esc(r.name)+' ('+r.capacity+'人)</span><span>'
+      +(cur?'<span class="now">现在：'+esc(cur.title)+' · '+esc(cur.ownerName)+'</span>':(nxt?'<span class="next">接下来 '+tt(nxt.startAt)+' '+esc(nxt.title)+'</span>':'<span class="next">空闲</span>'))+'</span></div>';
+  }).join(''):'<div class="empty">还没有会议室</div>';
+  qs('#rooms').innerHTML=html;
+}
+function buildOverview(){
   var occupied=DB.stalls.filter(function(s){return s.status==='occupied';}).length;
   var overdue=DB.tools.reduce(function(a,t){return a+(t.activeBorrows||[]).filter(function(b){return b.overdue;}).length;},0);
   var pendReq=DB.requests.filter(function(r){return r.status==='pending';}).length;
   var openRep=DB.repairs.filter(function(r){return r.status==='reported'||r.status==='in_progress';}).length;
-  document.getElementById('chips').innerHTML=[
-    ['🚻 坑位占用', occupied+'/'+DB.stalls.length],['📦 待处理申领', pendReq],['🛠️ 未办结报修', openRep],['⏰ 逾期借用', overdue],['🟢 在线', DB.users.length],['🏢 会议室', DB.rooms.length]
+  qs('#chips').innerHTML=[
+    ['🚻 坑位占用', occupied+'/'+DB.stalls.length],['📦 待处理申领', pendReq],['🛠️ 未办结报修', openRep],
+    ['⏰ 逾期借用', overdue],['🟢 在线', DB.users.length],['🏢 会议室', DB.rooms.length]
   ].map(function(c){return '<div class="chip"><div class="n">'+c[1]+'</div><div class="t">'+c[0]+'</div></div>';}).join('');
-  // mvp
   var mvp=DB.leaderboard.find(function(r){return r.mvp;});
-  document.getElementById('mvp').innerHTML = mvp ? ('👑 <b>'+esc(mvp.username)+'</b> 本周活跃 '+mvp.weekly+' 次') : '--';
-  // notices
-  document.getElementById('notices').innerHTML = DB.notices.slice(0,6).map(function(n){return '<div class="n"><b>'+esc(n.from)+'</b> '+esc(n.text)+'</div>';}).join('')||'<div class="n">暂无公告</div>';
-  // status
-  document.getElementById('status').innerHTML = DB.users.map(function(u){return '<span>'+esc(u.avatar||'')+' '+esc(u.display||u.username)+(u.status&&u.status.emoji?' '+esc(u.status.emoji):'')+' '+esc((u.status&&u.status.label)||'在岗')+'</span>';}).join('')||'<span>暂无人在线</span>';
+  qs('#mvp').innerHTML = mvp ? ('👑 <b>'+esc(mvp.username)+'</b> 本周活跃 '+mvp.weekly+' 次') : '--';
 }
-setInterval(function(){ var d=new Date(); document.getElementById('clock').textContent=pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds()); render(); },1000);
+function buildStalls(){
+  qs('#stallgrid').innerHTML = (DB.stalls.length?DB.stalls.map(function(s){
+    var cls = s.status==='free'?'ok':(s.status==='occupied'?'bad':'wait');
+    var label = s.status==='free'?'空闲':(s.status==='occupied'?(s.currentBy?'占用': '占用'):'预约');
+    return '<div class="ss"><div class="nm">'+esc(s.name)+(s.tier&&s.tier.name!=='新坑'?' '+s.tier.icon:'')+'</div><div class="st '+cls+'">'+label+(s.currentBy?' · '+esc(s.currentBy.display):'')+'</div></div>';
+  }).join(''):'<div class="empty">暂无坑位</div>');
+  qs('#status').innerHTML = DB.users.map(function(u){return '<span>'+esc(u.avatar||'')+' '+esc(u.display||u.username)+(u.status&&u.status.emoji?' '+esc(u.status.emoji):'')+' '+esc((u.status&&u.status.label)||'在岗')+'</span>';}).join('')||'<span>暂无人在线</span>';
+}
+function buildNotices(){ qs('#notices').innerHTML = DB.notices.slice(0,8).map(function(n){return '<div class="n"><b>'+esc(n.from)+'</b> '+esc(n.text)+'</div>';}).join('')||'<div class="empty">暂无公告</div>'; }
+function renderAll(){ buildRooms(); buildOverview(); buildStalls(); buildNotices(); }
+/* ---- 启动 ---- */
+[0,1,2,3].forEach(function(k){ var d=document.createElement('div'); d.className='dot'; d.onclick=function(){ show(k); }; document.getElementById('dots').appendChild(d); });
+show(0);
+setInterval(function(){
+  var d=new Date(); document.getElementById('clock').textContent=pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds());
+  renderAll();
+  if(!STATE.paused) show(STATE.view+1);
+}, STATE.ms);
+document.addEventListener('fullscreenchange', function(){ var b=document.getElementById('fsBtn'); if(b) b.textContent=document.fullscreenElement?'✕ 退出全屏':'⛶ 全屏'; });
 connect();
-document.getElementById('clock').textContent='--:--:--';
 </script>
 </body>
 </html>

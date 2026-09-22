@@ -39,16 +39,27 @@
 
 ```
 OfficeSpace/
-├── server.js                # 后端：HTTP + WebSocket + 五模块业务逻辑 + PostgreSQL
+├── server.js                # 入口：Express + WS 分发 + 定时器 + 心跳 + 停机 + 启动
+├── src/                     # 后端逻辑按领域拆分
+│   ├── context.js           # 共享上下文：状态/工具/持久化/认证/序列化/广播
+│   ├── http.js              # HTTP 路由（/api/spaces、/api/register）
+│   ├── session.js           # ws 会话：进入/切换空间、登录
+│   └── modules/             # 业务模块
+│       ├── rooms.js         # 会议室
+│       ├── tools.js         # 工具借用
+│       ├── materials.js     # 物资申领
+│       ├── repairs.js       # 报修
+│       ├── stalls.js        # 坑位看板
+│       └── extras.js        # 状态灯/公告/智能选房/催还
 ├── public/
 │   ├── index.html           # 前端单页应用（原生三件套）
-│   └── screen.html          # 电视墙大屏（会议室 now/next + 空间总览，只读）
+│   └── screen.html          # 电视墙大屏（会议室 now/next + 总览 + 占用 + 公告；全屏/自动轮播）
 ├── test/
 │   └── test.js              # 端到端冒烟测试（覆盖五模块+扩展功能，需先启动服务）
 ├── docs/
-│   └── spec.md              # 产品/数据模型/协议/性能设计规格
-├── Dockerfile               # 后端容器镜像
-├── docker-compose.yml       # 一键本地启动
+│   └── spec.md              # 产品/数据模型/协议/性能/架构设计规格
+├── Dockerfile
+├── docker-compose.yml
 ├── package.json
 └── .gitignore
 ```
