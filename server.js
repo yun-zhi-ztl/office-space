@@ -28,6 +28,11 @@ const REPAIR_STATUS = ['reported', 'in_progress', 'resolved', 'cancelled'];
 const REPAIR_CATEGORIES = ['厕所', '灯光', '空调', '其它'];
 const TOOL_CATEGORIES = ['测试电脑', '测试机器', '测试手机', '其它'];
 
+// 可扩展性参数：实时广播只推最近 LIST_PAGE 条（分页加载），写合并去抖窗口，WS 心跳周期
+const LIST_PAGE = 30;
+const PERSIST_DEBOUNCE_MS = 500;
+const WS_PING_MS = 30000;
+
 // ================= 内存状态 =================
 // space -> { id, name, admins:Set<account>, rooms:Room[], reservations:Map, tools:Tool[], borrows:Map, materialRequests:Map, repairs:Map, invites:Set, clients:Set }
 const spaces = new Map();
@@ -157,6 +162,11 @@ async function initDb() {
   END $$`);
   await pool.query(`ALTER TABLE stall_ratings ADD COLUMN IF NOT EXISTS account text DEFAULT ''`);
 
+  // 索引：支撑分页与载入查询（幂等）
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_entities_kind ON entities(kind)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_stall_ratings_space_stall ON stall_ratings(space, stall_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_stall_ratings_space_time ON stall_ratings(space, created_at)`);
+
   // 载入空间
   const spRows = await pool.query('SELECT id,name,admins,squat_count,urinal_count FROM spaces');
   for (const r of spRows.rows) {
@@ -223,20 +233,51 @@ function saveAccount(acct) {
     ON CONFLICT(account) DO UPDATE SET username=EXCLUDED.username, avatar=EXCLUDED.avatar`,
     [acct.account, acct.passwordHash, acct.username, acct.avatar]).catch(() => {});
 }
+// ---- 写合并去抖：profile / entity 按主键合并，批量 upsert，降低并发写放大 ----
+const queuedProfiles = new Map(); // `${space}::${account}` -> row [space,account,nick,avatar,statsJson,achievements]
+const queuedEntities = new Map(); // `${space}|${kind}|${id}` -> row [space,kind,id,dataJson]
+let flushTimer = null;
+
 function saveProfile(user) {
   const ns = user.currentSpace;
   if (!ns || !spaces.has(ns)) return;
   const key = ns + '::' + user.account;
   profiles.set(key, { account: user.account, nick: user.nickname, avatar: user.avatar, stats: { ...user.stats }, achievements: [...user.achievements] });
   if (!usePg) return;
-  pool.query(`INSERT INTO profiles(space,account,nick,avatar,stats,achievements) VALUES($1,$2,$3,$4,$5,$6)
-    ON CONFLICT(space,account) DO UPDATE SET nick=EXCLUDED.nick, avatar=EXCLUDED.avatar, stats=EXCLUDED.stats, achievements=EXCLUDED.achievements, updated_at=now()`,
-    [ns, user.account, user.nickname, user.avatar, JSON.stringify(user.stats), user.achievements]).catch(() => {});
+  queuedProfiles.set(key, [ns, user.account, user.nickname, user.avatar, JSON.stringify(user.stats), user.achievements]);
+  scheduleFlush();
 }
 function saveEntity(spaceId, kind, id, data) {
   if (!usePg) return;
-  pool.query(`INSERT INTO entities(space,kind,id,data) VALUES($1,$2,$3,$4)
-    ON CONFLICT(space,kind,id) DO UPDATE SET data=EXCLUDED.data`, [spaceId, kind, id, JSON.stringify(data)]).catch(() => {});
+  queuedEntities.set(`${spaceId}|${kind}|${id}`, [spaceId, kind, id, JSON.stringify(data)]);
+  scheduleFlush();
+}
+function scheduleFlush() {
+  if (flushTimer) return;
+  flushTimer = setTimeout(flushWrites, PERSIST_DEBOUNCE_MS);
+  if (flushTimer.unref) flushTimer.unref();
+}
+async function flushWrites() {
+  flushTimer = null;
+  if (!usePg) { queuedProfiles.clear(); queuedEntities.clear(); return; }
+  const pRows = [...queuedProfiles.values()];
+  const eRows = [...queuedEntities.values()];
+  queuedProfiles.clear();
+  queuedEntities.clear();
+  if (pRows.length) {
+    try {
+      const valueSql = pRows.map((_, i) => `($${i * 6 + 1},$${i * 6 + 2},$${i * 6 + 3},$${i * 6 + 4},$${i * 6 + 5}::jsonb,$${i * 6 + 6})`).join(',');
+      await pool.query(`INSERT INTO profiles(space,account,nick,avatar,stats,achievements) VALUES ${valueSql}
+        ON CONFLICT(space,account) DO UPDATE SET nick=EXCLUDED.nick, avatar=EXCLUDED.avatar, stats=EXCLUDED.stats, achievements=EXCLUDED.achievements, updated_at=now()`, pRows.flat());
+    } catch (e) { console.error('⚠️ flush profiles 失败:', e.message); }
+  }
+  if (eRows.length) {
+    try {
+      const valueSql = eRows.map((_, i) => `($${i * 4 + 1},$${i * 4 + 2},$${i * 4 + 3},$${i * 4 + 4}::jsonb)`).join(',');
+      await pool.query(`INSERT INTO entities(space,kind,id,data) VALUES ${valueSql}
+        ON CONFLICT(space,kind,id) DO UPDATE SET data=EXCLUDED.data`, eRows.flat());
+    } catch (e) { console.error('⚠️ flush entities 失败:', e.message); }
+  }
 }
 function deleteEntity(spaceId, kind, id) {
   if (!usePg) return;
@@ -395,12 +436,16 @@ function leaderboardPublic(sp) {
 
 // ============ 广播 ============
 function broadcast(spaceId, type, payload) { broadcastTo(spaceId, Object.assign({ type }, payload)); }
+// 分页：只推最近 LIST_PAGE 条 + 总数，前端按需 fetchPage
 function broadcastAll(sp) {
   const info = spaceUserInfo(sp.id);
-  broadcast(sp.id, 'rooms', { rooms: sp.rooms.map(roomPublic), reservations: [...sp.roomReservations.values()].map((r) => reservationPublic(r, info)) });
+  const reservations = roomReservationsPublic(sp);
+  const materials = materialsPublic(sp, info);
+  const repairs = repairsPublic(sp, info);
+  broadcast(sp.id, 'rooms', { rooms: sp.rooms.map(roomPublic), reservations: reservations.slice(0, LIST_PAGE), reservationTotal: reservations.length });
   broadcast(sp.id, 'tools', { tools: toolsPublic(sp, info) });
-  broadcast(sp.id, 'materials', { requests: materialsPublic(sp, info) });
-  broadcast(sp.id, 'repairs', { repairs: repairsPublic(sp, info) });
+  broadcast(sp.id, 'materials', { requests: materials.slice(0, LIST_PAGE), total: materials.length });
+  broadcast(sp.id, 'repairs', { repairs: repairs.slice(0, LIST_PAGE), total: repairs.length });
   broadcast(sp.id, 'stalls', { squat_count: sp.squatCount, urinal_count: sp.urinalCount, stalls: stallsPublic(sp, info) });
   broadcastUsers(sp);
   broadcastLeaderboard(sp);
@@ -424,9 +469,8 @@ function saveStatsToSpace(user, spaceId) {
   const key = ns + '::' + user.account;
   profiles.set(key, { account: user.account, nick: user.nickname, avatar: user.avatar, stats: { ...user.stats }, achievements: [...user.achievements] });
   if (!usePg) return;
-  pool.query(`INSERT INTO profiles(space,account,nick,avatar,stats,achievements) VALUES($1,$2,$3,$4,$5,$6)
-    ON CONFLICT(space,account) DO UPDATE SET nick=EXCLUDED.nick, avatar=EXCLUDED.avatar, stats=EXCLUDED.stats, achievements=EXCLUDED.achievements, updated_at=now()`,
-    [ns, user.account, user.nickname, user.avatar, JSON.stringify(user.stats), user.achievements]).catch(() => {});
+  queuedProfiles.set(key, [ns, user.account, user.nickname, user.avatar, JSON.stringify(user.stats), user.achievements]);
+  scheduleFlush();
 }
 function applyProfileToUser(user, spaceId) {
   user.stats = newStats();
@@ -502,7 +546,8 @@ function roomReservationsPublic(space) {
   return [...space.roomReservations.values()].map((r) => reservationPublic(r, info)).sort((a, b) => a.startAt - b.startAt);
 }
 function roomsBroadcast(space) {
-  broadcast(space.id, 'rooms', { rooms: space.rooms.map(roomPublic), reservations: roomReservationsPublic(space) });
+  const reservations = roomReservationsPublic(space);
+  broadcast(space.id, 'rooms', { rooms: space.rooms.map(roomPublic), reservations: reservations.slice(0, LIST_PAGE), reservationTotal: reservations.length });
 }
 function handleRooms(ws, user, space, msg) {
   const info = spaceUserInfo(space.id);
@@ -634,7 +679,8 @@ function handleTools(ws, user, space, msg) {
 // ============ 物资申领模块 ============
 function materialsBroadcast(space) {
   const info = spaceUserInfo(space.id);
-  broadcast(space.id, 'materials', { requests: materialsPublic(space, info) });
+  const all = materialsPublic(space, info);
+  broadcast(space.id, 'materials', { requests: all.slice(0, LIST_PAGE), total: all.length });
 }
 function handleMaterials(ws, user, space, msg) {
   if (msg.type === 'materialRequest') {
@@ -672,7 +718,8 @@ function handleMaterials(ws, user, space, msg) {
 // ============ 报修模块 ============
 function repairsBroadcast(space) {
   const info = spaceUserInfo(space.id);
-  broadcast(space.id, 'repairs', { repairs: repairsPublic(space, info) });
+  const all = repairsPublic(space, info);
+  broadcast(space.id, 'repairs', { repairs: all.slice(0, LIST_PAGE), total: all.length });
 }
 function handleRepairs(ws, user, space, msg) {
   if (msg.type === 'repairCreate') {
@@ -893,10 +940,31 @@ function handleStalls(ws, user, space, msg) {
   }
 }
 
+// ============ 分页加载 ============
+function handleFetchPage(ws, user, space, msg) {
+  const offset = Math.max(0, parseInt(msg.offset, 10) || 0);
+  const limit = Math.min(50, Math.max(1, parseInt(msg.limit, 10) || LIST_PAGE));
+  const info = spaceUserInfo(space.id);
+  let items = [];
+  let total = 0;
+  if (msg.module === 'materials') {
+    const all = materialsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit);
+  } else if (msg.module === 'repairs') {
+    const all = repairsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit);
+  } else if (msg.module === 'rooms') {
+    const all = roomReservationsPublic(space); total = all.length; items = all.slice(offset, offset + limit);
+  } else {
+    return sendTo(ws, serError('不支持的分页模块'));
+  }
+  sendTo(ws, { type: 'page', module: msg.module, offset, items, total });
+}
+
 // ================= WebSocket 分发 =================
 wss.on('connection', (ws) => {
   ws._userId = null;
   ws._ns = null;
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
 
   ws.on('message', (raw) => {
     let msg;
@@ -914,6 +982,7 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'logout') { if (user.token) tokens.delete(user.token); return; }
     if (msg.type === 'getStats') { sendToUser(user.id, { type: 'stats', stats: user.stats }); return; }
+    if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }
 
     switch (msg.type) {
       case 'roomCreate': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'roomStart': case 'roomEnd':
@@ -1025,6 +1094,35 @@ setInterval(() => {
     if (roomsChanged) roomsBroadcast(sp);
   }
 }, 15000);
+
+// ============ 心跳：清理异常断开的僵尸连接 ============
+setInterval(() => {
+  const seen = new Set();
+  for (const sp of spaces.values()) {
+    for (const c of [...sp.clients]) {
+      if (seen.has(c)) continue;
+      seen.add(c);
+      if (!c.isAlive) { c.terminate(); sp.clients.delete(c); continue; }
+      c.isAlive = false;
+      try { c.ping(); } catch { c.terminate(); sp.clients.delete(c); }
+    }
+  }
+}, WS_PING_MS);
+
+// ============ 优雅停机：flush 待写、关闭连接与连接池 ============
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`收到 ${signal}，正在优雅停机…`);
+  flushWrites().finally(() => {
+    try { for (const ws of wss.clients) ws.close(); } catch {}
+    server.close(() => { pool.end().catch(() => {}); process.exit(0); });
+    setTimeout(() => { pool.end().catch(() => {}); process.exit(0); }, 2500).unref();
+  });
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 // ============ 启动 ============
 initDb()

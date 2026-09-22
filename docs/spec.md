@@ -96,3 +96,33 @@
 ## 6. 非目标（本版本暂不实现）
 - 复杂审批流、权限细粒度分级、通知系统、文件上传、消息私聊。
 - 跨空间统计串用（每个空间的战绩 / 排行榜相互独立）。
+
+## 7. 性能、分页与并发设计
+
+设计目标是「办公室 / 楼层规模的多人在线实时协作」，兼顾可扩展到更大组织。
+
+### 并发一致性
+- 实时权威状态保存在进程内存，Node 单线程事件循环内完成关键操作的「检查-执行」：
+  工具库存扣减、坑位 `activeStallCount`、会议室时段冲突检测均为原子判定，不产生竞态丢更新。
+- PostgreSQL 作为持久化透写（写最终态），非事务关键路径；异常时降级纯内存。
+
+### 分页与广播
+- 可增长的列表（会议室预约、物资申领、报修、借用记录）**实时广播只推最近 `LIST_PAGE` 条**并附带 `total`，
+  前端按需「加载更多」。
+- 新增 `fetchPage` 消息：`{type:'fetchPage', module, offset, limit}`，服务端返回
+  `{type:'page', module, offset, items, total}`，实现 offset/limit 分页，避免每次全量下发。
+- 排行榜保留 TopN（30）；坑位评分保留最近 60 条。
+
+### 写入与数据库
+- **写合并去抖**：`saveProfile` / `saveEntity` 改为按主键合并、去抖批量 upsert（默认 500ms），
+  降低并发下的写放大；停机（SIGTERM/SIGINT）前强制 flush。
+- **索引**：`entities(kind)`、`stall_ratings(space, stall_id)`、`stall_ratings(space, created_at)`，
+  支撑分页与载入查询。
+- 启动只做幂等建表 / 迁移，不销毁数据。
+
+### 连接健康度
+- WebSocket 心跳：每 30s ping，未回 pong 的连接被终止，防止异常断开的僵尸连接持续占用内存与广播带宽。
+- 客户端断线自动重连并凭 token 恢复会话。
+
+### 运维
+- 优雅停机：SIGTERM/SIGINT 触发 flush 待写、关闭连接与连接池。

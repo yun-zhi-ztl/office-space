@@ -230,6 +230,23 @@ async function runTests() {
   const joinedB = last(w1, 'joined');
   assert(joinedB && joinedB.space.id === spB.id, '释放后可切换到空间 B');
 
+  // ========== 测试10: 列表分页（广播 total + fetchPage） ==========
+  console.log('\n📋 测试10: 列表分页');
+  const spP = (await httpJson('POST', '/api/spaces', { name: '分页办公室', squat_count: 2, urinal_count: 1 })).json;
+  const accP = 'page_' + runKey;
+  await reg(accP, 'pw', '分页用户');
+  const wP = await createWSClient();
+  await loginTo(wP, spP.id, accP, 'pw');
+  for (let i = 0; i < 7; i++) await sendMsg(wP, { type: 'materialRequest', name: '物品' + i, qty: 1, unit: '个', reason: 'r' + i });
+  const matsB = last(wP, 'materials');
+  assert(matsB.total === 7, '广播携带 total=7');
+  assert(matsB.requests.length === 7, '数据量低于 PAGE 时全量返回');
+  await sendMsg(wP, { type: 'fetchPage', module: 'materials', offset: 2, limit: 3 });
+  const page = last(wP, 'page');
+  assert(page && page.total === 7 && page.items.length === 3, 'fetchPage 返回正确窗口(offset2,limit3)与总数7');
+  assert(page.items[0].name === '物品4', '分页按最新优先切片正确');
+  wP.close();
+
   // ========== 总结 ==========
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
