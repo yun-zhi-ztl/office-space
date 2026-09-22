@@ -169,6 +169,12 @@ function dispatch(m){
     case 'stalls': S.DB.stalls=m.stalls; break;
     case 'users': S.DB.users=m.users; break;
     case 'leaderboard': S.DB.leaderboard=m.rankings||[]; break;
+    case 'notices': S.DB.notices=m.notices||[]; break;
+    case 'digest': S.digest=m.digest; break;
+    case 'suggestRooms': S.suggestions=m.suggestions||[]; renderSugg(); break;
+    case 'statusSet': toast('✔ 状态已更新','success'); break;
+    case 'remindSent': toast('✔ 已提醒 '+(m.count||0)+' 人','success'); break;
+    case 'borrowReminder': toast('🔔 '+(m.from||'有人')+'提醒你归还设备',"urge"); break;
     case 'stats': if(S.statsFn) S.statsFn(m.stats); break;
     case 'urgeNotification': toast('📣 有人催促你了（'+m.count+' 人）','urge'); break;
     case 'reservation': toast('✔ 预约成功','success'); break;
@@ -176,7 +182,7 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','stalls','users','leaderboard'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','stalls','users','leaderboard','notices','digest'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
 function render(){ if(!S.me) return; renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='stalls') renderStalls(); }
@@ -193,13 +199,26 @@ function handlePage(m){
 }
 function loadMore(module){ wsSend({type:'fetchPage', module, offset: module==='materials'?S.DB.matOffset:module==='repairs'?S.DB.repOffset:S.DB.revOffset, limit:PAGE}); }
 /* ============ 侧栏 ============ */
+const STATUS_OPTS = [['在岗',''],['开会','🧘'],['午饭','🍜'],['外出','🚪'],['休息','😴'],['勿扰','⚡']];
+function myStatus(){ const u=(S.DB.users||[]).find(x=>x.account===S.me.account); return (u&&u.status)||{label:'在岗',emoji:''}; }
+function setStatus(val){ const p=val.split('|'); wsSend({type:'setStatus', label:p[1], emoji:p[0]}); }
 function renderSidebar(){
   const who = S.me ? `${S.me.avatar||'🧑'} ${esc(S.me.nickname||'')}<span class="role-tag ${S.admin?'admin':''}">${S.admin?'管理员':'成员'}</span>` : '未登录';
+  const st = myStatus();
+  const badgeCount = (S.me && S.me.achievements)?S.me.achievements.length:((S.DB.users||[]).find(u=>u.account===S.me.account)&&false?0:(S.DB.leaderboard||[]).find(u=>u.account===S.me.account)?.achievements?.length||0);
   $('#sidebar').innerHTML = `
     <div class="logo">OfficeSpace<small>办公空间管理</small></div>
     <div class="spacename"><b>${S.space?esc(S.space.name):'--'}</b>${S.admin?' · 管理员':''}</div>
-    <nav class="nav">${MODULES.map(m=>`<button data-m="${m[0]}" class="${S.module===m[0]?'active':''}" onclick="switchModule('${m[0]}')"><span class="ic">${m[2]}</span>${m[1]}</button>`).join('')}</nav>
-    <div class="sidefoot"><div class="who">${who}</div><button class="btn sm" onclick="doLogout()">退出登录</button></div>`;
+    <nav class="nav">${MODULES.map(m=>`<button data-m="${m[0]}" class="${S.module===m[0]?'active':''}" onclick="switchModule('${m[0]}')"><span class="ic">${m[2]}</span>${m[1]}</button>`).join('')}
+      <a class="nav" href="screen.html?space=${S.space?S.space.id:''}" target="_blank" style="text-decoration:none"><button style="width:100%"><span class="ic">📺</span>电视墙大屏</button></a></nav>
+    <div class="sidefoot">
+      <div class="who">${who}</div>
+      <div class="fs" style="margin-bottom:8px"><label style="margin:0">状态</label><select style="width:100%" onchange="setStatus(this.value)">
+        ${STATUS_OPTS.map(([l,e],i)=>`<option value="${e}|${l}" ${st.label===l?'selected':''}>${e||'🙂'} ${l}</option>`).join('')}
+      </select></div>
+      ${badgeCount?`<div class="hint" style="margin-bottom:8px">🏅 徽章 ${badgeCount} 枚</div>`:''}
+      <button class="btn sm" onclick="doLogout()">退出登录</button>
+    </div>`;
 }
 
 /* ============ 入口（空间 + 登录） ============ */
@@ -242,9 +261,14 @@ function doLogin(account,password){ S.lastSpace=pickedSpace; localStorage.setIte
 function doLogout(){ wsSend({type:'logout'}); S.me=null; localStorage.removeItem('os_token'); location.reload(); }
 
 /* ============ 概览 ============ */
+const ACH = { punctual:'守时达人', endurance:'持久战', night:'夜行者', king:'蹲坑之王', grabber:'抢位达人', rater:'评论家' };
 function renderDash(){
   const d=S.DB; const st=(d.stalls||[]); const occupied=st.filter(s=>s.status==='occupied').length;
   const totalBorrowed=d.tools.reduce((a,t)=>a+t.borrowedCount,0);
+  const overdue=(d.tools||[]).reduce((a,t)=>a.concat((t.activeBorrows||[]).filter(b=>b.overdue)),[]);
+  const mvp=(d.leaderboard||[]).find(r=>r.mvp);
+  const myLb=(d.leaderboard||[]).find(r=>r.account===S.me.account);
+  const dig=S.digest;
   const cards=[
     ['会议室', d.rooms.length, MODULES[0][2]],
     ['工具设备', d.tools.length, '🔧'],
@@ -254,17 +278,35 @@ function renderDash(){
     ['坑位占用', occupied+'/'+st.length, '🚻'],
   ];
   $('#main').innerHTML = `<div class="topbar"><div><h1>概览 <span class="view-tag">${esc(S.space?S.space.name:'')}</span></h1><div class="sub">空间内的公共资源使用概览</div></div></div>
+    ${mvp?`<div class="row" style="border-color:var(--yellow)"><span><span class="who">👑 本周之星</span> <b>${esc(mvp.username)}</b> · 本周活跃 ${mvp.weekly} 次</span><span class="badge ok">MVP</span></div>`:''}
     <div class="cards">${cards.map(c=>`<div class="card"><h3>${c[2]} ${c[0]}</h3><div style="font-size:30px;font-weight:800">${c[1]}</div></div>`).join('')}</div>
+    ${dig?`<h3 style="margin:22px 0 10px">📌 每日看点</h3><div class="list">
+      <div class="row"><span>今日会议 ${dig.todayMeetingCount} 场</span>${dig.todayMeetingCount?`<span class="when">${dig.todayMeetings.map(r=>`${esc(r.title)}(${esc(r.ownerName)})`).join('、')}</span>`:''}</div>
+      ${dig.overdueCount?`<div class="row"><span>⚠️ 有 <b>${dig.overdueCount}</b> 笔借用逾期未还</span></div>`:''}
+      ${dig.myBorrows?`<div class="row"><span>你还有 <b>${dig.myBorrows}</b> 件设备未归还</span></div>`:''}
+      ${dig.pendingMaterialsCount?`<div class="row"><span>待处理申领 ${dig.pendingMaterialsCount}</span></div>`:''}
+      ${dig.openRepairsCount?`<div class="row"><span>未办结报修 ${dig.openRepairsCount}</span></div>`:''}
+    </div>`:''}
+    <h3 style="margin:22px 0 10px">🟢 在线状态</h3>
+    <div class="fs">${(d.users||[]).map(u=>`<span class="badge info">${esc(u.avatar||'' )} ${esc(u.display||u.username)}${u.status&&u.status.emoji?' '+esc(u.status.emoji):''} ${u.status?esc(u.status.label):'在岗'}</span>`).join('')||'<span class="hint">仅自己在线</span>'}</div>
+    <h3 style="margin:22px 0 10px">📢 公告</h3>
+    <div class="fs" style="margin-bottom:10px"><input id="annInput" placeholder="向整个空间喊一句话..."><button class="btn pri" onclick="doAnnounce()">喊话</button></div>
+    <div class="list">${(d.notices||[]).map(n=>`<div class="row"><span><span class="who">${esc(n.from)}</span> <span class="when">${fmtTime(n.ts)}</span><div>${esc(n.text)}</div></span></div>`).join('')||'<div class="empty">还没有公告</div>'}
+    </div>
+    ${overdue.length?`<h3 style="margin:22px 0 10px">⏰ 逾期借用 · 占用王</h3><div class="list">${overdue.map(b=>`<div class="row"><span>${esc(b.borrowerName)} ×${b.qty} · 已借 ${b.days} 天</span><button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒归还</button></div>`).join('')}</div>`:''}
+    ${myLb&&myLb.achievements&&myLb.achievements.length?`<h3 style="margin:22px 0 10px">🏅 我的徽章（${myLb.achievements.length} 枚）</h3><div class="fs">${myLb.achievements.map(a=>`<span class="badge ok">${ACH[a]||a}</span>`).join('')}</div>`:''}
     <h3 style="margin:22px 0 10px">🏅 活跃榜（本空间）</h3>
-    <div class="list">${ (d.leaderboard||[]).length?d.leaderboard.slice(0,8).map((r,i)=>`<div class="row"><span>${i+1}. <span class="who">${esc(r.username)}</span> <span class="when">${esc(r.avatar||'')} 使用${r.stats.totalVisits||0}次 · 借用${r.stats.borrowCount||0} · 申领${r.stats.requestCount||0} · 报修${r.stats.repairCount||0}</span></span></div>`).join(''):'<div class="empty">暂无活动数据</div>'}
+    <div class="list">${ (d.leaderboard||[]).length?d.leaderboard.slice(0,8).map((r,i)=>`<div class="row"><span>${r.mvp?'👑':i+1+'.'} <span class="who">${esc(r.username)}</span> ${r.weekly?`<span class="badge info">本周${r.weekly}</span>`:''} <span class="when">${esc(r.avatar||'' )} 使用${r.stats.totalVisits||0}次 · 借用${r.stats.borrowCount||0} · 申领${r.stats.requestCount||0} · 报修${r.stats.repairCount||0}</span></span></div>`).join(''):'<div class="empty">暂无活动数据</div>'}
     </div>`;
 }
+function doAnnounce(){ const t=$('#annInput'); const v=(t?t.value:'').trim(); if(v){ wsSend({type:'announce',text:v}); if(t)t.value=''; } }
+function remindReturn(id){ wsSend({type:'remindReturn',borrowId:id}); }
 
 /* ============ 会议室 ============ */
 function renderRooms(){
   const d=S.DB, me=S.me.account, now=Date.now();
   $('#main').innerHTML = `<div class="topbar"><div><h1>会议室预约</h1><div class="sub">预约时段、冲突自动检测、实时同步</div></div>
-    ${S.admin?'<div class="btn grp"><button class="btn pri" onclick="openRoomCreate()">＋ 新增会议室</button></div>':''}</div>
+    <div class="btn grp"><button class="btn" onclick="openSuggest()">✨ 智能选房</button>${S.admin?'<button class="btn pri" onclick="openRoomCreate()">＋ 新增会议室</button>':''}</div></div>
     <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))">${d.rooms.map(r=>roomCard(r)).join('')||'<div class="empty">还没有会议室，管理员可新增</div>'}</div>
     <h3 style="margin:22px 0 10px">📅 全部预约</h3>
     <div class="list">${d.reservations.filter(r=>r.status!=='cancelled'&&r.status!=='expired').map(r=>{ const rm=d.rooms.find(x=>x.id===r.roomId); return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(r.title)} <span class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}</span></span><span class="fs">${r.status==='pending'?'<span class="badge warn">待开始</span>':r.status==='active'?'<span class="badge info">进行中</span>':'<span class="badge grey">'+r.status+'</span>'}${r.ownerAccount===me&&r.status==='pending'?`<button class="btn danger sm" onclick="cancelReservation('${r.id}')">取消</button>`:''}</span></div>`; }).join('')||'<div class="empty">暂无预约</div>'}
@@ -301,6 +343,21 @@ function openBook(roomId){
 }
 function submitBook(roomId){ const st=new Date($('#bkStart').value).getTime(), en=new Date($('#bkEnd').value).getTime(); if(!(st>0)||!(en>st)) return toast('时间无效','error'); wsSend({type:'roomBook',roomId,startAt:st,endAt:en,title:$('#bkTitle').value,note:$('#bkNote').value}); closeModal(); }
 function cancelReservation(id){ wsSend({type:'reservationCancel',reservationId:id}); }
+/* 智能选房：按时段+人数找空闲会议室 */
+function openSuggest(){
+  const now=Date.now(), start=now+10*60000, end=start+60*60000, d=(ms)=>{ const x=new Date(ms), off=x.getTimezoneOffset(); return new Date(ms-off).toISOString().slice(0,16); };
+  S.suggestions=[];
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>✨ 智能选房</h2><div class="form">
+    <div class="fld"><label>开始</label><input id="sgStart" type="datetime-local"></div>
+    <div class="fld"><label>结束</label><input id="sgEnd" type="datetime-local"></div>
+    <div class="fld"><label>容纳人数（可选）</label><input id="sgCap" type="number" min="1" placeholder="不限"></div>
+    <button class="btn pri" onclick="findRooms()">🔍 查找空闲会议室</button>
+    <div id="suggList"></div></div>`);
+  $('#sgStart').value=d(start); $('#sgEnd').value=d(end);
+}
+function findRooms(){ wsSend({type:'suggestRoom', startAt:new Date($('#sgStart').value).getTime(), endAt:new Date($('#sgEnd').value).getTime(), capacity:parseInt($('#sgCap').value,10)}); }
+function renderSugg(){ const el=$('#suggList'); if(!el) return; const L=S.suggestions||[]; el.innerHTML=L.length?L.map(r=>`<div class="row"><span><span class="who">${esc(r.name)}</span> · 容量 ${r.capacity}${r.location?' · '+esc(r.location):''}</span><button class="btn pri sm" onclick="bookSugg('${r.id}')">就订它</button></div>`).join(''):'<div class="hint">该时段没有空闲会议室，可放宽条件再查</div>'; }
+function bookSugg(roomId){ const st=new Date($('#sgStart').value).getTime(), en=new Date($('#sgEnd').value).getTime(); if(!(st>0)||!(en>st)) return toast('时间无效','error'); wsSend({type:'roomBook',roomId,startAt:st,endAt:en,title:'会议'}); closeModal(); }
 /* ============ 工具借用 ============ */
 function renderTools(){
   const d=S.DB, me=S.me.account;
@@ -313,7 +370,7 @@ function renderTools(){
         ${t.available>0?`<button class="btn pri sm" onclick="openBorrow('${t.id}','${esc(t.name)}',${t.available})">借用</button>`:'<span class="hint">已全部借出</span>'}
         ${S.admin?`<button class="btn danger sm" onclick="removeTool('${t.id}')">删</button><button class="btn sm" onclick="openAdjust('${t.id}','${esc(t.name)}',${t.total},${t.borrowedCount})">改库存</button>`:''}
       </div>
-      ${t.activeBorrows&&t.activeBorrows.length?`<div class="meta">在借：${t.activeBorrows.map(b=>`${esc(b.borrowerName)}×${b.qty}${b.borrowerAccount===me?` <button class="btn green sm" onclick="returnTool('${b.id}')">归还</button>`:''}`).join('，')}</div>`:''}
+      ${t.activeBorrows&&t.activeBorrows.length?`<div class="meta">在借：${t.activeBorrows.map(b=>`${esc(b.borrowerName)}×${b.qty}${b.days>=0?'·'+b.days+'天':''}${b.overdue?'<span class="badge bad">逾期</span>':''}${b.borrowerAccount===me?` <button class="btn green sm" onclick="returnTool('${b.id}')">归还</button>`:`${b.overdue?` <button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒</button>`:''}`}`).join('，')}</div>`:''}
     </div>`).join('')||'<div class="empty">还没有设备，管理员可新增</div>'}
     </div>`;
 }
@@ -397,7 +454,7 @@ function stallCard(s){
     ${s.currentBy?`<span class="owner">${esc(s.currentBy.display)}</span>`:''}
     ${s.status==='occupied'?`<div class="count">⏳剩余 ${fmtCountdown(remains)}</div>`:s.status!=='free'?`<div class="count">${fmtTime(res.startTime)}</div>`:''}
     ${s.urgeCount?`<div class="count">📣已催促${s.urgeCount}</div>`:''}
-    <div class="foot">${ratings?'<div class="hint">'+ratings+'</div>':''}${buttons}</div></div>`;
+    <div class="foot">${s.tier&&s.tier.name!=='新坑'?`<div class="hint">${s.tier.icon} ${s.tier.name} · ${s.tier.count}评</div>`:''}${ratings?'<div class="hint">'+ratings+'</div>':''}${buttons}</div></div>`;
 }
 function renderStalls(){
   const d=S.DB;

@@ -91,7 +91,7 @@ function lk(s) { return String(s == null ? '' : s).toLowerCase(); }
 function spaceUserInfo(spaceId) {
   const info = new Map();
   for (const u of getUsersIn(spaceId)) {
-    info.set(u.account, { account: u.account, username: u.nickname, avatar: u.avatar, online: true, role: isAdmin(spaces.get(spaceId), u.account) ? 'admin' : 'member' });
+    info.set(u.account, { account: u.account, username: u.nickname, avatar: u.avatar, online: true, role: isAdmin(spaces.get(spaceId), u.account) ? 'admin' : 'member', status: u.status || { label: '在岗' } });
   }
   // 统计撞名并生成 display
   const count = new Map();
@@ -311,14 +311,34 @@ setInterval(() => { for (const [k, v] of tokens) if (v.expiresAt < Date.now()) t
 function accountByLogin(account) { return accounts.get(account); }
 
 // ================= 空间 =================
+function weekKey(ts) {
+  const d = new Date(ts || Date.now());
+  const day = (d.getDay() + 6) % 7; // 周一为一周起点
+  d.setDate(d.getDate() - day);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function newWeekly() {
+  return { key: weekKey(), visits: 0, borrows: 0, requests: 0, repairs: 0, meetings: 0 };
+}
 function newStats() {
-  return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, requestCount: 0, repairCount: 0 };
+  return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, requestCount: 0, repairCount: 0, meetingCount: 0, weekly: newWeekly() };
+}
+// 记录本周活跃（若跨周自动清零）
+function recordWeekly(user, field) {
+  if (!user.stats.weekly || user.stats.weekly.key !== weekKey()) user.stats.weekly = newWeekly();
+  user.stats.weekly[field] = (user.stats.weekly[field] || 0) + 1;
+}
+function weeklyScore(stats) {
+  const w = stats.weekly;
+  if (!w || w.key !== weekKey()) return 0;
+  return (w.visits || 0) + (w.borrows || 0) + (w.requests || 0) + (w.repairs || 0) + (w.meetings || 0);
 }
 function createSpace(id, name, squat, urinal) {
   const sp = {
     id, name, squatCount: squat == null ? 4 : squat, urinalCount: urinal == null ? 3 : urinal,
     admins: new Set(),
     clients: new Set(),
+    notices: [],                               // 空间公告（最近 N 条）
     rooms: [],                               // Room[]
     roomReservations: new Map(),             // id -> RoomReservation（会议室预约）
     reservations: new Map(),                 // id -> StallReservation（坑位预约/抢位，供过期清理）
@@ -381,13 +401,14 @@ function reservationPublic(res, info) {
   };
 }
 function toolsPublic(sp, info) {
+  const now = Date.now();
   return sp.tools.map((t) => {
     const active = [...sp.borrows.values()].filter((b) => b.toolId === t.id && b.status === 'borrowed');
     return {
       id: t.id, name: t.name, category: t.category, total: t.total, available: t.available,
       location: t.location, description: t.description,
       borrowedCount: active.reduce((s, b) => s + b.qty, 0),
-      activeBorrows: active.map((b) => ({ id: b.id, qty: b.qty, borrowerAccount: b.borrowerAccount, borrowerName: info.get(b.borrowerAccount) ? info.get(b.borrowerAccount).display : b.borrowerName, borrowedAt: b.borrowedAt })),
+      activeBorrows: active.map((b) => { const days = Math.floor((now - b.borrowedAt) / 86400000); return { id: b.id, qty: b.qty, borrowerAccount: b.borrowerAccount, borrowerName: info.get(b.borrowerAccount) ? info.get(b.borrowerAccount).display : b.borrowerName, borrowedAt: b.borrowedAt, days, overdue: days >= 7 }; }),
     };
   });
 }
@@ -407,9 +428,20 @@ function repairsPublic(sp, info) {
     createdAt: r.createdAt, updatedAt: r.updatedAt,
   })).sort((a, b) => (b.createdAt - a.createdAt));
 }
+function stallTier(s) {
+  const n = s.ratings.length;
+  if (!n) return { name: '新坑', icon: '🌱', rank: 0, avg: 0, count: 0 };
+  let sum = 0;
+  for (const r of s.ratings) sum += (r.cleanliness + r.signal + r.paper) / 3;
+  const avg = sum / n;
+  const score = avg * 16 + Math.min(n, 10) * 2;
+  let name = score >= 85 ? '王者' : score >= 68 ? '黄金' : score >= 50 ? '白银' : '青铜';
+  const icon = name === '王者' ? '👑' : name === '黄金' ? '🏅' : name === '白银' ? '🥈' : '🥉';
+  return { name, icon, rank: Math.round(score), avg: +avg.toFixed(1), count: n };
+}
 function stallsPublic(sp, info) {
   return sp.stalls.map((s) => {
-    const o = { id: s.id, type: s.type, name: s.name, status: s.status, urgeCount: sp.urges.get(s.id) || 0, ratings: s.ratings, reservation: null, currentBy: null };
+    const o = { id: s.id, type: s.type, name: s.name, status: s.status, urgeCount: sp.urges.get(s.id) || 0, ratings: s.ratings, tier: stallTier(s), reservation: null, currentBy: null };
     if (s.reservation) {
       const w = info.get(s.reservation.account) || {};
       const who = { account: s.reservation.account, display: w.display || s.reservation.nickname, avatar: w.avatar || '🧑' };
@@ -427,10 +459,13 @@ function leaderboardPublic(sp) {
   for (const [key, p] of profiles) {
     if (!key.startsWith(sp.id + '::')) continue;
     if (!key.slice(sp.id.length + 2)) continue;
-    rows.push({ account: p.account, username: p.nick || p.account, avatar: p.avatar || '🧑', stats: p.stats || {}, achievements: p.achievements || [] });
+    rows.push({ account: p.account, username: p.nick || p.account, avatar: p.avatar || '🧑', stats: p.stats || {}, achievements: p.achievements || [], weekly: weeklyScore(p.stats || {}) });
   }
-  const score = (s) => (s.totalVisits || 0) + (s.borrowCount || 0) + (s.requestCount || 0) + (s.repairCount || 0);
+  const score = (s) => (s.totalVisits || 0) + (s.borrowCount || 0) + (s.requestCount || 0) + (s.repairCount || 0) + (s.meetingCount || 0);
+  const maxWeekly = rows.reduce((m, r) => Math.max(m, r.weekly || 0), 0);
+  rows.forEach((r, i) => { r.mvp = (r.weekly || 0) > 0 && (r.weekly || 0) === maxWeekly; });
   rows.sort((a, b) => score(b.stats) - score(a.stats));
+  rows.forEach((r, i) => { r.rank = i + 1; });
   return { rankings: rows.slice(0, 30) };
 }
 
@@ -447,6 +482,7 @@ function broadcastAll(sp) {
   broadcast(sp.id, 'materials', { requests: materials.slice(0, LIST_PAGE), total: materials.length });
   broadcast(sp.id, 'repairs', { repairs: repairs.slice(0, LIST_PAGE), total: repairs.length });
   broadcast(sp.id, 'stalls', { squat_count: sp.squatCount, urinal_count: sp.urinalCount, stalls: stallsPublic(sp, info) });
+  broadcast(sp.id, 'notices', { notices: sp.notices });
   broadcastUsers(sp);
   broadcastLeaderboard(sp);
 }
@@ -456,7 +492,7 @@ function broadcastUsers(sp) {
   for (const [, u] of users) {
     if (u.currentSpace !== sp.id) continue;
     const d = info.get(u.account) || {};
-    arr.push({ account: u.account, online: true, username: u.nickname, avatar: u.avatar, role: d.role || 'member', display: d.display || u.nickname });
+    arr.push({ account: u.account, online: true, username: u.nickname, avatar: u.avatar, role: d.role || 'member', display: d.display || u.nickname, status: u.status || { label: '在岗' } });
   }
   broadcast(sp.id, 'users', { users: arr });
 }
@@ -538,6 +574,7 @@ function handleLogin(ws, msg, space) {
   ws._userId = userId;
   sendTo(ws, { type: 'loginSuccess', userId, account, nickname: user.nickname, avatar: user.avatar, token, role: isAdmin(space, account) ? 'admin' : 'member', spaceId: space.id });
   broadcastAll(space);
+  sendToUser(userId, { type: 'digest', digest: buildDigest(space, user) });
 }
 
 // ============ 会议室模块 ============
@@ -584,6 +621,7 @@ function handleRooms(ws, user, space, msg) {
     const res = { id: genId('res', null), roomId: room.id, ownerAccount: user.account, ownerName: user.nickname, title: (msg.title || '').trim().slice(0, 40) || '会议', startAt, endAt, note: (msg.note || '').trim().slice(0, 120), status: 'pending' };
     space.roomReservations.set(res.id, res);
     saveEntity(space.id, 'room_reservation', res.id, res);
+    recordWeekly(user, 'meetings');
     roomsBroadcast(space);
   } else if (msg.type === 'reservationCancel') {
     const res = space.roomReservations.get(msg.reservationId);
@@ -655,6 +693,7 @@ function handleTools(ws, user, space, msg) {
     const borrow = { id: genId('bw', null), toolId: tool.id, borrowerAccount: user.account, borrowerName: user.nickname, qty, borrowedAt: Date.now(), returnedAt: null, status: 'borrowed' };
     space.borrows.set(borrow.id, borrow);
     user.stats.borrowCount = (user.stats.borrowCount || 0) + 1;
+    recordWeekly(user, 'borrows');
     saveProfile(user);
     saveEntity(space.id, 'tool', tool.id, tool);
     saveEntity(space.id, 'borrow', borrow.id, borrow);
@@ -691,6 +730,7 @@ function handleMaterials(ws, user, space, msg) {
     const req = { id: genId('mt', null), requesterAccount: user.account, requesterName: user.nickname, name, qty, unit: (msg.unit || '个').trim().slice(0, 10), reason: (msg.reason || '').trim().slice(0, 120), status: 'pending', createdAt: Date.now(), handledAt: null };
     space.materialRequests.set(req.id, req);
     user.stats.requestCount = (user.stats.requestCount || 0) + 1;
+    recordWeekly(user, 'requests');
     saveProfile(user);
     saveEntity(space.id, 'material', req.id, req);
     materialsBroadcast(space);
@@ -730,6 +770,7 @@ function handleRepairs(ws, user, space, msg) {
     const rep = { id: genId('rp', null), reporterAccount: user.account, reporterName: user.nickname, category, location, description, status: 'reported', createdAt: Date.now(), updatedAt: Date.now() };
     space.repairs.set(rep.id, rep);
     user.stats.repairCount = (user.stats.repairCount || 0) + 1;
+    recordWeekly(user, 'repairs');
     saveProfile(user);
     saveEntity(space.id, 'repair', rep.id, rep);
     repairsBroadcast(space);
@@ -754,6 +795,62 @@ function handleRepairs(ws, user, space, msg) {
     saveEntity(space.id, 'repair', rep.id, rep);
     repairsBroadcast(space);
   }
+}
+
+// ============ 扩展功能：公告 / 状态灯 / 智能选房 / 催还 / 每日看点 ============
+function noticesBroadcast(sp) { broadcast(sp.id, 'notices', { notices: sp.notices }); }
+function pushNotice(space, text, fromAccount, fromName) {
+  space.notices.unshift({ id: genId('n', null), text, from: fromName || fromAccount || '系统', ts: Date.now() });
+  if (space.notices.length > 50) space.notices.length = 50;
+  noticesBroadcast(space);
+}
+function handleSetStatus(ws, user, space, msg) {
+  const label = (msg.label || '').trim().slice(0, 8) || '在岗';
+  const emoji = (msg.emoji || '').slice(0, 4) || '';
+  user.status = { label, emoji };
+  broadcastUsers(space);
+  sendTo(ws, { type: 'statusSet', status: user.status });
+}
+function handleAnnounce(ws, user, space, msg) {
+  const text = (msg.text || '').trim().slice(0, 120);
+  if (!text) return sendTo(ws, serError('公告不能为空'));
+  pushNotice(space, text, user.account, user.nickname);
+}
+function suggestRooms(space, startAt, endAt, capacity) {
+  const st = Math.floor(+startAt || 0), en = Math.floor(+endAt || 0);
+  if (!(st > 0) || !(en > st)) return [];
+  let list = space.rooms.filter((r) => ![...space.roomReservations.values()].some((x) => x.roomId === r.id && (x.status === 'pending' || x.status === 'active') && st < x.endAt && en > x.startAt));
+  if (Number.isInteger(capacity) && capacity > 0) list = list.filter((r) => r.capacity >= capacity);
+  return list.sort((a, b) => a.capacity - b.capacity);
+}
+function handleSuggestRoom(ws, user, space, msg) {
+  const capacity = parseInt(msg.capacity, 10);
+  const list = suggestRooms(space, msg.startAt, msg.endAt, capacity);
+  sendTo(ws, { type: 'suggestRooms', suggestions: list.map(roomPublic) });
+}
+function handleRemindReturn(ws, user, space, msg) {
+  const b = space.borrows.get(msg.borrowId);
+  if (!b || b.status !== 'borrowed') return sendTo(ws, serError('借用记录不存在或已归还'));
+  if (b.borrowerAccount === user.account) return sendTo(ws, serError('自己的借用无需提醒'));
+  let n = 0;
+  for (const [, u] of users) if (u.currentSpace === space.id && u.account === b.borrowerAccount && u.ws && u.ws.readyState === 1) { u.ws.send(JSON.stringify({ type: 'borrowReminder', borrowId: b.id, from: user.nickname })); n++; }
+  if (n === 0) return sendTo(ws, serError('借用人当前离线，无法提醒'));
+  pushNotice(space, `提醒 ${b.borrowerName} 归还设备`, user.account, user.nickname);
+  sendTo(ws, { type: 'remindSent', count: n });
+}
+function buildDigest(space, user) {
+  const monday0 = new Date(); monday0.setHours(0, 0, 0, 0);
+  const today0 = monday0.getTime(), todayEnd = today0 + 86400000;
+  const todayMeetings = roomReservationsPublic(space).filter((r) => r.startAt >= today0 && r.startAt < todayEnd && (r.status === 'pending' || r.status === 'active'));
+  const overdue = [...space.borrows.values()].filter((b) => b.status === 'borrowed' && (Date.now() - b.borrowedAt) >= 7 * 86400000);
+  const myBorrows = [...space.borrows.values()].filter((b) => b.borrowerAccount === user.account && b.status === 'borrowed');
+  const pendingMaterials = [...space.materialRequests.values()].filter((r) => r.status === 'pending');
+  const openRepairs = [...space.repairs.values()].filter((r) => r.status === 'reported' || r.status === 'in_progress');
+  const mvp = leaderboardPublic(space).rankings.find((r) => r.mvp) || null;
+  return {
+    todayMeetingCount: todayMeetings.length, todayMeetings: todayMeetings.slice(0, 5),
+    overdueCount: overdue.length, myBorrows: myBorrows.length, pendingMaterialsCount: pendingMaterials.length, openRepairsCount: openRepairs.length, mvp,
+  };
 }
 
 // ============ 坑位看板模块（原坑位雷达） ============
@@ -886,6 +983,7 @@ function handleStalls(ws, user, space, msg) {
       user.stats.maxDuration = Math.max(user.stats.maxDuration, duration);
       if (user.stats.favoriteStall === null) user.stats.favoriteStall = stall.id;
       user.stats.totalVisits++;
+      recordWeekly(user, 'visits');
       const hour = new Date().getHours();
       if (hour < 6 || hour > 22) user.stats.nightVisits++;
       if (user.wasOnTime) user.stats.consecutiveOnTime++; else user.stats.consecutiveOnTime = 0;
@@ -995,6 +1093,14 @@ wss.on('connection', (ws) => {
         handleRepairs(ws, user, space, msg); break;
       case 'reserve': case 'cancel': case 'grab': case 'startUse': case 'finish': case 'release': case 'urge': case 'rate': case 'toggleEmergency': case 'stallConfig':
         handleStalls(ws, user, space, msg); break;
+      case 'setStatus':
+        handleSetStatus(ws, user, space, msg); break;
+      case 'announce':
+        handleAnnounce(ws, user, space, msg); break;
+      case 'suggestRoom':
+        handleSuggestRoom(ws, user, space, msg); break;
+      case 'remindReturn':
+        handleRemindReturn(ws, user, space, msg); break;
       default:
         sendTo(ws, serError('未知操作'));
     }
@@ -1069,6 +1175,7 @@ setInterval(() => {
         user.stats.totalDuration += duration;
         user.stats.maxDuration = Math.max(user.stats.maxDuration, duration);
         user.stats.totalVisits++;
+        recordWeekly(user, 'visits');
         user.stats.onTimeRate = user.stats.totalVisits > 0 ? 1 : 0;
         checkAchievements(user);
         saveProfile(user);

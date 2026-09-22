@@ -247,6 +247,45 @@ async function runTests() {
   assert(page.items[0].name === '物品4', '分页按最新优先切片正确');
   wP.close();
 
+  // ========== 测试11: 扩展功能（状态灯/公告/智能选房/催还/每日看点/每周之星/坑位段位） ==========
+  console.log('\n📋 测试11: 扩展功能');
+  {
+    const spF = (await httpJson('POST', '/api/spaces', { name: '扩展办公室', squat_count: 2, urinal_count: 1 })).json;
+    const aE = 'ext_a' + runKey, bE = 'ext_b' + runKey;
+    await reg(aE, 'pw', '甲'); await reg(bE, 'pw', '乙');
+    const wA = await createWSClient(); await loginTo(wA, spF.id, aE, 'pw');
+    assert(last(wA, 'digest') && typeof last(wA, 'digest').digest === 'object', '登录收到每日看点 digest');
+    await sendMsg(wA, { type: 'setStatus', label: '开会', emoji: '🧘' });
+    const uA = last(wA, 'users').users.find(u => u.account === aE);
+    assert(uA && uA.status && uA.status.label === '开会', '状态灯设置并广播');
+    const wB = await createWSClient(); await loginTo(wB, spF.id, bE, 'pw');
+    await sendMsg(wA, { type: 'announce', text: '周五提前下班' });
+    const nt = last(wB, 'notices');
+    assert(nt && nt.notices.length && nt.notices[0].text === '周五提前下班', '公告广播到其他成员');
+    await sendMsg(wA, { type: 'roomCreate', name: '投影室', capacity: 8, location: '3F' });
+    await sendMsg(wA, { type: 'roomCreate', name: '洽谈间', capacity: 10, location: '3F' });
+    const roomsF = last(wA, 'rooms').rooms;
+    const tF = Date.now();
+    await sendMsg(wA, { type: 'roomBook', roomId: roomsF[0].id, startAt: tF + 10 * 60000, endAt: tF + 40 * 60000, title: '评审' });
+    await sendMsg(wA, { type: 'suggestRoom', startAt: tF + 20 * 60000, endAt: tF + 50 * 60000, capacity: 6 });
+    const sugg = last(wA, 'suggestRooms');
+    assert(sugg && sugg.suggestions.length === 1 && sugg.suggestions[0].id === roomsF[1].id, '智能选房排除冲突且满足人数');
+    await sendMsg(wA, { type: 'toolCreate', name: '测试机', category: '测试电脑', total: 2 });
+    const toolF = last(wA, 'tools').tools[0];
+    await sendMsg(wB, { type: 'toolBorrow', toolId: toolF.id, qty: 1 });
+    const borrowF = last(wB, 'tools').tools.find(t => t.id === toolF.id).activeBorrows[0];
+    await sendMsg(wA, { type: 'remindReturn', borrowId: borrowF.id });
+    const remF = mk(wB, 'borrowReminder');
+    assert(remF.length >= 1, '催还通知送达借用人');
+    const lbF = last(wA, 'leaderboard');
+    assert(lbF.rankings.some(r => r.weekly > 0), '排行榜包含本周活跃');
+    const mvpF = lbF.rankings.find(r => r.mvp);
+    assert(mvpF && mvpF.account === bE, 'MVP 为唯一本周活跃者(乙)');
+    const stF = last(wA, 'stalls');
+    assert(stF.stalls.every(s => s.tier && s.tier.name), '坑位含段位信息');
+    wA.close(); wB.close();
+  }
+
   // ========== 总结 ==========
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
