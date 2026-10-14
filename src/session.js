@@ -6,6 +6,25 @@ module.exports = function sessionApi(api) {
     applyProfileToUser, broadcastAll, accountByLogin, verifyPassword, issueToken, newStats, buildDigest,
   } = api;
 
+  const loginFailures = new Map();
+  const LOGIN_WINDOW_MS = 60 * 1000;
+  const LOGIN_MAX_FAILURES = 5;
+  function failureRecords(account) {
+    const now = Date.now();
+    const key = String(account || '').toLowerCase();
+    const rows = (loginFailures.get(key) || []).filter((t) => now - t < LOGIN_WINDOW_MS);
+    if (rows.length === 0) loginFailures.delete(key); else loginFailures.set(key, rows);
+    return rows;
+  }
+  function loginAllowed(account) { return failureRecords(account).length < LOGIN_MAX_FAILURES; }
+  function recordLoginFailure(account) {
+    const key = String(account || '').toLowerCase();
+    const rows = failureRecords(key);
+    rows.push(Date.now());
+    loginFailures.set(key, rows);
+  }
+  function clearLoginFailures(account) { loginFailures.delete(String(account || '').toLowerCase()); }
+
   function joinSpace(ws, spaceId) {
     const sp = spaces.get(String(spaceId));
     if (!sp) return sendTo(ws, serError('空间不存在'));
@@ -30,15 +49,17 @@ module.exports = function sessionApi(api) {
     let account = null;
     if (msg.token) {
       const tok = tokens.get(msg.token);
-      if (tok && tok.expiresAt > Date.now()) account = tok.account;
+      if (tok && tok.expiresAt > Date.now()) { account = tok.account; clearLoginFailures(account); }
       if (!account) return sendTo(ws, serError('登录已过期，请重新登录'));
     } else {
       account = (msg.account || '').trim();
       const password = (msg.password || '');
       if (!account || !password) return sendTo(ws, serError('请输入账号和密码'));
+      if (!loginAllowed(account)) return sendTo(ws, serError('登录失败次数过多，请稍后再试'));
       const acct = accountByLogin(account);
-      if (!acct) return sendTo(ws, serError('账号不存在，请先注册'));
-      if (!verifyPassword(password, acct.passwordHash)) return sendTo(ws, serError('账号或密码错误'));
+      if (!acct) { recordLoginFailure(account); return sendTo(ws, serError('账号不存在，请先注册')); }
+      if (!verifyPassword(password, acct.passwordHash)) { recordLoginFailure(account); return sendTo(ws, serError('账号或密码错误')); }
+      clearLoginFailures(account);
       account = acct.account;
     }
     const acct = accounts.get(account);

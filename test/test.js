@@ -76,6 +76,19 @@ async function runTests() {
   const ulist = last(w1, 'users');
   assert(ulist && ulist.users.some(u => u.account === ADMIN && u.role === 'admin'), '用户列表含 admin 角色');
 
+  // 登录失败限流：连续错误口令达到上限后短暂锁定
+  const LOCK_ACCOUNT = 'lock_' + runKey;
+  await reg(LOCK_ACCOUNT, 'pw', '锁定用户');
+  const wL = await createWSClient();
+  await sendMsg(wL, { type: 'join', spaceId: sp.id });
+  for (let i = 0; i < 5; i++) await sendMsg(wL, { type: 'login', account: LOCK_ACCOUNT, password: 'wrong' });
+  const errWrong = mk(wL, 'error');
+  assert(errWrong.length >= 5 && errWrong[errWrong.length - 1].message.includes('账号或密码错误'), '连续错误口令返回账号或密码错误');
+  await sendMsg(wL, { type: 'login', account: LOCK_ACCOUNT, password: 'wrong' });
+  const errLock = mk(wL, 'error');
+  assert(errLock.length > 0 && errLock[errLock.length - 1].message.includes('登录失败次数过多'), '达到失败上限后暂时锁定登录');
+  wL.close();
+
   // ========== 测试3: 会议室 ==========
   console.log('\n📋 测试3: 会议室（创建/预约/冲突/取消）');
   await sendMsg(w1, { type: 'roomCreate', name: '大会议室', capacity: 10, location: '3F-01', description: '投影+白板' });
