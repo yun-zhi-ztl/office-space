@@ -55,7 +55,8 @@ OfficeSpace/
 │   ├── index.html           # 前端单页应用（原生三件套）
 │   └── screen.html          # 电视墙大屏（会议室 now/next + 总览 + 占用 + 公告；全屏/自动轮播）
 ├── test/
-│   ├── test.js              # 端到端冒烟测试（覆盖五模块+扩展功能，需先启动服务）
+│   ├── test.js              # 端到端测试（覆盖五模块+扩展功能，需先启动服务）
+│   ├── restore.js           # 前端会话恢复回归测试（vm stub，无需服务）
 │   └── smoke.js             # 快速冒烟测试（健康检查/页面/WS/登录）
 ├── scripts/
 │   └── lint.js              # 语法检查（node --check 全量）
@@ -114,12 +115,13 @@ PORT / PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE
 npm start
 
 # 另开一个终端跑测试
-npm run lint      # 语法检查（无需启动服务）
-npm run smoke     # 快速冒烟（需服务已启动）
-npm test          # 完整 e2e（需服务已启动）
+npm run lint          # 语法检查（无需启动服务）
+npm run test:restore  # 前端会话恢复回归测试（无需启动服务）
+npm run smoke         # 快速冒烟（需服务已启动）
+npm test              # 先跑会话恢复回归测试，再跑完整 e2e（e2e 需服务已启动）
 ```
 
-包含会议室（冲突检测 / 取消 / RBAC / 智能选房）、工具借用（借用 / 不足 / 归还 / 逾期催还）、物资申领（提交 / 处理 / 自处理限制）、报修（状态流转 / 越权取消）、坑位看板（预约时间窗、评分越界、重复评分、同账号多开限制、切换空间守卫、段位），以及分页、状态灯、公告、每周之星 MVP、每日看点等 **48 项断言**。push 到 `main` 或提 PR 时，CI（`.github/workflows/ci.yml`）会自动执行 lint + compose 校验 + docker 构建 + smoke + e2e。
+包含会议室（冲突检测 / 取消 / RBAC / 智能选房）、工具借用（借用 / 不足 / 归还 / 逾期催还）、物资申领（提交 / 处理 / 自处理限制）、报修（状态流转 / 越权取消）、坑位看板（预约时间窗、评分越界、重复评分、同账号多开限制、切换空间守卫、段位），以及分页、状态灯、公告、每周之星 MVP、每日看点等 **49 项断言**。push 到 `main` 或提 PR 时，CI（`.github/workflows/ci.yml`）会自动执行 lint + compose 校验 + docker 构建 + smoke + e2e。
 
 ---
 

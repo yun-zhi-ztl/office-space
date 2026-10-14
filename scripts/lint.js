@@ -6,7 +6,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const root = path.resolve(__dirname, '..');
-const targets = ['server.js', 'test/test.js', 'test/smoke.js', 'scripts/lint.js'];
+const targets = ['server.js', 'test/test.js', 'test/smoke.js', 'test/restore.js', 'scripts/lint.js'];
 
 function walk(dir, acc) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
