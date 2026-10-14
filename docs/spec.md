@@ -171,9 +171,10 @@ src/modules/     rooms / tools / materials / repairs / stalls / extras（各领�
 - **健康检查**：`GET /api/health` 返回 `{ ok, pg, uptime, spaces, users, time }`，供探活、容器 `HEALTHCHECK` 与 CI 等待服务就绪。
 - **npm 脚本**：
   - `npm start`：启动服务
-  - `npm run lint`：对 `server.js` / `src/` / `test/` 全部 JS 执行 `node --check` 语法检查（`scripts/lint.js`）
+  - `npm run lint`：对 `server.js` / `public` / `src/` / `test/` 全部 JS 执行 `node --check` 语法检查（`scripts/lint.js`）
+  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁、口令哈希、管理员判定，18 项）
   - `npm run test:restore`：前端「自动恢复会话」回归测试（`test/restore.js`，vm stub 加载内联脚本，无需服务）
   - `npm run smoke`：快速冒烟（`test/smoke.js`）——健康检查、首页与大屏可达、WS 连接、登录、收到广播
-  - `npm test`：先跑 `test:restore`，再跑完整 e2e（`test/test.js`，49 项）
+  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，49 项）
 - **CI**：`.github/workflows/ci.yml` 在 push 到 `main` 或 pull_request 时自动：`npm ci` → `npm run lint` → `docker compose config` 校验 → `docker build` 构建校验 → 内存模式启动服务 → `npm run smoke` → `npm test`。用不可达的 PG 参数强制内存模式，无需外部数据库。
 - **环境变量**：见 `.env.example`（`PORT`、`PGHOST`、`PGPORT`、`PGUSER`、`PGPASSWORD`、`PGDATABASE`）；`.env` 已加入 `.gitignore`。
