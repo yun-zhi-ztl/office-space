@@ -1,7 +1,7 @@
 'use strict';
 // 会议室模块：roomCreate / roomRemove / roomBook / reservationCancel / roomStart / roomEnd
 module.exports = function roomsModule(api) {
-  const { spaceUserInfo, roomReservationsPublic, roomPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly } = api;
+  const { roomReservationsPublic, roomPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly } = api;
 
   function roomsBroadcast(space) {
     const reservations = roomReservationsPublic(space);
@@ -9,7 +9,6 @@ module.exports = function roomsModule(api) {
   }
 
   function handleRooms(ws, user, space, msg) {
-    const info = spaceUserInfo(space.id);
     if (msg.type === 'roomCreate') {
       if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可新增会议室'));
       const name = (msg.name || '').trim().slice(0, 30);
@@ -62,7 +61,6 @@ module.exports = function roomsModule(api) {
       saveEntity(space.id, 'room_reservation', res.id, res);
       roomsBroadcast(space);
     }
-    void info;
   }
 
   return { roomsBroadcast, handleRooms };
