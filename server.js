@@ -150,7 +150,7 @@ setInterval(() => {
         }
         sp.reservations.delete(rid);
         const user = users.get(r.userId);
-        if (user) { user.wasOnTime = false; user.stats.consecutiveOnTime = 0; }
+        if (user) { user.wasOnTime = false; user.stats.consecutiveOnTime = 0; api.saveProfile(user); }
       } else if (now >= r.startTime) {
         const stall = sp.stalls.find((s) => s.id === r.stallId);
         if (stall && stall.status === 'reserved') stall.status = 'waiting';
