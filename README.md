@@ -83,14 +83,14 @@ npm start          # 启动，默认 http://localhost:3000
 
 浏览器打开 http://localhost:3000，创建一个空间并注册账号即可（空间首个登录用户为管理员）。
 
-### 方式二：Docker
+### 方式二：Docker（推荐，含 PostgreSQL 持久化）
 
 ```bash
 docker compose up -d --build
 # 打开 http://localhost:3000
 ```
 
-容器内置 `HEALTHCHECK`（基于 `/api/health`），`docker inspect` 可查看健康状态。
+`docker-compose.yml` 会一并拉起应用 + PostgreSQL（`office/office_pass`/库 `office`），数据持久化到 `office-pgdata` 卷，重启容器不再丢数据。容器内置 `HEALTHCHECK`（基于 `/api/health`），`docker inspect` 可查看健康状态。
 
 ### 可选：连接 PostgreSQL
 

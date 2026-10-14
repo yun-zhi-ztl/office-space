@@ -1,4 +1,4 @@
-# 本地一键启动 OfficeSpace 办公空间管理后端
+# OfficeSpace 一键启动（应用 + PostgreSQL 持久化）
 # 用法：docker compose up -d --build   然后浏览器打开 http://localhost:3000
 services:
   office-space:
@@ -9,4 +9,32 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
+      # 指向下方 postgres 服务；连接失败会自动降级为内存模式
+      - PGHOST=postgres
+      - PGPORT=5432
+      - PGUSER=office
+      - PGPASSWORD=office_pass
+      - PGDATABASE=office
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: office-space-pg
+    environment:
+      - POSTGRES_USER=office
+      - POSTGRES_PASSWORD=office_pass
+      - POSTGRES_DB=office
+    volumes:
+      - office-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U office -d office"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  office-pgdata:
