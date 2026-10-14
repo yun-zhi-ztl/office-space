@@ -147,7 +147,7 @@ function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(m
 function connect(){
   const proto = location.protocol==='https:'?'wss://':'ws://';
   S.ws = new WebSocket(proto+location.host+'/ws');
-  S.ws.onopen = ()=>{ S.sockOpen=true; if(S.space) wsSend({type:'join',spaceId:S.space.id}); };
+  S.ws.onopen = ()=>{ S.sockOpen=true; const sid = S.space ? S.space.id : (S.pendingLogin ? S.lastSpace : null); if(sid) wsSend({type:'join',spaceId:sid}); };
   S.ws.onmessage = (ev)=>{ let m; try{m=JSON.parse(ev.data);}catch{return;} dispatch(m); };
   S.ws.onclose = ()=>{ S.sockOpen=false; if(S.me) setTimeout(connect, 1500); };
   S.ws.onerror = ()=>{};
