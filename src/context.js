@@ -138,7 +138,8 @@ function createContext() {
       const sp = spaces.get(r.space);
       if (!sp) continue;
       const data = r.data;
-      if (r.kind === 'room') { sp.rooms.push(data); sp.roomReservations.set(data.id, data); }
+      if (r.kind === 'room') sp.rooms.push(data);
+      else if (r.kind === 'room_reservation') sp.roomReservations.set(data.id, data);
       else if (r.kind === 'tool') sp.tools.push(data);
       else if (r.kind === 'borrow') sp.borrows.set(data.id, data);
       else if (r.kind === 'material') sp.materialRequests.set(data.id, data);

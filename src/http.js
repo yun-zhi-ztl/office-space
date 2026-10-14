@@ -1,8 +1,11 @@
 'use strict';
-// HTTP 路由：/api/spaces GET/POST、/api/register
+// HTTP 路由：/api/health、/api/spaces GET/POST、/api/register
 module.exports = function httpApi(api, app) {
   const { spaces, accounts, genSpaceId, createSpace, saveSpace, saveAccount, hashPassword } = api;
 
+  app.get('/api/health', (req, res) => {
+    res.json({ ok: true, pg: api.pgEnabled, uptime: process.uptime(), spaces: spaces.size, users: api.users.size, time: Date.now() });
+  });
   app.get('/api/spaces', (req, res) => {
     const list = [];
     for (const sp of spaces.values()) list.push({ id: sp.id, name: sp.name, admin_count: sp.admins.size });

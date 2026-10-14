@@ -42,7 +42,7 @@ OfficeSpace/
 ├── server.js                # 入口：Express + WS 分发 + 定时器 + 心跳 + 停机 + 启动
 ├── src/                     # 后端逻辑按领域拆分
 │   ├── context.js           # 共享上下文：状态/工具/持久化/认证/序列化/广播
-│   ├── http.js              # HTTP 路由（/api/spaces、/api/register）
+│   ├── http.js              # HTTP 路由（/api/health、/api/spaces、/api/register）
 │   ├── session.js           # ws 会话：进入/切换空间、登录
 │   └── modules/             # 业务模块
 │       ├── rooms.js         # 会议室
@@ -55,12 +55,18 @@ OfficeSpace/
 │   ├── index.html           # 前端单页应用（原生三件套）
 │   └── screen.html          # 电视墙大屏（会议室 now/next + 总览 + 占用 + 公告；全屏/自动轮播）
 ├── test/
-│   └── test.js              # 端到端冒烟测试（覆盖五模块+扩展功能，需先启动服务）
+│   ├── test.js              # 端到端冒烟测试（覆盖五模块+扩展功能，需先启动服务）
+│   └── smoke.js             # 快速冒烟测试（健康检查/页面/WS/登录）
+├── scripts/
+│   └── lint.js              # 语法检查（node --check 全量）
+├── .github/workflows/
+│   └── ci.yml               # push/PR 自动跑 lint + smoke + e2e
 ├── docs/
 │   └── spec.md              # 产品/数据模型/协议/性能/架构设计规格
 ├── Dockerfile
 ├── docker-compose.yml
 ├── package.json
+├── .env.example
 └── .gitignore
 ```
 
@@ -86,11 +92,13 @@ docker compose up -d --build
 
 ### 可选：连接 PostgreSQL
 
-默认尝试连接 `127.0.0.1:5432`（用户 `postgres`、库 `toilet`、密码 `toilet_dev`）。连接失败自动切到内存模式，不影响功能。可通过环境变量覆盖：
+默认尝试连接 `127.0.0.1:5432`（用户 `postgres`、库 `toilet`、密码 `toilet_dev`）。连接失败自动切到内存模式，不影响功能。可通过环境变量覆盖（示例见 `.env.example`）：
 
 ```
-PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE / PORT
+PORT / PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE
 ```
+
+健康检查：`GET /api/health` 返回 `{ ok, pg, uptime, spaces, users, time }`，可用于探活或 CI 等待服务就绪。
 
 > 说明：PostgreSQL 持久化「空间 / 账号 / 战绩 / 评分 / 会议室 / 工具 / 申领 / 报修」；
 > 运行状态（坑位占用、在线用户）实时保存在内存并由 WebSocket 广播。重启不再清空历史数据。
@@ -104,10 +112,12 @@ PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE / PORT
 npm start
 
 # 另开一个终端跑测试
-npm test
+npm run lint      # 语法检查（无需启动服务）
+npm run smoke     # 快速冒烟（需服务已启动）
+npm test          # 完整 e2e（需服务已启动）
 ```
 
-包含会议室（冲突检测 / 取消 / RBAC / 智能选房）、工具借用（借用 / 不足 / 归还 / 逾期催还）、物资申领（提交 / 处理 / 自处理限制）、报修（状态流转 / 越权取消）、坑位看板（预约时间窗、评分越界、重复评分、同账号多开限制、切换空间守卫、段位），以及分页、状态灯、公告、每周之星 MVP、每日看点等 **48 项断言**。
+包含会议室（冲突检测 / 取消 / RBAC / 智能选房）、工具借用（借用 / 不足 / 归还 / 逾期催还）、物资申领（提交 / 处理 / 自处理限制）、报修（状态流转 / 越权取消）、坑位看板（预约时间窗、评分越界、重复评分、同账号多开限制、切换空间守卫、段位），以及分页、状态灯、公告、每周之星 MVP、每日看点等 **48 项断言**。push 到 `main` 或提 PR 时，CI（`.github/workflows/ci.yml`）会自动执行 lint + smoke + e2e。
 
 ---
 

@@ -9,6 +9,7 @@ RUN npm ci --omit=dev --no-audit --no-fund
 
 # 拷贝应用代码与静态前端
 COPY server.js ./
+COPY src ./src
 COPY public ./public
 
 ENV PORT=3000

@@ -107,10 +107,11 @@
 - PostgreSQL 作为持久化透写（写最终态），非事务关键路径；异常时降级纯内存。
 
 ### 分页与广播
-- 可增长的列表（会议室预约、物资申领、报修、借用记录）**实时广播只推最近 `LIST_PAGE` 条**并附带 `total`，
-  前端按需「加载更多」。
+- 可增长的列表（会议室预约、物资申领、报修）**实时广播只推最近 `LIST_PAGE` 条**并附带 `total`，
+  前端按需「加载更多」；工具库存列表在广播中内联「当前在借」明细，规模可控。
 - 新增 `fetchPage` 消息：`{type:'fetchPage', module, offset, limit}`，服务端返回
-  `{type:'page', module, offset, items, total}`，实现 offset/limit 分页，避免每次全量下发。
+  `{type:'page', module, offset, items, total}`，当前支持 `rooms` / `materials` / `repairs` 三个分页模块，
+  实现 offset/limit 分页，避免每次全量下发。
 - 排行榜保留 TopN（30）；坑位评分保留最近 60 条。
 
 ### 写入与数据库
@@ -161,3 +162,14 @@ src/modules/     rooms / tools / materials / repairs / stalls / extras（各领�
 - 各领域模块是纯函数工厂 `module.exports = (api)=>({...})`，由 `server.js` 注入共享上下文 `api`，无全局状态、便于单测。
 - 定时器、心跳、优雅停机属于进程级关注点，保留在入口。
 - 该拆分不改变任何对外协议与行为，e2e（48 项）在内存与 PostgreSQL 双模式下均通过。
+
+## 10. 健康检查、自测与 CI（本版本新增）
+
+- **健康检查**：`GET /api/health` 返回 `{ ok, pg, uptime, spaces, users, time }`，供探活、容器 `HEALTHCHECK` 与 CI 等待服务就绪。
+- **npm 脚本**：
+  - `npm start`：启动服务
+  - `npm run lint`：对 `server.js` / `src/` 全部 JS 执行 `node --check` 语法检查（`scripts/lint.js`）
+  - `npm run smoke`：快速冒烟（`test/smoke.js`）——健康检查、首页与大屏可达、WS 连接、登录、收到广播
+  - `npm test`：完整 e2e（`test/test.js`，48 项）
+- **CI**：`.github/workflows/ci.yml` 在 push 到 `main` 或 pull_request 时自动：`npm ci` → `npm run lint` → 内存模式启动服务 → `npm run smoke` → `npm test`。用不可达的 PG 参数强制内存模式，无需外部数据库。
+- **环境变量**：见 `.env.example`（`PORT`、`PGHOST`、`PGPORT`、`PGUSER`、`PGPASSWORD`、`PGDATABASE`）；`.env` 已加入 `.gitignore`。

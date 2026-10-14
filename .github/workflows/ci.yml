@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 语法检查
+        run: npm run lint
+
+      - name: 启动服务（内存模式）并跑冒烟 + e2e
+        run: |
+          set -e
+          # 用不可达的 PG 参数强制内存模式，避免 CI 依赖数据库
+          PGHOST=127.0.0.1 PGPORT=59999 PGUSER=x PGPASSWORD=x PGDATABASE=x node server.js > /tmp/server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/api/health > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -sf http://localhost:3000/api/health > /dev/null || { echo '服务启动失败'; cat /tmp/server.log; exit 1; }
+
+          npm run smoke
+          npm test
