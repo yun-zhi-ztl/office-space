@@ -116,7 +116,8 @@
 
 ### 写入与数据库
 - **写合并去抖**：`saveProfile` / `saveEntity` 改为按主键合并、去抖批量 upsert（默认 500ms），
-  降低并发下的写放大；停机（SIGTERM/SIGINT）前强制 flush。
+  降低并发下的写放大；单批按 500/1000 行分块写入，避免单条 SQL 参数数超过 PostgreSQL 的 65535 上限；
+  停机（SIGTERM/SIGINT）前强制 flush。
 - **索引**：`entities(kind)`、`stall_ratings(space, stall_id)`、`stall_ratings(space, created_at)`，
   支撑分页与载入查询。
 - 启动只做幂等建表 / 迁移，不销毁数据。

@@ -78,7 +78,7 @@ function createContext() {
     port: +(process.env.PGPORT || 5432),
     user: process.env.PGUSER || 'postgres',
     password: process.env.PGPASSWORD || 'toilet_dev',
-    database: process.env.PGDATABASE || process.env.PGDATABASE || 'toilet',
+    database: process.env.PGDATABASE || 'toilet',
   });
   pool.on('error', (err) => console.error('⚠️  Postgres 池错误:', err.message));
 
@@ -182,30 +182,37 @@ function createContext() {
     const eRows = [...queuedEntities.values()];
     queuedProfiles.clear();
     queuedEntities.clear();
+    // 分块写入：单条 SQL 参数数上限为 65535，分块避免大批量写触发参数超限
     if (pRows.length) {
       try {
-        const valueSql = pRows.map((_, i) => `($${i * 6 + 1},$${i * 6 + 2},$${i * 6 + 3},$${i * 6 + 4},$${i * 6 + 5}::jsonb,$${i * 6 + 6})`).join(',');
-        await pool.query(`INSERT INTO profiles(space,account,nick,avatar,stats,achievements) VALUES ${valueSql}
-          ON CONFLICT(space,account) DO UPDATE SET nick=EXCLUDED.nick, avatar=EXCLUDED.avatar, stats=EXCLUDED.stats, achievements=EXCLUDED.achievements, updated_at=now()`, pRows.flat());
+        for (let i = 0; i < pRows.length; i += 500) {
+          const chunk = pRows.slice(i, i + 500);
+          const valueSql = chunk.map((_, j) => `($${j * 6 + 1},$${j * 6 + 2},$${j * 6 + 3},$${j * 6 + 4},$${j * 6 + 5}::jsonb,$${j * 6 + 6})`).join(',');
+          await pool.query(`INSERT INTO profiles(space,account,nick,avatar,stats,achievements) VALUES ${valueSql}
+            ON CONFLICT(space,account) DO UPDATE SET nick=EXCLUDED.nick, avatar=EXCLUDED.avatar, stats=EXCLUDED.stats, achievements=EXCLUDED.achievements, updated_at=now()`, chunk.flat());
+        }
       } catch (e) { console.error('⚠️ flush profiles 失败:', e.message); }
     }
     if (eRows.length) {
       try {
-        const valueSql = eRows.map((_, i) => `($${i * 4 + 1},$${i * 4 + 2},$${i * 4 + 3},$${i * 4 + 4}::jsonb)`).join(',');
-        await pool.query(`INSERT INTO entities(space,kind,id,data) VALUES ${valueSql}
-          ON CONFLICT(space,kind,id) DO UPDATE SET data=EXCLUDED.data`, eRows.flat());
+        for (let i = 0; i < eRows.length; i += 1000) {
+          const chunk = eRows.slice(i, i + 1000);
+          const valueSql = chunk.map((_, j) => `($${j * 4 + 1},$${j * 4 + 2},$${j * 4 + 3},$${j * 4 + 4}::jsonb)`).join(',');
+          await pool.query(`INSERT INTO entities(space,kind,id,data) VALUES ${valueSql}
+            ON CONFLICT(space,kind,id) DO UPDATE SET data=EXCLUDED.data`, chunk.flat());
+        }
       } catch (e) { console.error('⚠️ flush entities 失败:', e.message); }
     }
   }
-  function saveProfile(user) {
-    const ns = user.currentSpace;
-    if (!ns || !spaces.has(ns)) return;
-    const key = ns + '::' + user.account;
+  function queueProfile(user, spaceId) {
+    if (!spaceId || !spaces.has(spaceId)) return;
+    const key = spaceId + '::' + user.account;
     profiles.set(key, { account: user.account, nick: user.nickname, avatar: user.avatar, stats: { ...user.stats }, achievements: [...user.achievements] });
     if (!usePg) return;
-    queuedProfiles.set(key, [ns, user.account, user.nickname, user.avatar, JSON.stringify(user.stats), user.achievements]);
+    queuedProfiles.set(key, [spaceId, user.account, user.nickname, user.avatar, JSON.stringify(user.stats), user.achievements]);
     scheduleFlush();
   }
+  function saveProfile(user) { queueProfile(user, user.currentSpace); }
   function saveEntity(spaceId, kind, id, data) {
     if (!usePg) return;
     queuedEntities.set(`${spaceId}|${kind}|${id}`, [spaceId, kind, id, JSON.stringify(data)]);
@@ -220,15 +227,7 @@ function createContext() {
     pool.query(`INSERT INTO stall_ratings(space,stall_id,account,nickname,cleanliness,signal,paper) VALUES($1,$2,$3,$4,$5,$6,$7)`,
       [spaceId, stallId, r.account || '', r.nickname, r.cleanliness, r.signal, r.paper]).catch(() => {});
   }
-  function saveStatsToSpace(user, spaceId) {
-    const ns = spaceId;
-    if (!ns || !spaces.has(ns)) return;
-    const key = ns + '::' + user.account;
-    profiles.set(key, { account: user.account, nick: user.nickname, avatar: user.avatar, stats: { ...user.stats }, achievements: [...user.achievements] });
-    if (!usePg) return;
-    queuedProfiles.set(key, [ns, user.account, user.nickname, user.avatar, JSON.stringify(user.stats), user.achievements]);
-    scheduleFlush();
-  }
+  function saveStatsToSpace(user, spaceId) { queueProfile(user, spaceId); }
 
   // ---------- 认证 ----------
   function hashPassword(pw) {
