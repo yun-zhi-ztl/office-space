@@ -1,0 +1,386 @@
+
+/* ============ 工具 ============ */
+function $(s){return document.querySelector(s);}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function toast(msg, kind){ const w=$('#toasts'),t=document.createElement('div'); t.className='toast '+(kind||''); t.textContent=msg; w.appendChild(t); setTimeout(()=>t.remove(), 3200); }
+function pad(n){return (n<10?'0':'')+n;}
+function fmtTime(ms){ const d=new Date(ms); return `${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function fmtCountdown(ms){ if(ms<=0)return '已到期'; const s=Math.floor(ms/1000); return `${Math.floor(s/60)}:${pad(s%60)}`; }
+function http(method,path,body){ return fetch(path,{method,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined}).then(r=>r.json().catch(()=>({}))); }
+
+/* 弹窗 */
+function openModal(html){ $('#modals').innerHTML = `<div class="modal-mask show" onclick="if(event.target===this)this.classList.remove('show')"><div class="modal">${html}</div></div>`; }
+function closeModal(){ const m=$('#modals .modal-mask'); if(m) m.classList.remove('show'); }
+
+/* ============ 全局状态 ============ */
+const S = {
+  token: localStorage.getItem('os_token')||'',
+  lastSpace: localStorage.getItem('os_space')||'',
+  ws: null, me:null, space:null, module:'rooms',
+  pendingLogin:null,
+  DB:{ rooms:[], reservations:[], tools:[], requests:[], repairs:[], stalls:[], users:[], leaderboard:[] },
+  admin:false, sockOpen:false,
+};
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['repairs','报修','🛠️'],['stalls','坑位看板','🚻'],['dash','概览','📊'] ];
+
+/* ============ WebSocket ============ */
+function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
+function connect(){
+  const proto = location.protocol==='https:'?'wss://':'ws://';
+  S.ws = new WebSocket(proto+location.host+'/ws');
+  S.ws.onopen = ()=>{ S.sockOpen=true; const sid = S.space ? S.space.id : (S.pendingLogin ? S.lastSpace : null); if(sid) wsSend({type:'join',spaceId:sid}); };
+  S.ws.onmessage = (ev)=>{ let m; try{m=JSON.parse(ev.data);}catch{return;} dispatch(m); };
+  S.ws.onclose = ()=>{ S.sockOpen=false; if(S.me) setTimeout(connect, 1500); };
+  S.ws.onerror = ()=>{};
+}
+function dispatch(m){
+  switch(m.type){
+    case 'error': toast('✘ '+m.message,'error'); if(!S.me) renderGate(); break;
+    case 'joined': S.space=m.space; renderSidebar(); if(S.pendingLogin){ const p=S.pendingLogin; S.pendingLogin=null; wsSend({type:'login',token:p.token!==undefined?p.token:undefined,account:p.account,password:p.password}); } break;
+    case 'loginSuccess':
+      S.me={account:m.account,nickname:m.nickname,avatar:m.avatar,role:m.role,token:m.token};
+      S.admin = m.role==='admin'; S.token=m.token;
+      localStorage.setItem('os_token',m.token); localStorage.setItem('os_space',S.space?S.space.id:S.lastSpace);
+      $('#gate').style.display='none'; $('#app').style.display='flex'; renderAll(); break;
+    case 'rooms': S.DB.rooms=m.rooms; S.DB.reservations=m.reservations; S.DB.revTotal=m.reservationTotal||0; S.DB.revOffset=S.DB.reservations.length; break;
+    case 'tools': S.DB.tools=m.tools; break;
+    case 'materials': S.DB.requests=m.requests; S.DB.matTotal=m.total||0; S.DB.matOffset=S.DB.requests.length; break;
+    case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; break;
+    case 'page': handlePage(m); break;
+    case 'stalls': S.DB.stalls=m.stalls; break;
+    case 'users': S.DB.users=m.users; break;
+    case 'leaderboard': S.DB.leaderboard=m.rankings||[]; break;
+    case 'notices': S.DB.notices=m.notices||[]; break;
+    case 'digest': S.digest=m.digest; break;
+    case 'suggestRooms': S.suggestions=m.suggestions||[]; renderSugg(); break;
+    case 'statusSet': toast('✔ 状态已更新','success'); break;
+    case 'remindSent': toast('✔ 已提醒 '+(m.count||0)+' 人','success'); break;
+    case 'borrowReminder': toast('🔔 '+(m.from||'有人')+'提醒你归还设备',"urge"); break;
+    case 'stats': if(S.statsFn) S.statsFn(m.stats); break;
+    case 'urgeNotification': toast('📣 有人催促你了（'+m.count+' 人）','urge'); break;
+    case 'reservation': toast('✔ 预约成功','success'); break;
+    case 'cancelSuccess': toast('✔ 已取消','success'); break;
+    case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
+    default: break;
+  }
+  if(['rooms','tools','materials','repairs','stalls','users','leaderboard','notices','digest'].includes(m.type)) render();
+}
+/* 渲染入口：只重绘当前模块 */
+function render(){ if(!S.me) return; renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='stalls') renderStalls(); }
+function renderAll(){ render(); }
+function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); }
+
+/* 分页：广播已按最近 PAGE 下发，前端按 offset 加载更多 */
+const PAGE = 30;
+function handlePage(m){
+  if(m.module==='materials'){ S.DB.requests=(S.DB.requests||[]).concat(m.items); S.DB.matOffset=m.offset+m.items.length; }
+  else if(m.module==='repairs'){ S.DB.repairs=(S.DB.repairs||[]).concat(m.items); S.DB.repOffset=m.offset+m.items.length; }
+  else if(m.module==='rooms'){ S.DB.reservations=(S.DB.reservations||[]).concat(m.items); S.DB.revOffset=m.offset+m.items.length; }
+  render();
+}
+function loadMore(module){ wsSend({type:'fetchPage', module, offset: module==='materials'?S.DB.matOffset:module==='repairs'?S.DB.repOffset:S.DB.revOffset, limit:PAGE}); }
+/* ============ 侧栏 ============ */
+const STATUS_OPTS = [['在岗',''],['开会','🧘'],['午饭','🍜'],['外出','🚪'],['休息','😴'],['勿扰','⚡']];
+function myStatus(){ const u=(S.DB.users||[]).find(x=>x.account===S.me.account); return (u&&u.status)||{label:'在岗',emoji:''}; }
+function setStatus(val){ const p=val.split('|'); wsSend({type:'setStatus', label:p[1], emoji:p[0]}); }
+function renderSidebar(){
+  const who = S.me ? `${S.me.avatar||'🧑'} ${esc(S.me.nickname||'')}<span class="role-tag ${S.admin?'admin':''}">${S.admin?'管理员':'成员'}</span>` : '未登录';
+  const st = myStatus();
+  const badgeCount = (S.me && S.me.achievements)?S.me.achievements.length:((S.DB.users||[]).find(u=>u.account===S.me.account)&&false?0:(S.DB.leaderboard||[]).find(u=>u.account===S.me.account)?.achievements?.length||0);
+  $('#sidebar').innerHTML = `
+    <div class="logo">OfficeSpace<small>办公空间管理</small></div>
+    <div class="spacename"><b>${S.space?esc(S.space.name):'--'}</b>${S.admin?' · 管理员':''}</div>
+    <nav class="nav">${MODULES.map(m=>`<button data-m="${m[0]}" class="${S.module===m[0]?'active':''}" onclick="switchModule('${m[0]}')"><span class="ic">${m[2]}</span>${m[1]}</button>`).join('')}
+      <a class="nav" href="screen.html?space=${S.space?S.space.id:''}" target="_blank" style="text-decoration:none"><button style="width:100%"><span class="ic">📺</span>电视墙大屏</button></a></nav>
+    <div class="sidefoot">
+      <div class="who">${who}</div>
+      <div class="fs" style="margin-bottom:8px"><label style="margin:0">状态</label><select style="width:100%" onchange="setStatus(this.value)">
+        ${STATUS_OPTS.map(([l,e],i)=>`<option value="${e}|${l}" ${st.label===l?'selected':''}>${e||'🙂'} ${l}</option>`).join('')}
+      </select></div>
+      ${badgeCount?`<div class="hint" style="margin-bottom:8px">🏅 徽章 ${badgeCount} 枚</div>`:''}
+      <button class="btn sm" onclick="doLogout()">退出登录</button>
+    </div>`;
+}
+
+/* ============ 入口（空间 + 登录） ============ */
+async function renderGate(){
+  $('#app').style.display='none';
+  const g=$('#gate'); g.style.display='block'; g.style.cssText='';
+  const spaces = await http('GET','/api/spaces');
+  g.innerHTML = `<div class="gate">
+    <div class="head"><h2>🏢 OfficeSpace · 办公空间管理</h2><div class="hint">办公室 / 楼层 / 组织共用的空间管理看板：会议室、工具借用、物资申领、报修、坑位看板</div></div>
+    <div class="tabs"><button class="active" id="tab-space" onclick="gateTab('space')">选择空间</button><button id="tab-acct" onclick="gateTab('acct')" style="display:none">账号</button></div>
+    <div id="gate-space">
+      <div class="form">
+        ${spaces.length?`<div class="fld"><label>已有空间</label><div class="list">${spaces.map(s=>`<div class="row"><span><span class="who">${esc(s.name)}</span><span class="when"> · ${s.admin_count} 个管理员</span></span><button class="btn pri sm" onclick="pickSpace('${s.id}')">进入</button></div>`).join('')}</div></div>`:'<div class="hint">暂无空间，先创建一个吧</div>'}
+        <div class="fld"><label>创建新空间</label><div class="fs"><input id="spName" placeholder="办公室名，如：三层研发">　<button class="btn pri" onclick="createSpace()">创建</button></div></div>
+      </div>
+    </div>
+    <div id="gate-acct" style="display:none">
+      <div class="tabs"><button class="active" id="a-login" onclick="acctTab('login')">登录</button><button id="a-reg" onclick="acctTab('reg')">注册</button></div>
+      <div class="form">
+        <div class="fld"><label>账号</label><input id="acAccount" placeholder="唯一账号（区分大小写）"></div>
+        <div id="regNameWrap" class="fld" style="display:none"><label>展示名</label><input id="acName" placeholder="对外显示名（可重名）"></div>
+        <div class="fld"><label>密码</label><input id="acPass" type="password"></div>
+        <button class="btn pri" id="doLoginBtn" onclick="submitAccount()">登录</button>
+        <div class="hint" id="gate-msg">正在使用空间：<span id="pickedSpace">--</span></div>
+      </div>
+    </div>
+  </div>`;
+  if(spaces.length) gateTab('space');
+}
+function gateTab(t){
+  $('#gate-space').style.display = t==='space'?'block':'none';
+  $('#gate-acct').style.display = t==='acct'?'block':'none';
+}
+function acctTab(m){ const isLogin=m==='login'; $('#a-login').className=isLogin?'active':''; $('#a-reg').className=isLogin?'':'active'; $('#regNameWrap').style.display=isLogin?'none':'flex'; $('#doLoginBtn').textContent=isLogin?'登录':'注册'; }
+let pickedSpace='';
+function pickSpace(id){ pickedSpace=id; $('#pickedSpace').textContent=id; gateTab('acct'); }
+async function createSpace(){ const name=$('#spName').value.trim(); if(!name) return toast('请输入空间名','error'); const s=await http('POST','/api/spaces',{name}); if(s.id){ pickedSpace=s.id; gateTab('acct'); toast('空间已创建','success'); } }
+async function submitAccount(){ const account=$('#acAccount').value.trim(), pass=$('#acPass').value; if(!account||!pass) return toast('请输入账号密码','error'); const isLogin=$('#a-login').classList.contains('active'); if(!pickedSpace) return toast('请先选择空间','error'); if(isLogin){ doLogin(account,pass); } else { const name=$('#acName').value.trim(); const r=await http('POST','/api/register',{account,password:pass,username:name||account}); if(r.ok) { toast('注册成功，正在登录','success'); doLogin(account,pass); } else toast(r.error||'注册失败','error'); } }
+function doLogin(account,password){ S.lastSpace=pickedSpace; localStorage.setItem('os_space',pickedSpace); S.pendingLogin={account,password}; wsSend({type:'join',spaceId:pickedSpace}); }
+function doLogout(){ wsSend({type:'logout'}); S.me=null; localStorage.removeItem('os_token'); location.reload(); }
+
+/* ============ 概览 ============ */
+const ACH = { punctual:'守时达人', endurance:'持久战', night:'夜行者', king:'蹲坑之王', grabber:'抢位达人', rater:'评论家' };
+function renderDash(){
+  const d=S.DB; const st=(d.stalls||[]); const occupied=st.filter(s=>s.status==='occupied').length;
+  const totalBorrowed=d.tools.reduce((a,t)=>a+t.borrowedCount,0);
+  const overdue=(d.tools||[]).reduce((a,t)=>a.concat((t.activeBorrows||[]).filter(b=>b.overdue)),[]);
+  const mvp=(d.leaderboard||[]).find(r=>r.mvp);
+  const myLb=(d.leaderboard||[]).find(r=>r.account===S.me.account);
+  const dig=S.digest;
+  const cards=[
+    ['会议室', d.rooms.length, MODULES[0][2]],
+    ['工具设备', d.tools.length, '🔧'],
+    ['在借数量', totalBorrowed, '📤'],
+    ['待处理申领', d.requests.filter(r=>r.status==='pending').length, '📦'],
+    ['处理中报修', d.repairs.filter(r=>r.status!=='resolved'&&r.status!=='cancelled').length, '🛠️'],
+    ['坑位占用', occupied+'/'+st.length, '🚻'],
+  ];
+  $('#main').innerHTML = `<div class="topbar"><div><h1>概览 <span class="view-tag">${esc(S.space?S.space.name:'')}</span></h1><div class="sub">空间内的公共资源使用概览</div></div></div>
+    ${mvp?`<div class="row" style="border-color:var(--yellow)"><span><span class="who">👑 本周之星</span> <b>${esc(mvp.username)}</b> · 本周活跃 ${mvp.weekly} 次</span><span class="badge ok">MVP</span></div>`:''}
+    <div class="cards">${cards.map(c=>`<div class="card"><h3>${c[2]} ${c[0]}</h3><div style="font-size:30px;font-weight:800">${c[1]}</div></div>`).join('')}</div>
+    ${dig?`<h3 style="margin:22px 0 10px">📌 每日看点</h3><div class="list">
+      <div class="row"><span>今日会议 ${dig.todayMeetingCount} 场</span>${dig.todayMeetingCount?`<span class="when">${dig.todayMeetings.map(r=>`${esc(r.title)}(${esc(r.ownerName)})`).join('、')}</span>`:''}</div>
+      ${dig.overdueCount?`<div class="row"><span>⚠️ 有 <b>${dig.overdueCount}</b> 笔借用逾期未还</span></div>`:''}
+      ${dig.myBorrows?`<div class="row"><span>你还有 <b>${dig.myBorrows}</b> 件设备未归还</span></div>`:''}
+      ${dig.pendingMaterialsCount?`<div class="row"><span>待处理申领 ${dig.pendingMaterialsCount}</span></div>`:''}
+      ${dig.openRepairsCount?`<div class="row"><span>未办结报修 ${dig.openRepairsCount}</span></div>`:''}
+    </div>`:''}
+    <h3 style="margin:22px 0 10px">🟢 在线状态</h3>
+    <div class="fs">${(d.users||[]).map(u=>`<span class="badge info">${esc(u.avatar||'' )} ${esc(u.display||u.username)}${u.status&&u.status.emoji?' '+esc(u.status.emoji):''} ${u.status?esc(u.status.label):'在岗'}</span>`).join('')||'<span class="hint">仅自己在线</span>'}</div>
+    <h3 style="margin:22px 0 10px">📢 公告</h3>
+    <div class="fs" style="margin-bottom:10px"><input id="annInput" placeholder="向整个空间喊一句话..."><button class="btn pri" onclick="doAnnounce()">喊话</button></div>
+    <div class="list">${(d.notices||[]).map(n=>`<div class="row"><span><span class="who">${esc(n.from)}</span> <span class="when">${fmtTime(n.ts)}</span><div>${esc(n.text)}</div></span></div>`).join('')||'<div class="empty">还没有公告</div>'}
+    </div>
+    ${overdue.length?`<h3 style="margin:22px 0 10px">⏰ 逾期借用 · 占用王</h3><div class="list">${overdue.map(b=>`<div class="row"><span>${esc(b.borrowerName)} ×${b.qty} · 已借 ${b.days} 天</span><button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒归还</button></div>`).join('')}</div>`:''}
+    ${myLb&&myLb.achievements&&myLb.achievements.length?`<h3 style="margin:22px 0 10px">🏅 我的徽章（${myLb.achievements.length} 枚）</h3><div class="fs">${myLb.achievements.map(a=>`<span class="badge ok">${ACH[a]||a}</span>`).join('')}</div>`:''}
+    <h3 style="margin:22px 0 10px">🏅 活跃榜（本空间）</h3>
+    <div class="list">${ (d.leaderboard||[]).length?d.leaderboard.slice(0,8).map((r,i)=>`<div class="row"><span>${r.mvp?'👑':i+1+'.'} <span class="who">${esc(r.username)}</span> ${r.weekly?`<span class="badge info">本周${r.weekly}</span>`:''} <span class="when">${esc(r.avatar||'' )} 使用${r.stats.totalVisits||0}次 · 借用${r.stats.borrowCount||0} · 申领${r.stats.requestCount||0} · 报修${r.stats.repairCount||0}</span></span></div>`).join(''):'<div class="empty">暂无活动数据</div>'}
+    </div>`;
+}
+function doAnnounce(){ const t=$('#annInput'); const v=(t?t.value:'').trim(); if(v){ wsSend({type:'announce',text:v}); if(t)t.value=''; } }
+function remindReturn(id){ wsSend({type:'remindReturn',borrowId:id}); }
+
+/* ============ 会议室 ============ */
+function renderRooms(){
+  const d=S.DB, me=S.me.account, now=Date.now();
+  $('#main').innerHTML = `<div class="topbar"><div><h1>会议室预约</h1><div class="sub">预约时段、冲突自动检测、实时同步</div></div>
+    <div class="btn grp"><button class="btn" onclick="openSuggest()">✨ 智能选房</button>${S.admin?'<button class="btn pri" onclick="openRoomCreate()">＋ 新增会议室</button>':''}</div></div>
+    <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))">${d.rooms.map(r=>roomCard(r)).join('')||'<div class="empty">还没有会议室，管理员可新增</div>'}</div>
+    <h3 style="margin:22px 0 10px">📅 全部预约</h3>
+    <div class="list">${d.reservations.filter(r=>r.status!=='cancelled'&&r.status!=='expired').map(r=>{ const rm=d.rooms.find(x=>x.id===r.roomId); return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(r.title)} <span class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}</span></span><span class="fs">${r.status==='pending'?'<span class="badge warn">待开始</span>':r.status==='active'?'<span class="badge info">进行中</span>':'<span class="badge grey">'+r.status+'</span>'}${r.ownerAccount===me&&r.status==='pending'?`<button class="btn danger sm" onclick="cancelReservation('${r.id}')">取消</button>`:''}</span></div>`; }).join('')||'<div class="empty">暂无预约</div>'}
+    </div>
+    ${(S.DB.revOffset||0)<(S.DB.revTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('rooms')">加载更多（${S.DB.revTotal-(S.DB.revOffset||0)}）</button></div>`:''}`;
+}
+function roomCard(r){
+  const d=S.DB, me=S.me.account;
+  const upcoming=d.reservations.filter(x=>x.roomId===r.id&&x.status==='pending').sort((a,b)=>a.startAt-b.startAt).slice(0,3);
+  return `<div class="card"><h3>${esc(r.name)} ${S.admin?`<span></span><button class="btn danger sm" onclick="removeRoom('${r.id}')">删</button>`:''}</h3>
+    <div class="meta">容量 ${r.capacity} 人${r.location?' · '+esc(r.location):''}${r.description?'<div>'+esc(r.description)+'</div>':''}</div>
+    <div class="meta">${upcoming.length?upcoming.map(u=>`· ${fmtTime(u.startAt)} → ${fmtTime(u.endAt)} <b>${esc(u.title)}</b>${u.ownerAccount===me?'（你）':''}`).join('<br>'):'今日暂无预约'}</div>
+    <div class="foot"><button class="btn pri sm" onclick="openBook('${r.id}')">预约</button></div></div>`;
+}
+function openRoomCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>新增会议室</h2><div class="form">
+  <div class="fld"><label>名称</label><input id="mrName" placeholder="如：3F 大会议室"></div>
+  <div class="fld"><label>容纳人数</label><input id="mrCap" type="number" min="1" value="8"></div>
+  <div class="fld"><label>位置</label><input id="mrLoc" placeholder="如：三层东侧"></div>
+  <div class="fld"><label>备注</label><input id="mrDesc" placeholder="可选"></div>
+  <button class="btn pri" onclick="submitRoomCreate()">创建</button></div>`); }
+function submitRoomCreate(){ wsSend({type:'roomCreate',name:$('#mrName').value,capacity:parseInt($('#mrCap').value,10),location:$('#mrLoc').value,description:$('#mrDesc').value}); closeModal(); }
+function removeRoom(id){ if(confirm('确认删除该会议室？')) wsSend({type:'roomRemove',roomId:id}); }
+function openBook(roomId){
+  const now=Date.now(), start=now+10*60000, end=start+60*60000;
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>预约会议室</h2><div class="form">
+    <div class="fld"><label>会议标题</label><input id="bkTitle" value="会议"></div>
+    <div class="fld"><label>开始时间</label><input id="bkStart" type="datetime-local"></div>
+    <div class="fld"><label>结束时间</label><input id="bkEnd" type="datetime-local"></div>
+    <div class="fld"><label>备注</label><input id="bkNote" placeholder="可选"></div>
+    <button class="btn pri" onclick="submitBook('${roomId}')">提交预约</button>
+    <div class="hint">同一会议室时段不可重叠预约</div></div>`);
+  const d=(ms)=>{ const x=new Date(ms), off=x.getTimezoneOffset(); return new Date(ms-off).toISOString().slice(0,16); };
+  $('#bkStart').value=d(start); $('#bkEnd').value=d(end);
+}
+function submitBook(roomId){ const st=new Date($('#bkStart').value).getTime(), en=new Date($('#bkEnd').value).getTime(); if(!(st>0)||!(en>st)) return toast('时间无效','error'); wsSend({type:'roomBook',roomId,startAt:st,endAt:en,title:$('#bkTitle').value,note:$('#bkNote').value}); closeModal(); }
+function cancelReservation(id){ wsSend({type:'reservationCancel',reservationId:id}); }
+/* 智能选房：按时段+人数找空闲会议室 */
+function openSuggest(){
+  const now=Date.now(), start=now+10*60000, end=start+60*60000, d=(ms)=>{ const x=new Date(ms), off=x.getTimezoneOffset(); return new Date(ms-off).toISOString().slice(0,16); };
+  S.suggestions=[];
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>✨ 智能选房</h2><div class="form">
+    <div class="fld"><label>开始</label><input id="sgStart" type="datetime-local"></div>
+    <div class="fld"><label>结束</label><input id="sgEnd" type="datetime-local"></div>
+    <div class="fld"><label>容纳人数（可选）</label><input id="sgCap" type="number" min="1" placeholder="不限"></div>
+    <button class="btn pri" onclick="findRooms()">🔍 查找空闲会议室</button>
+    <div id="suggList"></div></div>`);
+  $('#sgStart').value=d(start); $('#sgEnd').value=d(end);
+}
+function findRooms(){ wsSend({type:'suggestRoom', startAt:new Date($('#sgStart').value).getTime(), endAt:new Date($('#sgEnd').value).getTime(), capacity:parseInt($('#sgCap').value,10)}); }
+function renderSugg(){ const el=$('#suggList'); if(!el) return; const L=S.suggestions||[]; el.innerHTML=L.length?L.map(r=>`<div class="row"><span><span class="who">${esc(r.name)}</span> · 容量 ${r.capacity}${r.location?' · '+esc(r.location):''}</span><button class="btn pri sm" onclick="bookSugg('${r.id}')">就订它</button></div>`).join(''):'<div class="hint">该时段没有空闲会议室，可放宽条件再查</div>'; }
+function bookSugg(roomId){ const st=new Date($('#sgStart').value).getTime(), en=new Date($('#sgEnd').value).getTime(); if(!(st>0)||!(en>st)) return toast('时间无效','error'); wsSend({type:'roomBook',roomId,startAt:st,endAt:en,title:'会议'}); closeModal(); }
+/* ============ 工具借用 ============ */
+function renderTools(){
+  const d=S.DB, me=S.me.account;
+  $('#main').innerHTML = `<div class="topbar"><div><h1>工具借用</h1><div class="sub">测试电脑 / 测试机器 / 测试手机等在库设备的借还</div></div>
+    ${S.admin?'<button class="btn pri" onclick="openToolCreate()">＋ 新增设备</button>':''}</div>
+    <div class="cards">${d.tools.map(t=>`<div class="card"><h3>${esc(t.name)} <span class="badge ${t.available>0?'ok':'bad'}">${t.available}/${t.total}</span></h3>
+      <div class="meta">${t.category}${t.location?' · '+esc(t.location):''}</div>
+      <div class="bar"><i style="width:${t.total?Math.round(t.available/t.total*100):0}%"></i></div>
+      <div class="foot fs">
+        ${t.available>0?`<button class="btn pri sm" onclick="openBorrow('${t.id}','${esc(t.name)}',${t.available})">借用</button>`:'<span class="hint">已全部借出</span>'}
+        ${S.admin?`<button class="btn danger sm" onclick="removeTool('${t.id}')">删</button><button class="btn sm" onclick="openAdjust('${t.id}','${esc(t.name)}',${t.total},${t.borrowedCount})">改库存</button>`:''}
+      </div>
+      ${t.activeBorrows&&t.activeBorrows.length?`<div class="meta">在借：${t.activeBorrows.map(b=>`${esc(b.borrowerName)}×${b.qty}${b.days>=0?'·'+b.days+'天':''}${b.overdue?'<span class="badge bad">逾期</span>':''}${b.borrowerAccount===me?` <button class="btn green sm" onclick="returnTool('${b.id}')">归还</button>`:`${b.overdue?` <button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒</button>`:''}`}`).join('，')}</div>`:''}
+    </div>`).join('')||'<div class="empty">还没有设备，管理员可新增</div>'}
+    </div>`;
+}
+function openToolCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>新增设备</h2><div class="form">
+  <div class="fld"><label>名称</label><input id="tlName" placeholder="如：测试手机 Pro"></div>
+  <div class="fld"><label>类别</label><select id="tlCat"><option>测试电脑</option><option>测试机器</option><option>测试手机</option><option>其它</option></select></div>
+  <div class="fld"><label>库存数量</label><input id="tlTotal" type="number" min="1" value="1"></div>
+  <div class="fld"><label>位置</label><input id="tlLoc" placeholder="可选"></div>
+  <div class="fld"><label>备注</label><input id="tlDesc" placeholder="可选"></div>
+  <button class="btn pri" onclick="submitToolCreate()">创建</button></div>`); }
+function submitToolCreate(){ wsSend({type:'toolCreate',name:$('#tlName').value,category:$('#tlCat').value,total:parseInt($('#tlTotal').value,10),location:$('#tlLoc').value,description:$('#tlDesc').value}); closeModal(); }
+function removeTool(id){ if(confirm('删除该设备？')) wsSend({type:'toolDelete',toolId:id}); }
+function openAdjust(id,name,total,borrowed){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>调整库存 · ${esc(name)}</h2><div class="form">
+  <div class="fld"><label>在借 ${borrowed} · 当前总库存 ${total}</label><input id="adTotal" type="number" min="1" value="${total}"></div>
+  <button class="btn pri" onclick="submitAdjust('${id}')">保存</button></div>`); }
+function submitAdjust(id){ wsSend({type:'toolAdjust',toolId:id,total:parseInt($('#adTotal').value,10)}); closeModal(); }
+function openBorrow(id,name,avail){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>借用 · ${esc(name)}</h2><div class="form">
+  <div class="fld"><label>数量（可用 ${avail}）</label><input id="bwQty" type="number" min="1" max="${avail}" value="1"></div>
+  <button class="btn pri" onclick="submitBorrow('${id}')">借用</button></div>`); }
+function submitBorrow(id){ wsSend({type:'toolBorrow',toolId:id,qty:parseInt($('#bwQty').value,10)}); closeModal(); }
+function returnTool(id){ wsSend({type:'toolReturn',borrowId:id}); }
+
+/* ============ 物资申领 ============ */
+function renderMaterials(){
+  const d=S.DB, me=S.me.account;
+  $('#main').innerHTML = `<div class="topbar"><div><h1>物资申领</h1><div class="sub">需要电池、文具等物资时提交申请，由同事/管理员处理</div></div>
+    <button class="btn pri" onclick="openMaterialRequest()">＋ 我要申领</button></div>
+    <div class="list">${d.requests.map(r=>{ const st=r.status; const badge=st==='pending'?'warn':st==='fulfilled'?'ok':'grey'; return `<div class="row"><span><span class="who">${esc(r.requesterName)}</span> 申领 <b>${esc(r.name)}</b> ×${r.qty}${r.unit?' '+esc(r.unit):''}<div class="desc">${esc(r.reason||'')}</div><div class="when">${fmtTime(r.createdAt)}</div></span>
+      <span class="fs"><span class="badge ${badge}">${st==='pending'?'待处理':st==='fulfilled'?'已满足':'已取消'}</span>
+      ${st==='pending'?`${r.requesterAccount===me?`<button class="btn danger sm" onclick="cancelRequest('${r.id}')">取消</button>`:`<button class="btn green sm" onclick="fulfillRequest('${r.id}')">已满足</button>`}`:''}
+      </span></div>`; }).join('')||'<div class="empty">暂无申领记录</div>'}
+    </div>
+    ${(S.DB.matOffset||0)<(S.DB.matTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('materials')">加载更多（${S.DB.matTotal-(S.DB.matOffset||0)}）</button></div>`:''}`;
+}
+function openMaterialRequest(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>物资申领</h2><div class="form">
+  <div class="fld"><label>物资名称</label><input id="mtName" placeholder="如：5号电池"></div>
+  <div class="fld"><label>数量</label><div class="fs"><input id="mtQty" type="number" min="1" value="1" style="width:100px"><input id="mtUnit" placeholder="单位（个/节/盒）" style="flex:1"></div></div>
+  <div class="fld"><label>说明</label><input id="mtReason" placeholder="为什么需要"></div>
+  <button class="btn pri" onclick="submitMaterial()">提交</button></div>`); }
+function submitMaterial(){ wsSend({type:'materialRequest',name:$('#mtName').value,qty:parseInt($('#mtQty').value,10),unit:$('#mtUnit').value,reason:$('#mtReason').value}); closeModal(); }
+function cancelRequest(id){ wsSend({type:'materialCancel',requestId:id}); }
+function fulfillRequest(id){ wsSend({type:'materialFulfill',requestId:id}); }
+
+/* ============ 报修 ============ */
+function renderRepairs(){
+  const d=S.DB, me=S.me.account;
+  const badge=s=>s==='reported'?'warn':s==='in_progress'?'info':s==='resolved'?'ok':'grey';
+  const label=s=>s==='reported'?'待处理':s==='in_progress'?'处理中':s==='resolved'?'已解决':'已取消';
+  $('#main').innerHTML = `<div class="topbar"><div><h1>报修</h1><div class="sub">上报厕所、灯光、空调等设施故障并及时跟进</div></div>
+    <button class="btn pri" onclick="openRepair()">＋ 我要报修</button></div>
+    <div class="list">${d.repairs.map(r=>`<div class="row"><span><span class="who">${esc(r.category)} · ${esc(r.location)}</span> <span class="when">${esc(r.reporterName)} ${fmtTime(r.createdAt)}</span><div class="desc">${esc(r.description)}</div></span>
+      <span class="fs">
+      <span class="badge ${badge(r.status)}">${label(r.status)}</span>
+      ${r.status==='reported'?`<button class="btn sm" onclick="setRepair('${r.id}','in_progress')">开始处理</button>`:''}
+      ${(r.status==='reported'||r.status==='in_progress')?`<button class="btn green sm" onclick="setRepair('${r.id}','resolved')">已解决</button>`:''}
+      ${r.status==='reported'&&r.reporterAccount===me?`<button class="btn danger sm" onclick="setRepair('${r.id}','cancelled')">撤销</button>`:''}
+      </span></div>`).join('')||'<div class="empty">暂无报修记录</div>'}
+    </div>
+    ${(S.DB.repOffset||0)<(S.DB.repTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('repairs')">加载更多（${S.DB.repTotal-(S.DB.repOffset||0)}）</button></div>`:''}`;
+}
+function openRepair(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>提交报修</h2><div class="form">
+  <div class="fld"><label>类别</label><select id="rpCat"><option>厕所</option><option>灯光</option><option>空调</option><option>其它</option></select></div>
+  <div class="fld"><label>位置</label><input id="rpLoc" placeholder="如：三层男厕第二个坑位"></div>
+  <div class="fld"><label>描述</label><input id="rpDesc" placeholder="故障现象"></div>
+  <button class="btn pri" onclick="submitRepair()">提交</button></div>`); }
+function submitRepair(){ wsSend({type:'repairCreate',category:$('#rpCat').value,location:$('#rpLoc').value,description:$('#rpDesc').value}); closeModal(); }
+function setRepair(id,status){ wsSend({type:'repairUpdate',repairId:id,status}); }
+/* ============ 坑位看板 ============ */
+function stallCard(s){
+  const me=S.me?S.me.account:'';
+  const own = s.currentBy && s.currentBy.account===me;
+  const res = s.reservation;
+  const remains = res ? res.endTime - Date.now() : 0;
+  let badge='', buttons='';
+  if(s.status==='free'){ badge='<span class="badge ok">空闲</span>'; buttons=`<button class="btn pri sm" onclick="openReserve(${s.id},'${s.type}')">预约</button><button class="btn sm" onclick="grabStall(${s.id})">⚡抢位</button>`; }
+  else if(s.status==='reserved'){ badge='<span class="badge warn">已预约</span>'; buttons = own?`<button class="btn sm" onclick="cancelStall(${s.id})">取消</button>${Date.now()>=res.startTime?`<button class="btn green sm" onclick="startUse(${s.id})">到坑</button>`:''}` : '<span class="hint">他人预约</span>'; }
+  else if(s.status==='waiting'){ badge='<span class="badge warn">可到坑</span>'; buttons = own?`<button class="btn green sm" onclick="startUse(${s.id})">确认到坑</button><button class="btn danger sm" onclick="cancelStall(${s.id})">取消</button>` : '<span class="hint">他人预约</span>'; }
+  else if(s.status==='occupied'){ badge='<span class="badge bad">使用中</span>'; buttons = own?`<button class="btn green sm" onclick="finishStall(${s.id})">完成</button><button class="btn sm" onclick="releaseStall(${s.id})">释放</button>` : `<button class="btn sm" onclick="urgeStall(${s.id})">催促</button>`; buttons+=`<button class="btn sm" onclick="openRate(${s.id})">评分</button>`; }
+  const ratings = s.ratings&&s.ratings.length ? `${Math.round(s.ratings.reduce((a,r)=>a+r.cleanliness,0)/s.ratings.length*10)/10}★(${s.ratings.length})` : '';
+  return `<div class="stall"><div class="name">${esc(s.name)}</div>${badge}
+    ${s.currentBy?`<span class="owner">${esc(s.currentBy.display)}</span>`:''}
+    ${s.status==='occupied'?`<div class="count">⏳剩余 ${fmtCountdown(remains)}</div>`:s.status!=='free'?`<div class="count">${fmtTime(res.startTime)}</div>`:''}
+    ${s.urgeCount?`<div class="count">📣已催促${s.urgeCount}</div>`:''}
+    <div class="foot">${s.tier&&s.tier.name!=='新坑'?`<div class="hint">${s.tier.icon} ${s.tier.name} · ${s.tier.count}评</div>`:''}${ratings?'<div class="hint">'+ratings+'</div>':''}${buttons}</div></div>`;
+}
+function renderStalls(){
+  const d=S.DB;
+  $('#main').innerHTML = `<div class="topbar"><div><h1>坑位看板</h1><div class="sub">卫生间坑位实时状态 · 蹲坑倒计时 5 分钟 · 尿槽 1 分钟</div></div>
+    ${S.admin?`<button class="btn" onclick="openStallConfig()">⚙️ 配置坑位</button>`:''}</div>
+    <div class="grid">${d.stalls.map(stallCard).join('')}</div>`;
+}
+setInterval(()=>{ if(S.module==='stalls' && S.me && document.visibilityState==='visible') renderStalls(); }, 1000);
+function openReserve(id,type){
+  const opts = type==='urinal' ? [['1分钟',1],['2分钟',2],['5分钟',5]] : [['15分钟',15],['30分钟',30],['45分钟',45]];
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>预约坑位 #${id}</h2><div class="form">
+    <div class="fld"><label>使用时长</label>${opts.map(o=>`<button class="btn" onclick="doReserve(${id},${o[1]})">${o[0]}</button>`).join('')}</div>
+    <div class="hint">1 分钟后到点，需在开始时间后再确认到坑</div></div>`);
+}
+function doReserve(id,dur){ wsSend({type:'reserve',stallId:id,duration:dur}); closeModal(); }
+function grabStall(id){ if(confirm('临时抢位？抢到后需在倒计时内使用')) wsSend({type:'grab',stallId:id}); }
+function startUse(id){ wsSend({type:'startUse',stallId:id}); }
+function finishStall(id){ if(confirm('确认使用完成？')) wsSend({type:'finish',stallId:id}); }
+function releaseStall(id){ if(confirm('提前释放坑位？')) wsSend({type:'release',stallId:id}); }
+function cancelStall(id){ wsSend({type:'cancel',stallId:id}); }
+function urgeStall(id){ wsSend({type:'urge',stallId:id}); }
+function openRate(id){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>坑位评分</h2><div class="form">
+  <div class="fld"><label>干净度 (1-5)</label><select id="rtClean">${[1,2,3,4,5].map(n=>`<option value="${n}">${n}</option>`).join('')}</select></div>
+  <div class="fld"><label>信号 (1-5)</label><select id="rtSig"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></div>
+  <div class="fld"><label>纸巾 (1-5)</label><select id="rtPaper"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></div>
+  <button class="btn pri" onclick="submitRate(${id})">提交</button></div>`); }
+function submitRate(id){ wsSend({type:'rate',stallId:id,cleanliness:+$('#rtClean').value,signal:+$('#rtSig').value,paper:+$('#rtPaper').value}); closeModal(); }
+function openStallConfig(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>配置坑位</h2><div class="form">
+  <div class="fld"><label>蹲坑数量 (0-10)</label><input id="scSquat" type="number" min="0" max="10" value="${S.DB.stalls.reduce((a,s)=>s.type==='squat'?a+1:a,0)}"></div>
+  <div class="fld"><label>尿槽数量 (0-10)</label><input id="scUr" type="number" min="0" max="10" value="${S.DB.stalls.reduce((a,s)=>s.type==='urinal'?a+1:a,0)}"></div>
+  <button class="btn pri" onclick="submitConfig()">保存</button>
+  <div class="hint">改动会使未开始的预约失效</div></div>`); }
+function submitConfig(){ wsSend({type:'stallConfig',squat_count:parseInt($('#scSquat').value,10),urinal_count:parseInt($('#scUr').value,10)}); closeModal(); }
+
+/* ============ 启动 ============ */
+function init(){
+  if(S.token && S.lastSpace && S.lastSpace!=='') {
+    // 自动恢复会话
+    $('#app').style.display='none';
+    $('#gate').style.display='flex'; $('#gate').innerHTML = `<div class="gate"><div class="head"><h2>OfficeSpace</h2><div class="hint">正在恢复会话…</div></div></div>`;
+    S.pendingLogin = { token: S.token };
+    connect();
+  } else {
+    renderGate();
+    connect();
+  }
+}
+document.addEventListener('DOMContentLoaded', init);
