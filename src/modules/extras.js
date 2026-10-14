@@ -1,7 +1,7 @@
 'use strict';
 // 扩展功能：setStatus / announce / suggestRoom / remindReturn + 公告推送
 module.exports = function extrasModule(api) {
-  const { users, broadcastUsers, sendTo, serError, genId, roomPublic, noticesBroadcast, roomReservationsPublic } = api;
+  const { users, broadcastUsers, sendTo, serError, genId, roomPublic, noticesBroadcast } = api;
 
   function pushNotice(space, text, fromAccount, fromName) {
     space.notices.unshift({ id: genId('n', null), text, from: fromName || fromAccount || '系统', ts: Date.now() });
@@ -47,6 +47,5 @@ module.exports = function extrasModule(api) {
     sendTo(ws, { type: 'remindSent', count: n });
   }
 
-  void roomReservationsPublic; //（备用：后续扩展需要时）
   return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn };
 };

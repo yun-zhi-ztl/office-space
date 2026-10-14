@@ -22,6 +22,12 @@ jobs:
       - name: 语法检查
         run: npm run lint
 
+      - name: 校验 docker-compose 配置
+        run: docker compose config --quiet
+
+      - name: Docker 构建校验
+        run: docker build -t office-space:ci .
+
       - name: 启动服务（内存模式）并跑冒烟 + e2e
         run: |
           set -e

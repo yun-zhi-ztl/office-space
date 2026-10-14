@@ -116,9 +116,12 @@
 
 ### 写入与数据库
 - **写合并去抖**：`saveProfile` / `saveEntity` 改为按主键合并、去抖批量 upsert（默认 500ms），
-  降低并发下的写放大；停机（SIGTERM/SIGINT）前强制 flush。
+  降低并发下的写放大；单批按 500/1000 行分块写入，避免单条 SQL 参数数超过 PostgreSQL 的 65535 上限；
+  停机（SIGTERM/SIGINT）前强制 flush。
 - **索引**：`entities(kind)`、`stall_ratings(space, stall_id)`、`stall_ratings(space, created_at)`，
   支撑分页与载入查询。
+- **内存索引**：排行榜按空间维护 `profilesBySpace` 索引，避免每次广播全量扫描 profile；
+  工具在借明细按设备预聚合 borrows，避免 tools×borrows 双重扫描。
 - 启动只做幂等建表 / 迁移，不销毁数据。
 
 ### 连接健康度
@@ -171,5 +174,5 @@ src/modules/     rooms / tools / materials / repairs / stalls / extras（各领�
   - `npm run lint`：对 `server.js` / `src/` 全部 JS 执行 `node --check` 语法检查（`scripts/lint.js`）
   - `npm run smoke`：快速冒烟（`test/smoke.js`）——健康检查、首页与大屏可达、WS 连接、登录、收到广播
   - `npm test`：完整 e2e（`test/test.js`，48 项）
-- **CI**：`.github/workflows/ci.yml` 在 push 到 `main` 或 pull_request 时自动：`npm ci` → `npm run lint` → 内存模式启动服务 → `npm run smoke` → `npm test`。用不可达的 PG 参数强制内存模式，无需外部数据库。
+- **CI**：`.github/workflows/ci.yml` 在 push 到 `main` 或 pull_request 时自动：`npm ci` → `npm run lint` → `docker compose config` 校验 → `docker build` 构建校验 → 内存模式启动服务 → `npm run smoke` → `npm test`。用不可达的 PG 参数强制内存模式，无需外部数据库。
 - **环境变量**：见 `.env.example`（`PORT`、`PGHOST`、`PGPORT`、`PGUSER`、`PGPASSWORD`、`PGDATABASE`）；`.env` 已加入 `.gitignore`。

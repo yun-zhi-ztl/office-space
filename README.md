@@ -83,12 +83,14 @@ npm start          # 启动，默认 http://localhost:3000
 
 浏览器打开 http://localhost:3000，创建一个空间并注册账号即可（空间首个登录用户为管理员）。
 
-### 方式二：Docker
+### 方式二：Docker（推荐，含 PostgreSQL 持久化）
 
 ```bash
 docker compose up -d --build
 # 打开 http://localhost:3000
 ```
+
+`docker-compose.yml` 会一并拉起应用 + PostgreSQL（`office/office_pass`/库 `office`），数据持久化到 `office-pgdata` 卷，重启容器不再丢数据。容器内置 `HEALTHCHECK`（基于 `/api/health`），`docker inspect` 可查看健康状态。
 
 ### 可选：连接 PostgreSQL
 
@@ -117,7 +119,7 @@ npm run smoke     # 快速冒烟（需服务已启动）
 npm test          # 完整 e2e（需服务已启动）
 ```
 
-包含会议室（冲突检测 / 取消 / RBAC / 智能选房）、工具借用（借用 / 不足 / 归还 / 逾期催还）、物资申领（提交 / 处理 / 自处理限制）、报修（状态流转 / 越权取消）、坑位看板（预约时间窗、评分越界、重复评分、同账号多开限制、切换空间守卫、段位），以及分页、状态灯、公告、每周之星 MVP、每日看点等 **48 项断言**。push 到 `main` 或提 PR 时，CI（`.github/workflows/ci.yml`）会自动执行 lint + smoke + e2e。
+包含会议室（冲突检测 / 取消 / RBAC / 智能选房）、工具借用（借用 / 不足 / 归还 / 逾期催还）、物资申领（提交 / 处理 / 自处理限制）、报修（状态流转 / 越权取消）、坑位看板（预约时间窗、评分越界、重复评分、同账号多开限制、切换空间守卫、段位），以及分页、状态灯、公告、每周之星 MVP、每日看点等 **48 项断言**。push 到 `main` 或提 PR 时，CI（`.github/workflows/ci.yml`）会自动执行 lint + compose 校验 + docker 构建 + smoke + e2e。
 
 ---
 

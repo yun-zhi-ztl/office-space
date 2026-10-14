@@ -24,6 +24,7 @@ function createContext() {
   const accounts = new Map();
   const tokens = new Map();
   const profiles = new Map(); // `${space}::${account}` -> { account, nick, avatar, stats, achievements }
+  const profilesBySpace = new Map(); // spaceId -> Map<account, profileEntry>，避免排行榜全量扫描
   let usePg = false;
 
   // ---------- 基础工具 ----------
@@ -58,6 +59,11 @@ function createContext() {
   function isAdmin(space, account) { return !!space.admins.has(account); }
   function serError(message) { return { type: 'error', message }; }
   function lk(s) { return String(s == null ? '' : s).toLowerCase(); }
+  function reindexProfile(spaceId, account, value) {
+    let m = profilesBySpace.get(spaceId);
+    if (!m) { m = new Map(); profilesBySpace.set(spaceId, m); }
+    m.set(account, value);
+  }
   function spaceUserInfo(spaceId) {
     const info = new Map();
     for (const u of getUsersIn(spaceId)) {
@@ -78,7 +84,7 @@ function createContext() {
     port: +(process.env.PGPORT || 5432),
     user: process.env.PGUSER || 'postgres',
     password: process.env.PGPASSWORD || 'toilet_dev',
-    database: process.env.PGDATABASE || process.env.PGDATABASE || 'toilet',
+    database: process.env.PGDATABASE || 'toilet',
   });
   pool.on('error', (err) => console.error('⚠️  Postgres 池错误:', err.message));
 
@@ -129,7 +135,11 @@ function createContext() {
     const accRows = await pool.query('SELECT account,password_hash,username,avatar FROM accounts');
     for (const r of accRows.rows) accounts.set(r.account, { account: r.account, passwordHash: r.password_hash, username: r.username, avatar: r.avatar || '🧑' });
     const pr = await pool.query('SELECT space,account,nick,avatar,stats,achievements FROM profiles');
-    for (const r of pr.rows) profiles.set(`${r.space}::${r.account}`, { account: r.account, nick: r.nick, avatar: r.avatar, stats: r.stats || {}, achievements: r.achievements || [] });
+    for (const r of pr.rows) {
+      const p = { account: r.account, nick: r.nick, avatar: r.avatar, stats: r.stats || {}, achievements: r.achievements || [] };
+      profiles.set(`${r.space}::${r.account}`, p);
+      reindexProfile(r.space, r.account, p);
+    }
     const rat = await pool.query('SELECT space,stall_id,account,nickname,cleanliness,signal,paper,created_at FROM stall_ratings ORDER BY created_at ASC');
     const byStall = {};
     for (const r of rat.rows) { const k = `${r.space}::${r.stall_id}`; (byStall[k] = byStall[k] || []).push({ account: r.account || '', nickname: r.nickname, cleanliness: r.cleanliness, signal: r.signal, paper: r.paper, timestamp: Date.parse(r.created_at) }); }
@@ -182,30 +192,39 @@ function createContext() {
     const eRows = [...queuedEntities.values()];
     queuedProfiles.clear();
     queuedEntities.clear();
+    // 分块写入：单条 SQL 参数数上限为 65535，分块避免大批量写触发参数超限
     if (pRows.length) {
       try {
-        const valueSql = pRows.map((_, i) => `($${i * 6 + 1},$${i * 6 + 2},$${i * 6 + 3},$${i * 6 + 4},$${i * 6 + 5}::jsonb,$${i * 6 + 6})`).join(',');
-        await pool.query(`INSERT INTO profiles(space,account,nick,avatar,stats,achievements) VALUES ${valueSql}
-          ON CONFLICT(space,account) DO UPDATE SET nick=EXCLUDED.nick, avatar=EXCLUDED.avatar, stats=EXCLUDED.stats, achievements=EXCLUDED.achievements, updated_at=now()`, pRows.flat());
+        for (let i = 0; i < pRows.length; i += 500) {
+          const chunk = pRows.slice(i, i + 500);
+          const valueSql = chunk.map((_, j) => `($${j * 6 + 1},$${j * 6 + 2},$${j * 6 + 3},$${j * 6 + 4},$${j * 6 + 5}::jsonb,$${j * 6 + 6})`).join(',');
+          await pool.query(`INSERT INTO profiles(space,account,nick,avatar,stats,achievements) VALUES ${valueSql}
+            ON CONFLICT(space,account) DO UPDATE SET nick=EXCLUDED.nick, avatar=EXCLUDED.avatar, stats=EXCLUDED.stats, achievements=EXCLUDED.achievements, updated_at=now()`, chunk.flat());
+        }
       } catch (e) { console.error('⚠️ flush profiles 失败:', e.message); }
     }
     if (eRows.length) {
       try {
-        const valueSql = eRows.map((_, i) => `($${i * 4 + 1},$${i * 4 + 2},$${i * 4 + 3},$${i * 4 + 4}::jsonb)`).join(',');
-        await pool.query(`INSERT INTO entities(space,kind,id,data) VALUES ${valueSql}
-          ON CONFLICT(space,kind,id) DO UPDATE SET data=EXCLUDED.data`, eRows.flat());
+        for (let i = 0; i < eRows.length; i += 1000) {
+          const chunk = eRows.slice(i, i + 1000);
+          const valueSql = chunk.map((_, j) => `($${j * 4 + 1},$${j * 4 + 2},$${j * 4 + 3},$${j * 4 + 4}::jsonb)`).join(',');
+          await pool.query(`INSERT INTO entities(space,kind,id,data) VALUES ${valueSql}
+            ON CONFLICT(space,kind,id) DO UPDATE SET data=EXCLUDED.data`, chunk.flat());
+        }
       } catch (e) { console.error('⚠️ flush entities 失败:', e.message); }
     }
   }
-  function saveProfile(user) {
-    const ns = user.currentSpace;
-    if (!ns || !spaces.has(ns)) return;
-    const key = ns + '::' + user.account;
-    profiles.set(key, { account: user.account, nick: user.nickname, avatar: user.avatar, stats: { ...user.stats }, achievements: [...user.achievements] });
+  function queueProfile(user, spaceId) {
+    if (!spaceId || !spaces.has(spaceId)) return;
+    const key = spaceId + '::' + user.account;
+    const value = { account: user.account, nick: user.nickname, avatar: user.avatar, stats: { ...user.stats }, achievements: [...user.achievements] };
+    profiles.set(key, value);
+    reindexProfile(spaceId, user.account, value);
     if (!usePg) return;
-    queuedProfiles.set(key, [ns, user.account, user.nickname, user.avatar, JSON.stringify(user.stats), user.achievements]);
+    queuedProfiles.set(key, [spaceId, user.account, user.nickname, user.avatar, JSON.stringify(user.stats), user.achievements]);
     scheduleFlush();
   }
+  function saveProfile(user) { queueProfile(user, user.currentSpace); }
   function saveEntity(spaceId, kind, id, data) {
     if (!usePg) return;
     queuedEntities.set(`${spaceId}|${kind}|${id}`, [spaceId, kind, id, JSON.stringify(data)]);
@@ -220,15 +239,7 @@ function createContext() {
     pool.query(`INSERT INTO stall_ratings(space,stall_id,account,nickname,cleanliness,signal,paper) VALUES($1,$2,$3,$4,$5,$6,$7)`,
       [spaceId, stallId, r.account || '', r.nickname, r.cleanliness, r.signal, r.paper]).catch(() => {});
   }
-  function saveStatsToSpace(user, spaceId) {
-    const ns = spaceId;
-    if (!ns || !spaces.has(ns)) return;
-    const key = ns + '::' + user.account;
-    profiles.set(key, { account: user.account, nick: user.nickname, avatar: user.avatar, stats: { ...user.stats }, achievements: [...user.achievements] });
-    if (!usePg) return;
-    queuedProfiles.set(key, [ns, user.account, user.nickname, user.avatar, JSON.stringify(user.stats), user.achievements]);
-    scheduleFlush();
-  }
+  function saveStatsToSpace(user, spaceId) { queueProfile(user, spaceId); }
 
   // ---------- 认证 ----------
   function hashPassword(pw) {
@@ -294,8 +305,15 @@ function createContext() {
   }
   function toolsPublic(sp, info) {
     const now = Date.now();
+    const activeByTool = new Map();
+    for (const b of sp.borrows.values()) {
+      if (b.status !== 'borrowed') continue;
+      const arr = activeByTool.get(b.toolId) || [];
+      arr.push(b);
+      activeByTool.set(b.toolId, arr);
+    }
     return sp.tools.map((t) => {
-      const active = [...sp.borrows.values()].filter((b) => b.toolId === t.id && b.status === 'borrowed');
+      const active = activeByTool.get(t.id) || [];
       return {
         id: t.id, name: t.name, category: t.category, total: t.total, available: t.available,
         location: t.location, description: t.description,
@@ -345,10 +363,11 @@ function createContext() {
   }
   function leaderboardPublic(sp) {
     const rows = [];
-    for (const [key, p] of profiles) {
-      if (!key.startsWith(sp.id + '::')) continue;
-      if (!key.slice(sp.id.length + 2)) continue;
-      rows.push({ account: p.account, username: p.nick || p.account, avatar: p.avatar || '🧑', stats: p.stats || {}, achievements: p.achievements || [], weekly: weeklyScore(p.stats || {}) });
+    const bySpace = profilesBySpace.get(sp.id);
+    if (bySpace) {
+      for (const [, p] of bySpace) {
+        rows.push({ account: p.account, username: p.nick || p.account, avatar: p.avatar || '🧑', stats: p.stats || {}, achievements: p.achievements || [], weekly: weeklyScore(p.stats || {}) });
+      }
     }
     const score = (s) => (s.totalVisits || 0) + (s.borrowCount || 0) + (s.requestCount || 0) + (s.repairCount || 0) + (s.meetingCount || 0);
     const maxWeekly = rows.reduce((m, r) => Math.max(m, r.weekly || 0), 0);
