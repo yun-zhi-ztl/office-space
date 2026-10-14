@@ -62,7 +62,7 @@ function handleFetchPage(ws, user, space, msg) {
   let total = 0;
   if (msg.module === 'materials') { const all = api.materialsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
   else if (msg.module === 'repairs') { const all = api.repairsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
-  else if (msg.module === 'rooms') { const all = api.roomReservationsPublic(space); total = all.length; items = all.slice(offset, offset + limit); }
+  else if (msg.module === 'rooms') { const all = api.roomReservationsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
   else return api.sendTo(ws, api.serError('不支持的分页模块'));
   api.sendTo(ws, { type: 'page', module: msg.module, offset, items, total });
 }
@@ -203,6 +203,7 @@ setInterval(() => {
       }
     }
     if (roomsChanged) rooms.roomsBroadcast(sp);
+    if (api.pruneRoomReservations(sp, now - 7 * 86400000)) rooms.roomsBroadcast(sp);
   }
 }, 15000);
 

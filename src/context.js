@@ -348,6 +348,7 @@ function createContext() {
     })).sort((a, b) => (b.createdAt - a.createdAt));
   }
   function stallTier(s) {
+    if (s.__tier && s.__tierAt === s.ratings.length) return s.__tier;
     const n = s.ratings.length;
     if (!n) return { name: '新坑', icon: '🌱', rank: 0, avg: 0, count: 0 };
     let sum = 0;
@@ -356,7 +357,10 @@ function createContext() {
     const score = avg * 16 + Math.min(n, 10) * 2;
     let name = score >= 85 ? '王者' : score >= 68 ? '黄金' : score >= 50 ? '白银' : '青铜';
     const icon = name === '王者' ? '👑' : name === '黄金' ? '🏅' : name === '白银' ? '🥈' : '🥉';
-    return { name, icon, rank: Math.round(score), avg: +avg.toFixed(1), count: n };
+    const tier = { name, icon, rank: Math.round(score), avg: +avg.toFixed(1), count: n };
+    s.__tier = tier;
+    s.__tierAt = n;
+    return tier;
   }
   function stallsPublic(sp, info) {
     return sp.stalls.map((s) => {
@@ -385,9 +389,22 @@ function createContext() {
     rows.forEach((r, i) => { r.rank = i + 1; });
     return { rankings: rows.slice(0, 30) };
   }
-  function roomReservationsPublic(space) {
-    const info = spaceUserInfo(space.id);
+  function roomReservationsPublic(space, info) {
+    if (!info) info = spaceUserInfo(space.id);
     return [...space.roomReservations.values()].map((r) => reservationPublic(r, info)).sort((a, b) => a.startAt - b.startAt);
+  }
+  function pruneRoomReservations(space, before, max = 200) {
+    let removed = 0;
+    for (const [id, r] of [...space.roomReservations]) {
+      if (removed >= max) break;
+      if (r.status !== 'completed' && r.status !== 'cancelled' && r.status !== 'expired') continue;
+      const ts = r.endAt || r.startAt || 0;
+      if (ts >= before) continue;
+      space.roomReservations.delete(id);
+      deleteEntity(space.id, 'room_reservation', id);
+      removed++;
+    }
+    return removed;
   }
 
   // ---------- 广播 ----------
@@ -410,7 +427,7 @@ function createContext() {
   }
   function broadcastAll(sp) {
     const info = spaceUserInfo(sp.id);
-    const reservations = roomReservationsPublic(sp);
+    const reservations = roomReservationsPublic(sp, info);
     const materials = materialsPublic(sp, info);
     const repairs = repairsPublic(sp, info);
     broadcast(sp.id, 'rooms', { rooms: sp.rooms.map(roomPublic), reservations: reservations.slice(0, LIST_PAGE), reservationTotal: reservations.length });
@@ -479,7 +496,7 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, reservationPublic, toolsPublic, materialsPublic, repairsPublic, stallsPublic, leaderboardPublic, roomReservationsPublic, stallTier,
+    roomPublic, reservationPublic, toolsPublic, materialsPublic, repairsPublic, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier,
     // 广播
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, noticesBroadcast,
     // 坑位辅助

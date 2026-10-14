@@ -148,6 +148,7 @@ module.exports = function stallsModule(api) {
       if (stall.ratings.some((r) => r.account && r.account === user.account)) return sendTo(ws, serError('你已为该坑位评过分'));
       stall.ratings.push({ account: user.account, nickname: user.nickname, cleanliness, signal, paper, timestamp: Date.now() });
       if (stall.ratings.length > 60) stall.ratings = stall.ratings.slice(-60);
+      stall.__tier = null;
       user.stats.ratingsGiven++;
       checkAchievements(user);
       saveProfile(user);

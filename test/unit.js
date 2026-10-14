@@ -70,6 +70,25 @@ sp.admins.add('alice');
 assert(api.isAdmin(sp, 'alice'), '管理员账号判定为 admin');
 assert(!api.isAdmin(sp, 'bob'), '非管理员账号判定为非 admin');
 
+// ---------- 历史预约清理 ----------
+console.log('\n📋 7. 历史预约清理');
+const sp2 = api.createSpace('s2', '清理空间', 1, 0);
+const old = Date.now() - 8 * 86400000;
+sp2.roomReservations.set('old-res', { id: 'old-res', roomId: 'rm1', ownerAccount: 'alice', startAt: old, endAt: old + 60000, status: 'completed' });
+sp2.roomReservations.set('new-res', { id: 'new-res', roomId: 'rm1', ownerAccount: 'bob', startAt: Date.now() + 60000, endAt: Date.now() + 120000, status: 'pending' });
+const pruned = api.pruneRoomReservations(sp2, Date.now() - 7 * 86400000);
+assertEq(pruned, 1, '清理超过 7 天的历史预约返回数量');
+assert(!sp2.roomReservations.has('old-res'), '旧预约已从内存移除');
+assert(sp2.roomReservations.has('new-res'), '未到期的预约保留');
+
+// ---------- 坑位段位缓存 ----------
+console.log('\n📋 8. 坑位段位缓存');
+const ratedStall = { ratings: [{ cleanliness: 5, signal: 5, paper: 5 }] };
+const tier1 = api.stallTier(ratedStall);
+const tier2 = api.stallTier(ratedStall);
+assert(tier1 === tier2, '评分不变时复用缓存段位');
+assert(ratedStall.__tier === tier1, '缓存字段已写入');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

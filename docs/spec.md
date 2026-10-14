@@ -125,6 +125,11 @@
   支撑分页与载入查询。
 - **内存索引**：排行榜按空间维护 `profilesBySpace` 索引，避免每次广播全量扫描 profile；
   工具在借明细按设备预聚合 borrows，避免 tools×borrows 双重扫描。
+- **历史数据清理**：每 15s 清理超过 7 天且已结束（`completed/cancelled/expired`）的会议室预约，
+  同步删除内存 Map 与 `entities` 行，避免长期运行无界增长。
+- **广播计算复用**：`roomReservationsPublic` 支持传入已构建的 `spaceUserInfo`，`broadcastAll` 与
+  `fetchPage` 复用同一份在线用户信息，避免同一轮广播重复扫描。
+- **评分缓存**：坑位段位 `stallTier` 按评分版本缓存结果，评分变化时失效，减少每次广播重复求和。
 - 启动只做幂等建表 / 迁移，不销毁数据。
 
 ### 连接健康度
@@ -176,7 +181,7 @@ src/modules/     rooms / tools / materials / repairs / stalls / extras（各领�
 - **npm 脚本**：
   - `npm start`：启动服务
   - `npm run lint`：对 `server.js` / `public` / `src/` / `test/` 全部 JS 执行 `node --check` 语法检查（`scripts/lint.js`）
-  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁、口令哈希、管理员判定，18 项）
+  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁、口令哈希、管理员判定、历史预约清理、段位缓存，23 项）
   - `npm run test:restore`：前端「自动恢复会话」回归测试（`test/restore.js`，vm stub 加载内联脚本，无需服务）
   - `npm run smoke`：快速冒烟（`test/smoke.js`）——健康检查、首页与大屏可达、WS 连接、登录、收到广播
   - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，50 项）

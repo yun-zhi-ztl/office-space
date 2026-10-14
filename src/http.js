@@ -22,11 +22,12 @@ module.exports = function httpApi(api, app) {
     res.json({ id: sp.id, name: sp.name, squat_count: sp.squatCount, urinal_count: sp.urinalCount });
   });
   app.post('/api/register', (req, res) => {
-    const account = (req.body.account || '').trim();
+    const account = (req.body.account || '').trim().slice(0, 40);
     const username = (req.body.username || '').trim().slice(0, 12);
     const avatar = (req.body.avatar || '🧑').slice(0, 4);
     const password = String(req.body.password || '');
     if (!account || !password) return res.status(400).json({ error: '请输入账号和密码' });
+    if (password.length > 128) return res.status(400).json({ error: '密码过长' });
     if (accounts.has(account)) return res.status(409).json({ error: '账号已被占用' });
     const acct = { account, passwordHash: hashPassword(password), username: username || account, avatar };
     accounts.set(account, acct);
