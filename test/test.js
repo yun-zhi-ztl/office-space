@@ -92,6 +92,10 @@ async function runTests() {
   rooms = last(w2, 'rooms');
   assert(rooms && rooms.reservations.length === 1 && rooms.reservations[0].status === 'pending', 'member 预约会议室成功');
   const resId = rooms.reservations[0].id;
+  // 过去时间预约被拒
+  await sendMsg(w2, { type: 'roomBook', roomId, startAt: Date.now() - 60000, endAt: Date.now() + 3600000 });
+  const errPast = mk(w2, 'error');
+  assert(errPast.length > 0 && errPast[errPast.length - 1].message.includes('不能早于'), '过去时间预约被拒');
   // 冲突检测：另一账号预约重叠时段
   const wA = await createWSClient();
   await loginTo(wA, sp.id, ADMIN, 'pw');
