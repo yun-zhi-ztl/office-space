@@ -30,6 +30,17 @@ function httpGet(path) {
     http.get(BASE + path, (res) => { let b = ''; res.on('data', (c) => b += c); res.on('end', () => resolve({ status: res.statusCode, body: b })); }).on('error', reject);
   });
 }
+function httpRaw(method, path, body) {
+  return new Promise((resolve, reject) => {
+    const data = Buffer.from(body);
+    const req = http.request({ hostname: 'localhost', port: 3000, path, method, headers: { 'Content-Type': 'application/json', 'Content-Length': data.length } }, (res) => {
+      let b = ''; res.on('data', (c) => b += c); res.on('end', () => { let j = {}; try { j = JSON.parse(b); } catch {} resolve({ status: res.statusCode, json: j, body: b }); });
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
 
 async function runSmoke() {
   console.log('\n🔥 冒烟测试 OfficeSpace · 办公空间管理...\n');
@@ -37,6 +48,9 @@ async function runSmoke() {
   const health = await httpJson('GET', '/api/health');
   assert(health.status === 200 && health.json.ok === true, '/api/health 返回 ok');
   assert(typeof health.json.uptime === 'number', '健康检查返回 uptime');
+
+  const badJson = await httpRaw('POST', '/api/spaces', '{');
+  assert(badJson.status === 400 && /不是合法 JSON/.test(badJson.body), '非法 JSON 返回 400');
 
   const page = await httpGet('/');
   assert(page.status === 200 && page.body.includes('OfficeSpace'), '首页可访问且含标题');

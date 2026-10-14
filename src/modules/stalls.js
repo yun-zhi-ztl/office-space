@@ -13,6 +13,8 @@ module.exports = function stallsModule(api) {
 
     if (type === 'stallConfig') {
       if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可配置坑位'));
+      const busy = space.stalls.some((s) => s.status === 'reserved' || s.status === 'waiting' || s.status === 'occupied');
+      if (busy) return sendTo(ws, serError('当前仍有预约或占用中的坑位，请先释放后再配置'));
       const squat = parseInt(msg.squat_count, 10);
       const urinal = parseInt(msg.urinal_count, 10);
       const sq = Number.isInteger(squat) ? Math.max(0, Math.min(10, squat)) : space.squatCount;

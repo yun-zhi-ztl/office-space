@@ -181,6 +181,13 @@ async function runTests() {
   // 取消预约
   const resv = last(w2, 'reservation').reservation;
   await sendMsg(w2, { type: 'cancel', reservationId: resv.id });
+  // 存在预约时禁止重配坑位（避免重配后 currentStall 指向已删除坑位）
+  await sendMsg(w2, { type: 'reserve', stallId: freeStall.id, duration: 15 });
+  const resv2 = last(w2, 'reservation').reservation;
+  await sendMsg(w1, { type: 'stallConfig', squat_count: 1, urinal_count: 1 });
+  const errCfg = mk(w1, 'error');
+  assert(errCfg.length > 0 && errCfg[errCfg.length - 1].message.includes('预约或占用'), '存在预约时禁止重配坑位');
+  await sendMsg(w2, { type: 'cancel', reservationId: resv2.id });
   // 评分越界被拒 + 同账号重复评分被拒
   await sendMsg(w2, { type: 'grab', stallId: freeStall.id });
   await sendMsg(w2, { type: 'rate', stallId: freeStall.id, cleanliness: 99, signal: 4, paper: 3 });

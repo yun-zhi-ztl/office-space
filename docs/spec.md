@@ -62,6 +62,7 @@
 - 操作：`reserve / cancel / grab / startUse / finish / release / urge / rate / toggleEmergency`。
 - 评分：干净度 / 信号 / 纸巾 1-5 整数校验，同一账号同一坑位只记一次。
 - 战绩与排行榜：按时率、累计时长、抢位次数、蹲坑次数等；按空间 + 账号维度独立。
+- 配置守卫：管理员 `stallConfig` 仅在不存在 `reserved/waiting/occupied` 坑位时可用，避免重配后在线用户的 `currentStall` 指向已删除坑位。
 
 ## 4. 通信协议
 
@@ -118,6 +119,8 @@
 - **写合并去抖**：`saveProfile` / `saveEntity` 改为按主键合并、去抖批量 upsert（默认 500ms），
   降低并发下的写放大；单批按 500/1000 行分块写入，避免单条 SQL 参数数超过 PostgreSQL 的 65535 上限；
   停机（SIGTERM/SIGINT）前强制 flush。
+- **在途写追踪**：`saveSpace` / `saveAccount` / `saveStallRating` / `deleteEntity` 等直接写库查询统一登记为
+  在途 Promise；`flushWrites` 与优雅停机前先 `Promise.allSettled` 等待，避免进程退出时这些即时写丢失。
 - **索引**：`entities(kind)`、`stall_ratings(space, stall_id)`、`stall_ratings(space, created_at)`，
   支撑分页与载入查询。
 - **内存索引**：排行榜按空间维护 `profilesBySpace` 索引，避免每次广播全量扫描 profile；
@@ -127,9 +130,10 @@
 ### 连接健康度
 - WebSocket 心跳：每 30s ping，未回 pong 的连接被终止，防止异常断开的僵尸连接持续占用内存与广播带宽。
 - 客户端断线自动重连并凭 token 恢复会话。
+- 输入边界：HTTP JSON 解析限制为 1MB，WebSocket 单帧上限 64KB；解析失败返回 400，超大请求体返回 413。
 
 ### 运维
-- 优雅停机：SIGTERM/SIGINT 触发 flush 待写、关闭连接与连接池。
+- 优雅停机：SIGTERM/SIGINT 触发 flush 待写、等待在途写、关闭连接与连接池。
 
 ## 8. 趣味与效率功能（本版本新增）
 
@@ -164,7 +168,7 @@ src/modules/     rooms / tools / materials / repairs / stalls / extras（各领�
 
 - 各领域模块是纯函数工厂 `module.exports = (api)=>({...})`，由 `server.js` 注入共享上下文 `api`，无全局状态、便于单测。
 - 定时器、心跳、优雅停机属于进程级关注点，保留在入口。
-- 该拆分不改变任何对外协议与行为，e2e（49 项）在内存与 PostgreSQL 双模式下均通过。
+- 该拆分不改变任何对外协议与行为，e2e（50 项）在内存与 PostgreSQL 双模式下均通过。
 
 ## 10. 健康检查、自测与 CI（本版本新增）
 
@@ -175,6 +179,6 @@ src/modules/     rooms / tools / materials / repairs / stalls / extras（各领�
   - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁、口令哈希、管理员判定，18 项）
   - `npm run test:restore`：前端「自动恢复会话」回归测试（`test/restore.js`，vm stub 加载内联脚本，无需服务）
   - `npm run smoke`：快速冒烟（`test/smoke.js`）——健康检查、首页与大屏可达、WS 连接、登录、收到广播
-  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，49 项）
+  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，50 项）
 - **CI**：`.github/workflows/ci.yml` 在 push 到 `main` 或 pull_request 时自动：`npm ci` → `npm run lint` → `docker compose config` 校验 → `docker build` 构建校验 → 内存模式启动服务 → `npm run smoke` → `npm test`。用不可达的 PG 参数强制内存模式，无需外部数据库。
 - **环境变量**：见 `.env.example`（`PORT`、`PGHOST`、`PGPORT`、`PGUSER`、`PGPASSWORD`、`PGDATABASE`）；`.env` 已加入 `.gitignore`。

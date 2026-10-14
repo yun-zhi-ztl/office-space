@@ -167,19 +167,25 @@ function createContext() {
 
   function saveSpace(sp) {
     if (!usePg) return;
-    pool.query(`INSERT INTO spaces(id,name,admins,squat_count,urinal_count) VALUES($1,$2,$3,$4,$5)
+    trackWrite(pool.query(`INSERT INTO spaces(id,name,admins,squat_count,urinal_count) VALUES($1,$2,$3,$4,$5)
       ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, admins=EXCLUDED.admins, squat_count=EXCLUDED.squat_count, urinal_count=EXCLUDED.urinal_count`,
-      [sp.id, sp.name, JSON.stringify([...sp.admins]), sp.squatCount, sp.urinalCount]).catch(() => {});
+      [sp.id, sp.name, JSON.stringify([...sp.admins]), sp.squatCount, sp.urinalCount]).catch(() => {}));
   }
   function saveAccount(acct) {
     if (!usePg) return;
-    pool.query(`INSERT INTO accounts(account,password_hash,username,avatar) VALUES($1,$2,$3,$4)
+    trackWrite(pool.query(`INSERT INTO accounts(account,password_hash,username,avatar) VALUES($1,$2,$3,$4)
       ON CONFLICT(account) DO UPDATE SET username=EXCLUDED.username, avatar=EXCLUDED.avatar`,
-      [acct.account, acct.passwordHash, acct.username, acct.avatar]).catch(() => {});
+      [acct.account, acct.passwordHash, acct.username, acct.avatar]).catch(() => {}));
   }
   const queuedProfiles = new Map();
   const queuedEntities = new Map();
+  const inflightWrites = new Set();
   let flushTimer = null;
+  function trackWrite(promise) {
+    inflightWrites.add(promise);
+    promise.catch(() => {}).finally(() => inflightWrites.delete(promise));
+    return promise;
+  }
   function scheduleFlush() {
     if (flushTimer) return;
     flushTimer = setTimeout(flushWrites, PERSIST_DEBOUNCE_MS);
@@ -187,6 +193,9 @@ function createContext() {
   }
   async function flushWrites() {
     flushTimer = null;
+    if (inflightWrites.size > 0) {
+      try { await Promise.allSettled([...inflightWrites]); } catch {}
+    }
     if (!usePg) { queuedProfiles.clear(); queuedEntities.clear(); return; }
     const pRows = [...queuedProfiles.values()];
     const eRows = [...queuedEntities.values()];
@@ -232,12 +241,12 @@ function createContext() {
   }
   function deleteEntity(spaceId, kind, id) {
     if (!usePg) return;
-    pool.query(`DELETE FROM entities WHERE space=$1 AND kind=$2 AND id=$3`, [spaceId, kind, id]).catch(() => {});
+    trackWrite(pool.query(`DELETE FROM entities WHERE space=$1 AND kind=$2 AND id=$3`, [spaceId, kind, id]).catch(() => {}));
   }
   function saveStallRating(spaceId, stallId, r) {
     if (!usePg) return;
-    pool.query(`INSERT INTO stall_ratings(space,stall_id,account,nickname,cleanliness,signal,paper) VALUES($1,$2,$3,$4,$5,$6,$7)`,
-      [spaceId, stallId, r.account || '', r.nickname, r.cleanliness, r.signal, r.paper]).catch(() => {});
+    trackWrite(pool.query(`INSERT INTO stall_ratings(space,stall_id,account,nickname,cleanliness,signal,paper) VALUES($1,$2,$3,$4,$5,$6,$7)`,
+      [spaceId, stallId, r.account || '', r.nickname, r.cleanliness, r.signal, r.paper]).catch(() => {}));
   }
   function saveStatsToSpace(user, spaceId) { queueProfile(user, spaceId); }
 
