@@ -120,6 +120,8 @@
   停机（SIGTERM/SIGINT）前强制 flush。
 - **索引**：`entities(kind)`、`stall_ratings(space, stall_id)`、`stall_ratings(space, created_at)`，
   支撑分页与载入查询。
+- **内存索引**：排行榜按空间维护 `profilesBySpace` 索引，避免每次广播全量扫描 profile；
+  工具在借明细按设备预聚合 borrows，避免 tools×borrows 双重扫描。
 - 启动只做幂等建表 / 迁移，不销毁数据。
 
 ### 连接健康度

@@ -24,6 +24,7 @@ function createContext() {
   const accounts = new Map();
   const tokens = new Map();
   const profiles = new Map(); // `${space}::${account}` -> { account, nick, avatar, stats, achievements }
+  const profilesBySpace = new Map(); // spaceId -> Map<account, profileEntry>，避免排行榜全量扫描
   let usePg = false;
 
   // ---------- 基础工具 ----------
@@ -58,6 +59,11 @@ function createContext() {
   function isAdmin(space, account) { return !!space.admins.has(account); }
   function serError(message) { return { type: 'error', message }; }
   function lk(s) { return String(s == null ? '' : s).toLowerCase(); }
+  function reindexProfile(spaceId, account, value) {
+    let m = profilesBySpace.get(spaceId);
+    if (!m) { m = new Map(); profilesBySpace.set(spaceId, m); }
+    m.set(account, value);
+  }
   function spaceUserInfo(spaceId) {
     const info = new Map();
     for (const u of getUsersIn(spaceId)) {
@@ -129,7 +135,11 @@ function createContext() {
     const accRows = await pool.query('SELECT account,password_hash,username,avatar FROM accounts');
     for (const r of accRows.rows) accounts.set(r.account, { account: r.account, passwordHash: r.password_hash, username: r.username, avatar: r.avatar || '🧑' });
     const pr = await pool.query('SELECT space,account,nick,avatar,stats,achievements FROM profiles');
-    for (const r of pr.rows) profiles.set(`${r.space}::${r.account}`, { account: r.account, nick: r.nick, avatar: r.avatar, stats: r.stats || {}, achievements: r.achievements || [] });
+    for (const r of pr.rows) {
+      const p = { account: r.account, nick: r.nick, avatar: r.avatar, stats: r.stats || {}, achievements: r.achievements || [] };
+      profiles.set(`${r.space}::${r.account}`, p);
+      reindexProfile(r.space, r.account, p);
+    }
     const rat = await pool.query('SELECT space,stall_id,account,nickname,cleanliness,signal,paper,created_at FROM stall_ratings ORDER BY created_at ASC');
     const byStall = {};
     for (const r of rat.rows) { const k = `${r.space}::${r.stall_id}`; (byStall[k] = byStall[k] || []).push({ account: r.account || '', nickname: r.nickname, cleanliness: r.cleanliness, signal: r.signal, paper: r.paper, timestamp: Date.parse(r.created_at) }); }
@@ -207,7 +217,9 @@ function createContext() {
   function queueProfile(user, spaceId) {
     if (!spaceId || !spaces.has(spaceId)) return;
     const key = spaceId + '::' + user.account;
-    profiles.set(key, { account: user.account, nick: user.nickname, avatar: user.avatar, stats: { ...user.stats }, achievements: [...user.achievements] });
+    const value = { account: user.account, nick: user.nickname, avatar: user.avatar, stats: { ...user.stats }, achievements: [...user.achievements] };
+    profiles.set(key, value);
+    reindexProfile(spaceId, user.account, value);
     if (!usePg) return;
     queuedProfiles.set(key, [spaceId, user.account, user.nickname, user.avatar, JSON.stringify(user.stats), user.achievements]);
     scheduleFlush();
@@ -293,8 +305,15 @@ function createContext() {
   }
   function toolsPublic(sp, info) {
     const now = Date.now();
+    const activeByTool = new Map();
+    for (const b of sp.borrows.values()) {
+      if (b.status !== 'borrowed') continue;
+      const arr = activeByTool.get(b.toolId) || [];
+      arr.push(b);
+      activeByTool.set(b.toolId, arr);
+    }
     return sp.tools.map((t) => {
-      const active = [...sp.borrows.values()].filter((b) => b.toolId === t.id && b.status === 'borrowed');
+      const active = activeByTool.get(t.id) || [];
       return {
         id: t.id, name: t.name, category: t.category, total: t.total, available: t.available,
         location: t.location, description: t.description,
@@ -344,10 +363,11 @@ function createContext() {
   }
   function leaderboardPublic(sp) {
     const rows = [];
-    for (const [key, p] of profiles) {
-      if (!key.startsWith(sp.id + '::')) continue;
-      if (!key.slice(sp.id.length + 2)) continue;
-      rows.push({ account: p.account, username: p.nick || p.account, avatar: p.avatar || '🧑', stats: p.stats || {}, achievements: p.achievements || [], weekly: weeklyScore(p.stats || {}) });
+    const bySpace = profilesBySpace.get(sp.id);
+    if (bySpace) {
+      for (const [, p] of bySpace) {
+        rows.push({ account: p.account, username: p.nick || p.account, avatar: p.avatar || '🧑', stats: p.stats || {}, achievements: p.achievements || [], weekly: weeklyScore(p.stats || {}) });
+      }
     }
     const score = (s) => (s.totalVisits || 0) + (s.borrowCount || 0) + (s.requestCount || 0) + (s.repairCount || 0) + (s.meetingCount || 0);
     const maxWeekly = rows.reduce((m, r) => Math.max(m, r.weekly || 0), 0);
