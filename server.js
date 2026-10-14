@@ -185,6 +185,9 @@ setInterval(() => {
       if (res.status === 'pending') {
         if (now >= res.endAt) { res.status = 'expired'; roomsChanged = true; }
         else if (now >= res.startAt) { res.status = 'active'; roomsChanged = true; }
+      } else if (res.status === 'active' && now >= res.endAt) {
+        // 预约时段自然结束：自动置为已完成，避免「进行中」悬挂
+        res.status = 'completed'; roomsChanged = true;
       }
     }
     if (roomsChanged) rooms.roomsBroadcast(sp);

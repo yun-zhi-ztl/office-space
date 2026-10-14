@@ -36,6 +36,7 @@ module.exports = function roomsModule(api) {
       const startAt = Math.floor(+msg.startAt || 0);
       const endAt = Math.floor(+msg.endAt || 0);
       if (!(startAt > 0) || !(endAt > startAt)) return sendTo(ws, serError('请选择有效的时间段'));
+      if (startAt < Date.now()) return sendTo(ws, serError('预约开始时间不能早于当前时间'));
       if (endAt - startAt < 5 * 60000) return sendTo(ws, serError('至少预约 5 分钟'));
       const clash = [...space.roomReservations.values()].some((r) => r.roomId === room.id && (r.status === 'pending' || r.status === 'active') && startAt < r.endAt && endAt > r.startAt);
       if (clash) return sendTo(ws, serError('该时段已被预约，请另选时间'));
