@@ -78,7 +78,7 @@ module.exports = function stallsModule(api) {
       saveProfile(user);
       broadcastStalls(space);
       broadcastLeaderboard(space);
-      sendToUser(user.id, { type: 'stats', stats: user.stats });
+      sendToUser(user.id, { type: 'stats', stats: user.stats, achievements: user.achievements });
       return;
     }
 
@@ -122,7 +122,7 @@ module.exports = function stallsModule(api) {
       broadcast(space.id, 'stallReleased', { stallId: stall.id });
       broadcastStalls(space);
       broadcastLeaderboard(space);
-      sendToUser(user.id, { type: 'stats', stats: user.stats });
+      sendToUser(user.id, { type: 'stats', stats: user.stats, achievements: user.achievements });
       saveProfile(user);
       return;
     }
@@ -151,7 +151,7 @@ module.exports = function stallsModule(api) {
       saveProfile(user);
       saveStallRating(space.id, stall.id, { account: user.account, nickname: user.nickname, cleanliness, signal, paper });
       broadcastStalls(space);
-      sendToUser(user.id, { type: 'stats', stats: user.stats });
+      sendToUser(user.id, { type: 'stats', stats: user.stats, achievements: user.achievements });
       return;
     }
 

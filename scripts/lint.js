@@ -1,12 +1,12 @@
 'use strict';
-// 轻量语法检查：对 server.js / src/ 下全部 JS 执行 `node --check`。
+// 轻量语法检查：对 server.js / public / src / test 下全部 JS 执行 `node --check`。
 // 供 `npm run lint` 与 CI 使用，不引入额外依赖。
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
 const root = path.resolve(__dirname, '..');
-const targets = ['server.js', 'test/test.js', 'test/smoke.js', 'test/restore.js', 'scripts/lint.js'];
+const targets = ['server.js', 'public/app.js', 'public/screen.js', 'test/test.js', 'test/smoke.js', 'test/restore.js', 'scripts/lint.js'];
 
 function walk(dir, acc) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
