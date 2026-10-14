@@ -39,6 +39,8 @@ function dispatch(m){
     case 'joined': S.space=m.space; renderSidebar(); if(S.pendingLogin){ const p=S.pendingLogin; S.pendingLogin=null; wsSend({type:'login',token:p.token!==undefined?p.token:undefined,account:p.account,password:p.password}); } break;
     case 'loginSuccess':
       S.me={account:m.account,nickname:m.nickname,avatar:m.avatar,role:m.role,token:m.token};
+      if(m.stats) S.me.stats=m.stats;
+      if(m.achievements) S.me.achievements=m.achievements;
       S.admin = m.role==='admin'; S.token=m.token;
       localStorage.setItem('os_token',m.token); localStorage.setItem('os_space',S.space?S.space.id:S.lastSpace);
       $('#gate').style.display='none'; $('#app').style.display='flex'; renderAll(); break;
@@ -56,7 +58,7 @@ function dispatch(m){
     case 'statusSet': toast('✔ 状态已更新','success'); break;
     case 'remindSent': toast('✔ 已提醒 '+(m.count||0)+' 人','success'); break;
     case 'borrowReminder': toast('🔔 '+(m.from||'有人')+'提醒你归还设备',"urge"); break;
-    case 'stats': if(S.statsFn) S.statsFn(m.stats); break;
+    case 'stats': if(S.me && m.stats){ S.me.stats = m.stats; if(m.achievements) S.me.achievements = m.achievements; render(); } break;
     case 'urgeNotification': toast('📣 有人催促你了（'+m.count+' 人）','urge'); break;
     case 'reservation': toast('✔ 预约成功','success'); break;
     case 'cancelSuccess': toast('✔ 已取消','success'); break;
@@ -86,7 +88,7 @@ function setStatus(val){ const p=val.split('|'); wsSend({type:'setStatus', label
 function renderSidebar(){
   const who = S.me ? `${S.me.avatar||'🧑'} ${esc(S.me.nickname||'')}<span class="role-tag ${S.admin?'admin':''}">${S.admin?'管理员':'成员'}</span>` : '未登录';
   const st = myStatus();
-  const badgeCount = (S.me && S.me.achievements)?S.me.achievements.length:((S.DB.users||[]).find(u=>u.account===S.me.account)&&false?0:(S.DB.leaderboard||[]).find(u=>u.account===S.me.account)?.achievements?.length||0);
+  const badgeCount = (S.me && S.me.achievements) ? S.me.achievements.length : 0;
   $('#sidebar').innerHTML = `
     <div class="logo">OfficeSpace<small>办公空间管理</small></div>
     <div class="spacename"><b>${S.space?esc(S.space.name):'--'}</b>${S.admin?' · 管理员':''}</div>
@@ -148,7 +150,6 @@ function renderDash(){
   const totalBorrowed=d.tools.reduce((a,t)=>a+t.borrowedCount,0);
   const overdue=(d.tools||[]).reduce((a,t)=>a.concat((t.activeBorrows||[]).filter(b=>b.overdue)),[]);
   const mvp=(d.leaderboard||[]).find(r=>r.mvp);
-  const myLb=(d.leaderboard||[]).find(r=>r.account===S.me.account);
   const dig=S.digest;
   const cards=[
     ['会议室', d.rooms.length, MODULES[0][2]],
@@ -175,7 +176,7 @@ function renderDash(){
     <div class="list">${(d.notices||[]).map(n=>`<div class="row"><span><span class="who">${esc(n.from)}</span> <span class="when">${fmtTime(n.ts)}</span><div>${esc(n.text)}</div></span></div>`).join('')||'<div class="empty">还没有公告</div>'}
     </div>
     ${overdue.length?`<h3 style="margin:22px 0 10px">⏰ 逾期借用 · 占用王</h3><div class="list">${overdue.map(b=>`<div class="row"><span>${esc(b.borrowerName)} ×${b.qty} · 已借 ${b.days} 天</span><button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒归还</button></div>`).join('')}</div>`:''}
-    ${myLb&&myLb.achievements&&myLb.achievements.length?`<h3 style="margin:22px 0 10px">🏅 我的徽章（${myLb.achievements.length} 枚）</h3><div class="fs">${myLb.achievements.map(a=>`<span class="badge ok">${ACH[a]||a}</span>`).join('')}</div>`:''}
+    ${S.me&&S.me.achievements&&S.me.achievements.length?`<h3 style="margin:22px 0 10px">🏅 我的徽章（${S.me.achievements.length} 枚）</h3><div class="fs">${S.me.achievements.map(a=>`<span class="badge ok">${ACH[a]||a}</span>`).join('')}</div>`:''}
     <h3 style="margin:22px 0 10px">🏅 活跃榜（本空间）</h3>
     <div class="list">${ (d.leaderboard||[]).length?d.leaderboard.slice(0,8).map((r,i)=>`<div class="row"><span>${r.mvp?'👑':i+1+'.'} <span class="who">${esc(r.username)}</span> ${r.weekly?`<span class="badge info">本周${r.weekly}</span>`:''} <span class="when">${esc(r.avatar||'' )} 使用${r.stats.totalVisits||0}次 · 借用${r.stats.borrowCount||0} · 申领${r.stats.requestCount||0} · 报修${r.stats.repairCount||0}</span></span></div>`).join(''):'<div class="empty">暂无活动数据</div>'}
     </div>`;

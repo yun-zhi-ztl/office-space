@@ -50,7 +50,7 @@ module.exports = function sessionApi(api) {
     applyProfileToUser(user, space.id);
     users.set(userId, user);
     ws._userId = userId;
-    sendTo(ws, { type: 'loginSuccess', userId, account, nickname: user.nickname, avatar: user.avatar, token, role: isAdmin(space, account) ? 'admin' : 'member', spaceId: space.id });
+    sendTo(ws, { type: 'loginSuccess', userId, account, nickname: user.nickname, avatar: user.avatar, token, role: isAdmin(space, account) ? 'admin' : 'member', spaceId: space.id, stats: user.stats, achievements: user.achievements });
     broadcastAll(space);
     sendToUser(userId, { type: 'digest', digest: buildDigest(space, user) });
   }
