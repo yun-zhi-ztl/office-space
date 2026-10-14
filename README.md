@@ -90,6 +90,8 @@ docker compose up -d --build
 # 打开 http://localhost:3000
 ```
 
+容器内置 `HEALTHCHECK`（基于 `/api/health`），`docker inspect` 可查看健康状态。
+
 ### 可选：连接 PostgreSQL
 
 默认尝试连接 `127.0.0.1:5432`（用户 `postgres`、库 `toilet`、密码 `toilet_dev`）。连接失败自动切到内存模式，不影响功能。可通过环境变量覆盖（示例见 `.env.example`）：
