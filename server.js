@@ -183,11 +183,11 @@ setInterval(() => {
     let roomsChanged = false;
     for (const res of [...sp.roomReservations.values()]) {
       if (res.status === 'pending') {
-        if (now >= res.endAt) { res.status = 'expired'; roomsChanged = true; }
-        else if (now >= res.startAt) { res.status = 'active'; roomsChanged = true; }
+        if (now >= res.endAt) { res.status = 'expired'; roomsChanged = true; api.saveEntity(sp.id, 'room_reservation', res.id, res); }
+        else if (now >= res.startAt) { res.status = 'active'; roomsChanged = true; api.saveEntity(sp.id, 'room_reservation', res.id, res); }
       } else if (res.status === 'active' && now >= res.endAt) {
-        // 预约时段自然结束：自动置为已完成，避免「进行中」悬挂
-        res.status = 'completed'; roomsChanged = true;
+        // 预约时段自然结束：自动置为已完成，避免「进行中」悬挂；同时持久化，防止重启后状态回退
+        res.status = 'completed'; roomsChanged = true; api.saveEntity(sp.id, 'room_reservation', res.id, res);
       }
     }
     if (roomsChanged) rooms.roomsBroadcast(sp);
