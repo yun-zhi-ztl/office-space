@@ -241,6 +241,8 @@ function createContext() {
   }
   function deleteEntity(spaceId, kind, id) {
     if (!usePg) return;
+    const key = `${spaceId}|${kind}|${id}`;
+    queuedEntities.delete(key);
     trackWrite(pool.query(`DELETE FROM entities WHERE space=$1 AND kind=$2 AND id=$3`, [spaceId, kind, id]).catch(() => {}));
   }
   function saveStallRating(spaceId, stallId, r) {
