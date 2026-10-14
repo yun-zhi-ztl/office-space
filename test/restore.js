@@ -7,8 +7,7 @@ const path = require('path');
 const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
-const html = fs.readFileSync(path.join(root, 'public/index.html'), 'utf8');
-const script = html.match(/<script>([\s\S]*)<\/script>/)[1];
+const script = fs.readFileSync(path.join(root, 'public/app.js'), 'utf8');
 
 const sent = [];
 class FakeWS {

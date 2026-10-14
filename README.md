@@ -52,8 +52,12 @@ OfficeSpace/
 │       ├── stalls.js        # 坑位看板
 │       └── extras.js        # 状态灯/公告/智能选房/催还
 ├── public/
-│   ├── index.html           # 前端单页应用（原生三件套）
-│   └── screen.html          # 电视墙大屏（会议室 now/next + 总览 + 占用 + 公告；全屏/自动轮播）
+│   ├── index.html           # 前端单页应用入口（含 app.js / styles.css）
+│   ├── app.js                # 前端逻辑（拆分自 index.html）
+│   ├── styles.css            # 前端样式（拆分自 index.html）
+│   ├── screen.html          # 电视墙大屏入口（含 screen.js / screen.css）
+│   ├── screen.js             # 大屏逻辑（拆分自 screen.html）
+│   └── screen.css            # 大屏样式（拆分自 screen.html）
 ├── test/
 │   ├── test.js              # 端到端测试（覆盖五模块+扩展功能，需先启动服务）
 │   ├── restore.js           # 前端会话恢复回归测试（vm stub，无需服务）
