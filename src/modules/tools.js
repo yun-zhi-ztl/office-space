@@ -1,7 +1,7 @@
 'use strict';
 // 工具借用模块：toolCreate / toolDelete / toolAdjust / toolBorrow / toolReturn
 module.exports = function toolsModule(api) {
-  const { spaceUserInfo, toolsPublic, toolWaitlistPublic, broadcast, TOOL_CATEGORIES, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToUser, sendToAccount, checkAchievements, dueBorrowReminders } = api;
+  const { spaceUserInfo, toolsPublic, toolWaitlistPublic, broadcast, TOOL_CATEGORIES, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToUser, sendToAccount, checkAchievements, dueBorrowReminders, pushNotice } = api;
 
   function toolsBroadcast(space) {
     const info = spaceUserInfo(space.id);
@@ -129,6 +129,7 @@ module.exports = function toolsModule(api) {
       borrow.returnedAt = Date.now();
       tool.available = Math.min(tool.total, tool.available + borrow.qty);
       promoteToolWaitlist(space);
+      pushNotice(space, `已归还设备：${tool.name} ×${borrow.qty}`, user.account, user.nickname);
       const borrower = getUserByAccount(borrow.borrowerAccount);
       if (borrower) {
         borrower.stats.borrowDuration += Math.max(0, Math.round((borrow.returnedAt - borrow.borrowedAt) / 60000));

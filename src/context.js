@@ -614,6 +614,18 @@ function createContext() {
   }
   function broadcastLeaderboard(sp) { broadcast(sp.id, 'leaderboard', leaderboardPublic(sp)); }
   function noticesBroadcast(sp) { broadcast(sp.id, 'notices', { notices: sp.notices }); }
+  // 公告/通知统一入口：写入 + 持久化 + 广播；超过 50 条自动裁剪并删除旧公告
+  function pushNotice(space, text, fromAccount, fromName) {
+    const notice = { id: genId('n', null), text, from: fromName || fromAccount || '系统', ts: Date.now() };
+    space.notices.unshift(notice);
+    if (space.notices.length > 50) {
+      const removed = space.notices.splice(50);
+      removed.forEach((n) => deleteEntity(space.id, 'notice', n.id));
+    }
+    saveEntity(space.id, 'notice', notice.id, notice);
+    noticesBroadcast(space);
+    return notice;
+  }
   function visitorsBroadcast(sp) {
     const info = spaceUserInfo(sp.id);
     const all = visitorsPublic(sp, info);
@@ -781,7 +793,7 @@ function createContext() {
     // 序列化
     roomPublic, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
     // 广播
-    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, noticesBroadcast, visitorsBroadcast,
+    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, noticesBroadcast, pushNotice, visitorsBroadcast,
     // 坑位辅助
     activeStallCount, checkAchievements, notifyUrge, ACHIEVEMENT_DEFS,
     achievementProgress, achievementDefsPublic,

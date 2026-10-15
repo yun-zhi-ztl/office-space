@@ -472,6 +472,18 @@ lastAdminErr = null;
 extras.adminSet(fakeAdminWs, { account: 'dave' }, spAdmin, { account: 'carol', admin: false });
 assert(lastAdminErr && lastAdminErr.includes('仅管理员'), '非管理员管理被拒绝');
 
+// ---------- 通知统一入口 ----------
+console.log('\n📋 30. 通知统一入口');
+const spN = api.createSpace('s22', '通知空间', 1, 0);
+const n1 = api.pushNotice(spN, '测试公告', 'alice', '甲');
+assertEq(spN.notices.length, 1, 'pushNotice 写入公告');
+assertEq(n1.text, '测试公告', 'pushNotice 保留公告文本');
+assertEq(n1.from, '甲', 'pushNotice 使用展示名作为来源');
+assertEq(spN.notices[0].id, n1.id, 'pushNotice 公告置顶');
+api.pushNotice(spN, '第二条', 'bob', '乙');
+assertEq(spN.notices.length, 2, 'pushNotice 第二条公告');
+assertEq(spN.notices[0].text, '第二条', 'pushNotice 新公告置顶');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

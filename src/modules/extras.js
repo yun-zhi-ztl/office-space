@@ -1,18 +1,7 @@
 'use strict';
 // 扩展功能：setStatus / announce / suggestRoom / remindReturn + 公告推送
 module.exports = function extrasModule(api) {
-  const { users, broadcastUsers, sendTo, serError, genId, roomPublic, noticesBroadcast, isAdmin, saveSpace, saveEntity, deleteEntity, broadcast, getUserByAccount, sendToUser } = api;
-
-  function pushNotice(space, text, fromAccount, fromName) {
-    const notice = { id: genId('n', null), text, from: fromName || fromAccount || '系统', ts: Date.now() };
-    space.notices.unshift(notice);
-    if (space.notices.length > 50) {
-      const removed = space.notices.splice(50);
-      removed.forEach((n) => deleteEntity(space.id, 'notice', n.id));
-    }
-    saveEntity(space.id, 'notice', notice.id, notice);
-    noticesBroadcast(space);
-  }
+  const { users, broadcastUsers, sendTo, serError, roomPublic, noticesBroadcast, isAdmin, saveSpace, deleteEntity, broadcast, getUserByAccount, sendToUser, pushNotice } = api;
 
   function handleSetStatus(ws, user, space, msg) {
     const label = (msg.label || '').trim().slice(0, 8) || '在岗';
