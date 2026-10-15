@@ -1,7 +1,7 @@
 'use strict';
 // 报修模块：repairCreate / repairUpdate
 module.exports = function repairsModule(api) {
-  const { spaceUserInfo, repairsPublic, broadcast, LIST_PAGE, REPAIR_CATEGORIES, REPAIR_PRIORITIES, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, isAdmin } = api;
+  const { spaceUserInfo, repairsPublic, broadcast, LIST_PAGE, REPAIR_CATEGORIES, REPAIR_PRIORITIES, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToAccount, isAdmin } = api;
 
   function repairsBroadcast(space) {
     const info = spaceUserInfo(space.id);
@@ -38,6 +38,7 @@ module.exports = function repairsModule(api) {
       rep.handlerName = target.nickname;
       rep.updatedAt = Date.now();
       saveEntity(space.id, 'repair', rep.id, rep);
+      sendToAccount(target.account, { type: 'repairAssigned', repairId: rep.id, category: rep.category, location: rep.location, reporterName: rep.reporterName });
       repairsBroadcast(space);
     } else if (msg.type === 'repairUpdate') {
       const rep = space.repairs.get(msg.repairId);
@@ -69,6 +70,8 @@ module.exports = function repairsModule(api) {
       rep.status = to;
       rep.updatedAt = Date.now();
       saveEntity(space.id, 'repair', rep.id, rep);
+      if (to === 'in_progress') sendToAccount(rep.reporterAccount, { type: 'repairInProgress', repairId: rep.id, category: rep.category, location: rep.location });
+      if (to === 'resolved') sendToAccount(rep.reporterAccount, { type: 'repairResolved', repairId: rep.id, category: rep.category, location: rep.location });
       repairsBroadcast(space);
     }
   }

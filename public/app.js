@@ -73,6 +73,11 @@ function dispatch(m){
     case 'borrowReminder': toast('🔔 '+(m.from||'有人')+'提醒你归还设备',"urge"); break;
     case 'overdueReminder': toast('⏰ 你借的设备已逾期，请尽快归还','urge'); break;
     case 'roomReminder': { const rm=(S.DB.rooms||[]).find(r=>r.id===m.roomId); toast('🔔 '+(rm?rm.name:'会议室')+' 即将开始：'+fmtTime(m.startAt),'success'); break; }
+    case 'materialAssigned': toast('📌 物资申领已指派给你：'+(m.name||''),'info'); render(); break;
+    case 'materialFulfilled': toast('✅ 物资申领已满足：'+(m.name||''),'success'); render(); break;
+    case 'repairAssigned': toast('📌 报修已指派给你：'+(m.category||'')+' · '+(m.location||''),'info'); render(); break;
+    case 'repairInProgress': toast('🔧 报修处理中：'+(m.category||'')+' · '+(m.location||''),'info'); render(); break;
+    case 'repairResolved': toast('✅ 报修已解决：'+(m.category||'')+' · '+(m.location||''),'success'); render(); break;
     case 'stats': if(S.me && m.stats){ S.me.stats = m.stats; if(m.achievements) S.me.achievements = m.achievements; render(); } break;
     case 'urgeNotification': toast('📣 有人催促你了（'+m.count+' 人）','urge'); break;
     case 'reservation': toast('✔ 预约成功','success'); break;

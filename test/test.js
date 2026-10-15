@@ -264,6 +264,7 @@ async function runTests() {
   mats = last(w1, 'materials');
   const fulfilled = mats.requests.find(r => r.id === reqId);
   assert(fulfilled && fulfilled.status === 'fulfilled', '他人可将申领置为已满足');
+  assert(mk(w2, 'materialFulfilled').length >= 1, '申领满足后申请人收到通知');
 
   // ========== 测试5b: 物资申领指派 ==========
   console.log('\n📋 测试5b: 物资申领指派负责人');
@@ -282,6 +283,7 @@ async function runTests() {
   mats5 = last(w2, 'materials');
   const assignedA = mats5.requests.find(r => r.id === reqA.id);
   assert(assignedA.handlerAccount === THIRD && assignedA.handlerName, '申请人指派负责人成功');
+  assert(mk(w3, 'materialAssigned').length >= 1, '申领指派后负责人收到通知');
   await sendMsg(w4, { type: 'materialFulfill', requestId: reqA.id });
   const errFulfill = mk(w4, 'error');
   assert(errFulfill.length > 0 && errFulfill[errFulfill.length - 1].message.includes('由负责人处理'), '非负责人处理已指派申领被拒');
@@ -299,9 +301,11 @@ async function runTests() {
   await sendMsg(w1, { type: 'repairUpdate', repairId, status: 'in_progress' });
   repairs = last(w1, 'repairs');
   assert(repairs.repairs.find(r => r.id === repairId).status === 'in_progress', '报修进入处理中');
+  assert(mk(w2, 'repairInProgress').length >= 1, '报修处理中通知上报人');
   await sendMsg(w1, { type: 'repairUpdate', repairId, status: 'resolved' });
   repairs = last(w1, 'repairs');
   assert(repairs.repairs.find(r => r.id === repairId).status === 'resolved', '报修已解决');
+  assert(mk(w2, 'repairResolved').length >= 1, '报修解决后通知上报人');
   // 他人不能取消成员上报的报修
   await sendMsg(w1, { type: 'repairUpdate', repairId, status: 'cancelled' });
   const errRep = mk(w1, 'error');
@@ -323,6 +327,7 @@ async function runTests() {
   reps5 = last(w2, 'repairs');
   const repAssigned = reps5.repairs.find(r => r.id === repB.id);
   assert(repAssigned.handlerAccount === THIRD && repAssigned.handlerName, '上报人指派负责人成功');
+  assert(mk(w3, 'repairAssigned').length >= 1, '报修指派后负责人收到通知');
   await sendMsg(w4, { type: 'repairAssign', repairId: repB.id, handlerAccount: FOURTH });
   const errRepAssign = mk(w4, 'error');
   assert(errRepAssign.length > 0 && errRepAssign[errRepAssign.length - 1].message.includes('仅上报人或管理员'), '非上报人指派被拒');
