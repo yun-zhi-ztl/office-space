@@ -148,6 +148,31 @@
   - 约束：同一账号每天只能保留一条心情，重复打卡覆盖更新。
   - 序列化：`moodPublic` 仅返回今日记录并按展示名排序；`moodStats` 统计今日总人数与各 emoji 计数，随 `mood` 广播下发。
 
+### 活动管理（events）
+- `event`: `{ id, title, description, category, location, startAt, endAt, hostAccount, hostName, capacity, rsvps, cancelled, reminded, remindAt, createdAt }`
+  - `category`: 培训 / 分享会 / 团建 / 生日会 / 会议 / 其它；`location` 可选。
+  - `rsvps`: 对象映射 `{ account: 'going' | 'maybe' | 'not_going' }`（对象可 JSON 持久化）。
+  - 约束：`startAt < endAt` 且开始时间晚于当前；活动未开始前可变更 RSVP，`going` 受 `capacity` 限制（名额满拒绝新参加）。
+  - 状态由序列化实时计算：`upcoming / ongoing / ended / cancelled`（不落库，避免定时器依赖）。
+  - 提醒：`remindAt = startAt - 10min`，定时器对未提醒且未开始的活动发送一次 `eventReminder` 给主办与所有报名人。
+  - 权限：成员可发起；仅主办或管理员可取消；仅管理员可删除。
+  - 成就：「活动主办」（举办 3 次）、「活动达人」（参加 5 次）。
+
+### 投票（polls）
+- `poll`: `{ id, question, options[], anonymous, creatorAccount, creatorName, status, createdAt, deadline, votes }`
+  - `options[]`: `{ id, text }`，2-5 个；`votes` 对象映射 `{ account: optionId }`（对象可 JSON 持久化）。
+  - 约束：单账号单票，截止前可改投；`deadline` 可选。
+  - 状态：`open / closed`；序列化对 `closed` 与「超过 `deadline`」均标记 `closed` 并停止投票。
+  - 权限：成员可发起；仅发起人或管理员可关闭；仅管理员可删除。
+  - 成就：「决策发起人」（发起 3 次）、「参与决策者」（参与 5 次）。
+
+### 知识库（knowledge）
+- `knowledge`: `{ id, title, content, category, tags[], authorAccount, authorName, likes[], createdAt, updatedAt }`
+  - `category`: 规章制度 / 操作指引 / 设备说明 / 常见问题 / 其他；`tags[]` 最多 10 个、单标签 ≤12 字。
+  - `likes[]`: 点赞账号数组（数组可 JSON 持久化）；按点赞数降序、再按时间降序排序。
+  - 权限：成员可发布；作者或管理员可编辑 / 删除；全员可点赞 / 取消点赞。
+  - 成就：「知识贡献者」（发布 3 篇）、「知识之星」（获得 10 赞，点赞计入文章作者）。
+
 ### 坑位看板（restroom / 原坑位雷达）
 - 每个空间独立配置 `squat_count`（蹲坑）、`urinal_count`（尿槽）。
 - `stall`: `{ id, type: squat|urinal, name, status: free|reserved|waiting|occupied, ratings, reservation }`
@@ -195,6 +220,15 @@
 | `feedbackCreate` | 提交反馈（可匿名） | member |
 | `feedbackReply` / `feedbackClose` / `feedbackRemove` | 回复 / 关闭 / 删除反馈 | admin |
 | `moodCheckIn` | 提交 / 更新今日心情（emoji） | member |
+| `eventCreate` | 发起活动（含 `category` / `location` / `startAt` / `endAt` / `capacity`） | member |
+| `eventRsvp` | 活动 RSVP（`going` / `maybe` / `not_going`） | member |
+| `eventCancel` / `eventRemove` | 取消自己的活动 / 删除活动 | owner / admin |
+| `pollCreate` | 发起投票（`question` / `options[]` / 可选 `deadline` / `anonymous`） | member |
+| `pollVote` | 投票或改投（`optionId`） | member |
+| `pollClose` / `pollRemove` | 关闭自己的投票 / 删除投票 | owner / admin |
+| `knowledgeCreate` | 发布知识文章（`title` / `content` / `category` / `tags[]`） | member |
+| `knowledgeEdit` / `knowledgeDelete` | 编辑 / 删除文章 | author / admin |
+| `knowledgeLike` | 点赞 / 取消点赞文章 | member |
 | `attendCheckIn` / `attendCheckOut` | 上班 / 下班打卡 | member |
 | `attendConfig` | 配置工作时间与迟到宽限 | admin |
 | `profileUpdate` / `passwordChange` | 修改展示名、头像 / 修改密码 | member |
@@ -206,12 +240,12 @@
 
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，
-以及 `rooms`（含 `rooms` / `reservations` / `waitlist` / `waitlistTotal`）、`tools`、`materials`（含 `requests` / `templates`）、`repairs`、`visitors`、`stalls`、`attendance`（含 `records` / `stats` / `config`）、`desks`（含 `desks` / `reservations` / `reservationTotal`）、`deskStats`、`ooo`（含 `records` / `stats`）、`feedback`（含 `records` / `stats`）、`mood`（含 `records` / `stats`）、`users`、`leaderboard`（含 `account`、`role`、`display`），
-另有 `roomStats`、`spacePaused`、`roomWaitlistPromoted`、`roomRated`、`roomFavorites`、`repairEscalated`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendanceCheckedIn`、`attendanceCheckedOut` 等即时广播，另有 `oooBacked`、`oooReturnSoon`、`moodCheckedIn`；全量广播含 `inventory`（物资库存台账，随 `broadcastAll` 下发）；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows` / `feedback`）。
+以及 `rooms`（含 `rooms` / `reservations` / `waitlist` / `waitlistTotal`）、`tools`、`materials`（含 `requests` / `templates`）、`repairs`、`visitors`、`stalls`、`attendance`（含 `records` / `stats` / `config`）、`desks`（含 `desks` / `reservations` / `reservationTotal`）、`deskStats`、`ooo`（含 `records` / `stats`）、`feedback`（含 `records` / `stats`）、`mood`（含 `records` / `stats`）、`events`（含 `events` / `total` / `stats`）、`polls`（含 `polls` / `total` / `stats`）、`knowledge`（含 `knowledge` / `total` / `stats`）、`users`、`leaderboard`（含 `account`、`role`、`display`），
+另有 `roomStats`、`spacePaused`、`roomWaitlistPromoted`、`roomRated`、`roomFavorites`、`repairEscalated`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendanceCheckedIn`、`attendanceCheckedOut`、`eventReminder`、`eventRsvpChanged`、`pollVoted`、`pollClosed`、`knowledgeLiked` 等即时广播，另有 `oooBacked`、`oooReturnSoon`、`moodCheckedIn`；全量广播含 `inventory`（物资库存台账，随 `broadcastAll` 下发）；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows` / `feedback` / `events` / `polls` / `knowledge`）。
 
 ## 5. 前端
 
-单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 物资库存 / 报修 / 访客登记 / 考勤打卡 / 工位预约 / 外出登记 / 意见反馈 / 心情打卡 / 坑位看板），
+单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 物资库存 / 报修 / 访客登记 / 考勤打卡 / 工位预约 / 外出登记 / 意见反馈 / 心情打卡 / 活动管理 / 投票 / 知识库 / 坑位看板），
 个人资料入口位于侧栏底部；桌面与移动端响应式，原生 HTML/CSS/JS，无构建步骤；静态文件由 Express 托管；
 会议室预约支持每天 / 每周周期预约（列表按 `seriesId` 聚合展示并整组取消）；
 报修列表展示工单号 `RP-日期-编号` 并可调整高 / 中 / 低优先级；空间暂停时顶部展示暂停横幅并限制对应创建操作；

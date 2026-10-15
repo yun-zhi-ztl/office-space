@@ -18,9 +18,10 @@ const S = {
   lastSpace: localStorage.getItem('os_space')||'',
   ws: null, me:null, space:null, module:'rooms',
   pendingLogin:null,
-  DB:{ rooms:[], reservations:[], waitlist:[], waitlistTotal:0, tools:[], requests:[], materialTemplates:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[], inventory:{items:[],issues:[]}, attendance:{records:[],stats:{},config:{workStart:'09:00',workEnd:'18:00',lateMinutes:15}}, desks:{desks:[],reservations:[],reservationTotal:0}, ooo:{records:[],stats:{}} },
+  DB:{ rooms:[], reservations:[], waitlist:[], waitlistTotal:0, tools:[], requests:[], materialTemplates:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[], inventory:{items:[],issues:[]}, attendance:{records:[],stats:{},config:{workStart:'09:00',workEnd:'18:00',lateMinutes:15}}, desks:{desks:[],reservations:[],reservationTotal:0}, ooo:{records:[],stats:{}}, events:[], polls:[], knowledge:[] },
   visitorTotal:0, visitorOffset:0,
   borrowTotal:0, borrowOffset:0,
+  eventTotal:0, eventOffset:0, pollTotal:0, pollOffset:0, knowledgeTotal:0, knowledgeOffset:0,
   roomStats:null,
   deskStats:null,
   lastRoomBook:null,
@@ -28,7 +29,7 @@ const S = {
   weeklyReport:null,
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -64,6 +65,9 @@ function dispatch(m){
     case 'ooo': S.DB.ooo={ records:m.records||[], stats:m.stats||{} }; break;
     case 'feedback': S.DB.feedback={ records:m.records||[], stats:m.stats||{} }; break;
     case 'mood': S.DB.mood={ records:m.records||[], stats:m.stats||{} }; break;
+    case 'events': S.DB.events=m.events||[]; S.eventTotal=m.total||0; S.eventOffset=S.DB.events.length; S.eventStats=m.stats||{}; break;
+    case 'polls': S.DB.polls=m.polls||[]; S.pollTotal=m.total||0; S.pollOffset=S.DB.polls.length; S.pollStats=m.stats||{}; break;
+    case 'knowledge': S.DB.knowledge=m.knowledge||[]; S.knowledgeTotal=m.total||0; S.knowledgeOffset=S.DB.knowledge.length; S.knowledgeStats=m.stats||{}; break;
     case 'materials': S.DB.requests=m.requests; S.DB.materialTemplates=m.templates||[]; S.DB.matTotal=m.total||0; S.DB.matOffset=S.DB.requests.length; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; break;
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
@@ -90,6 +94,16 @@ function dispatch(m){
     case 'attendanceCheckedOut': toast('✔ 下班打卡成功，今日工作 '+Math.round((m.workedMinutes||0)/60)+'h'+((m.workedMinutes||0)%60?(m.workedMinutes%60)+'m':''),'success'); render(); break;
     case 'oooBacked': toast('✔ 已确认返回（'+(m.category||'外出')+'）','success'); render(); break;
     case 'moodCheckedIn': toast('🌈 心情已记录：'+(m.emoji||''),'success'); render(); break;
+    case 'eventCreated': toast('🎉 活动已创建','success'); render(); break;
+    case 'eventRsvpChanged': { const ev=(S.DB.events||[]).find(e=>e.id===m.rsvpId); if(ev) ev.myRsvp=m.status; toast('✔ 已更新参与状态（'+({going:'参加',maybe:'可能',not_going:'不参加'}[m.status]||m.status)+'）','success'); render(); break; }
+    case 'eventCancelled': toast('已取消活动','warn'); render(); break;
+    case 'eventReminder': toast('🔔 活动「'+(m.title||'')+'」即将开始：'+fmtTime(m.startAt),'success'); break;
+    case 'pollCreated': toast('🗳️ 投票已发起','success'); render(); break;
+    case 'pollVoted': { const pl=(S.DB.polls||[]).find(p=>p.id===m.pollId); if(pl) pl.myVote=m.optionId; toast('✔ 投票已提交','success'); render(); break; }
+    case 'pollClosed': toast('🔒 投票已关闭','info'); render(); break;
+    case 'knowledgeCreated': toast('📘 知识已发布','success'); render(); break;
+    case 'knowledgeUpdated': toast('✔ 文章已更新','success'); render(); break;
+    case 'knowledgeLiked': { const k=(S.DB.knowledge||[]).find(x=>x.id===m.id); if(k){ k.liked=m.liked; k.likeCount=Math.max(0,(k.likeCount||0)+(m.liked?1:-1)); } toast(m.liked?'👍 已点赞':'已取消点赞','success'); render(); break; }
     case 'oooReturnSoon': toast('🔔 外出预计 '+fmtTime(m.expectedReturnAt)+' 返回，请记得回来','warn'); render(); break;
     case 'borrowDueSoon': toast('🔔 你借的设备即将到期，请按时归还','warn'); render(); break;
     case 'roomReminder': { const rm=(S.DB.rooms||[]).find(r=>r.id===m.roomId); toast('🔔 '+(rm?rm.name:'会议室')+' 即将开始：'+fmtTime(m.startAt),'success'); break; }
@@ -131,7 +145,7 @@ function dispatch(m){
   if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','roomStats','users','leaderboard','achievements','myReminders','spaceTrend','notices','digest'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
@@ -148,9 +162,12 @@ function handlePage(m){
   else if(m.module==='rooms'){ S.DB.reservations=(S.DB.reservations||[]).concat(m.items); S.DB.revOffset=m.offset+m.items.length; }
   else if(m.module==='visitors'){ S.DB.visitors=(S.DB.visitors||[]).concat(m.items); S.visitorOffset=m.offset+m.items.length; }
   else if(m.module==='borrows'){ S.DB.borrows=(S.DB.borrows||[]).concat(m.items); S.borrowOffset=m.offset+m.items.length; }
+  else if(m.module==='events'){ S.DB.events=(S.DB.events||[]).concat(m.items); S.eventOffset=m.offset+m.items.length; }
+  else if(m.module==='polls'){ S.DB.polls=(S.DB.polls||[]).concat(m.items); S.pollOffset=m.offset+m.items.length; }
+  else if(m.module==='knowledge'){ S.DB.knowledge=(S.DB.knowledge||[]).concat(m.items); S.knowledgeOffset=m.offset+m.items.length; }
   render();
 }
-function loadMore(module){ wsSend({type:'fetchPage', module, offset: module==='materials'?S.DB.matOffset:module==='repairs'?S.DB.repOffset:module==='visitors'?S.visitorOffset:S.DB.revOffset, limit:PAGE}); }
+function loadMore(module){ wsSend({type:'fetchPage', module, offset: module==='materials'?S.DB.matOffset:module==='repairs'?S.DB.repOffset:module==='visitors'?S.visitorOffset:module==='events'?S.eventOffset:module==='polls'?S.pollOffset:module==='knowledge'?S.knowledgeOffset:S.DB.revOffset, limit:PAGE}); }
 /* ============ CSV 导出 ============ */
 function csvCell(v){ let s=String(v==null?'':v); if(/[",\n\r]/.test(s)) s='"'+s.replace(/"/g,'""')+'"'; return s; }
 function rowsToCsv(columns, rows){
@@ -995,6 +1012,121 @@ function openMoodPicker(){
   </div>`);
 }
 function pickMood(e){ wsSend({type:'moodCheckIn',emoji:e}); closeModal(); }
+
+/* ============ 活动管理 ============ */
+function eventStatusBadge(s){ return s==='upcoming'?'<span class="badge warn">即将开始</span>':s==='ongoing'?'<span class="badge ok">进行中</span>':s==='cancelled'?'<span class="badge bad">已取消</span>':'<span class="badge">已结束</span>'; }
+function renderEvents(){
+  const list=S.DB.events||[]; const me=S.me.account; const st=S.eventStats||{};
+  $('#main').innerHTML = `<div class="topbar"><div><h1>活动管理</h1><div class="sub">培训 / 分享会 / 团建 / 生日会，发起活动并收集 RSVP</div></div>
+    <button class="btn pri" onclick="openEventCreate()">＋ 发起活动</button></div>
+    <div class="cards">
+      <div class="card"><h3>📅 即将开始</h3><div style="font-size:30px;font-weight:800">${st.upcoming||0}</div><div class="meta">场活动</div></div>
+      <div class="card"><h3>🟢 进行中</h3><div style="font-size:30px;font-weight:800">${st.ongoing||0}</div><div class="meta">场活动</div></div>
+      <div class="card"><h3>✅ 已结束</h3><div style="font-size:30px;font-weight:800">${st.ended||0}</div><div class="meta">场活动</div></div>
+      <div class="card"><h3>🏢 活动总数</h3><div style="font-size:30px;font-weight:800">${st.total||0}</div><div class="meta">场活动</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">🎉 活动列表</h3>
+    <div class="list">${list.length?list.map(e=>`
+      <div class="row"><span><span class="who">${esc(e.title)} <span class="badge">${esc(e.category)}</span> ${eventStatusBadge(e.status)}</span>
+        <div class="desc">${esc(e.description||'')} ${e.location?'· 📍 '+esc(e.location):''}</div>
+        <div class="when">${fmtTime(e.startAt)} → ${fmtTime(e.endAt)} · 主办 ${esc(e.hostName||'')} · 参加 ${e.goingCount||0}/${e.capacity||'不限'}（${e.goingCount+e.maybeCount+e.notGoingCount||0} 人回复）</div>
+        ${e.status==='upcoming'&&e.myRsvp?`<div class="fs"><span class="badge ok">我：${({going:'参加',maybe:'可能',not_going:'不参加'}[e.myRsvp])||''}</span></div>`:''}
+      </span><span class="fs">${e.status==='upcoming'?`<button class="btn sm ${e.myRsvp==='going'?'green':''}" onclick="eventRsvp('${e.id}','going')">参加</button><button class="btn sm" onclick="eventRsvp('${e.id}','maybe')">可能</button><button class="btn sm" onclick="eventRsvp('${e.id}','not_going')">不参加</button>`:''}${e.hostAccount===me||S.admin?`<button class="btn danger sm" onclick="eventCancel('${e.id}')">取消</button>`:''}${S.admin?`<button class="btn danger sm" onclick="eventRemove('${e.id}')">删除</button>`:''}</span></div>`).join(''):'<div class="empty">还没有活动，来发起第一个吧</div>'}</div>
+    ${(S.eventOffset||0)<(S.eventTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('events')">加载更多（${S.eventTotal-(S.eventOffset||0)}）</button></div>`:''}`;
+}
+function openEventCreate(){
+  const mins=(n)=>{ const d=new Date(Date.now()+n*60000); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>发起活动</h2><div class="form">
+    <div class="fld"><label>标题</label><input id="evTitle" maxlength="50" placeholder="如：Q4 技术分享会"></div>
+    <div class="fld"><label>描述</label><textarea id="evDesc" rows="3" placeholder="活动说明…"></textarea></div>
+    <div class="fld"><label>类型</label><select id="evCat">${['培训','分享会','团建','生日会','会议','其它'].map(c=>`<option>${c}</option>`).join('')}</select></div>
+    <div class="fld"><label>地点（可选）</label><input id="evLoc" maxlength="30" placeholder="如：3F 会议室"></div>
+    <div class="fld"><label>开始时间</label><input id="evStart" type="datetime-local" value="${mins(60)}"></div>
+    <div class="fld"><label>结束时间</label><input id="evEnd" type="datetime-local" value="${mins(120)}"></div>
+    <div class="fld"><label>人数上限（可选，0=不限）</label><input id="evCap" type="number" min="0" value="0"></div>
+    <button class="btn pri" onclick="submitEventCreate()">发起</button></div>`);
+}
+function submitEventCreate(){ wsSend({type:'eventCreate',title:$('#evTitle').value,description:$('#evDesc').value,category:$('#evCat').value,location:$('#evLoc').value,startAt:Date.parse($('#evStart').value),endAt:Date.parse($('#evEnd').value),capacity:parseInt($('#evCap').value,10)||0}); closeModal(); }
+function eventRsvp(id,status){ wsSend({type:'eventRsvp',rsvpId:id,status}); }
+function eventCancel(id){ wsSend({type:'eventCancel',rsvpId:id}); }
+function eventRemove(id){ wsSend({type:'eventRemove',rsvpId:id}); }
+
+/* ============ 投票 ============ */
+function renderPolls(){
+  const list=S.DB.polls||[]; const me=S.me.account; const st=S.pollStats||{};
+  $('#main').innerHTML = `<div class="topbar"><div><h1>投票</h1><div class="sub">午饭吃什么、办公怎么改，一个投票快速达成共识</div></div>
+    <button class="btn pri" onclick="openPollCreate()">＋ 发起投票</button></div>
+    <div class="cards">
+      <div class="card"><h3>🗳️ 进行中</h3><div style="font-size:30px;font-weight:800">${st.open||0}</div><div class="meta">个投票</div></div>
+      <div class="card"><h3>🔒 已关闭</h3><div style="font-size:30px;font-weight:800">${st.closed||0}</div><div class="meta">个投票</div></div>
+      <div class="card"><h3>📊 投票总数</h3><div style="font-size:30px;font-weight:800">${st.total||0}</div><div class="meta">个投票</div></div>
+      <div class="card"><h3>🙋 累计参与</h3><div style="font-size:30px;font-weight:800">${st.totalVotes||0}</div><div class="meta">人次</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">🗳️ 投票列表</h3>
+    <div class="list">${list.length?list.map(p=>`
+      <div class="row"><span><span class="who">${esc(p.question)} ${p.anonymous?'<span class="badge">匿名</span>':''} ${p.closed?'<span class="badge bad">已截止</span>':p.status==='closed'?'<span class="badge">已关闭</span>':'<span class="badge ok">进行中</span>'}</span>
+        <div class="when">${esc(p.creatorName||'')} 发起 · ${p.deadline?'截止 '+fmtTime(p.deadline):'无截止时间'} · ${p.totalVotes} 票</div>
+        ${p.options.map(o=>`<div class="pollopt ${p.myVote===o.id?'voted':''}"><span>${o.count}</span><i>${o.text}</i>${p.closed?'':`<button class="btn sm" onclick="pollVote('${p.id}','${o.id}')">${p.myVote===o.id?'已投':'投票'}</button>`}</div>`).join('')}
+      </span><span class="fs">${p.creatorAccount===me||S.admin?`<button class="btn sm" onclick="pollClose('${p.id}')">关闭</button>`:''}${S.admin?`<button class="btn danger sm" onclick="pollRemove('${p.id}')">删除</button>`:''}</span></div>`).join(''):'<div class="empty">还没有投票</div>'}</div>
+    ${(S.pollOffset||0)<(S.pollTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('polls')">加载更多（${S.pollTotal-(S.pollOffset||0)}）</button></div>`:''}`;
+}
+function openPollCreate(){
+  const d=new Date(Date.now()+24*3600000);
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>发起投票</h2><div class="form">
+    <div class="fld"><label>问题</label><input id="plQ" maxlength="50" placeholder="午饭吃什么？"></div>
+    <div class="fld"><label>选项（2-5 个）</label><div class="fs" style="flex-direction:column;align-items:stretch">${[1,2,3].map(i=>`<div class="fs"><input id="plO${i}" maxlength="20" placeholder="选项 ${i}"><button class="btn sm danger" onclick="this.parentNode.remove()">×</button></div>`).join('')}<button class="btn sm" onclick="addPollOption()">＋ 添加选项</button></div></div>
+    <div class="fld"><label>截止时间（可选）</label><input id="plDead" type="datetime-local" value="${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}"></div>
+    <label class="check"><input id="plAnon" type="checkbox"> 匿名投票</label>
+    <button class="btn pri" onclick="submitPollCreate()">发起</button></div>`);
+}
+function addPollOption(){ const wrap=$('#modals'); if(!wrap) return; if(wrap.querySelectorAll('input[id^="plO"]').length>=5) return; const i=wrap.querySelectorAll('input[id^="plO"]').length+1; const row=document.createElement('div'); row.className='fs'; row.innerHTML=`<input id="plO${i}" maxlength="20" placeholder="选项 ${i}"><button class="btn sm danger" onclick="this.parentNode.remove()">×</button>`; const addBtn=wrap.querySelector('button[onclick="addPollOption()"]'); addBtn.before(row); }
+function submitPollCreate(){ const opts=[...document.querySelectorAll('#modals input[id^="plO"]')].map(i=>i.value).filter(Boolean); wsSend({type:'pollCreate',question:$('#plQ').value,options:opts,deadline:Date.parse($('#plDead').value)||null,anonymous:$('#plAnon').checked}); closeModal(); }
+function pollVote(id,optId){ wsSend({type:'pollVote',pollId:id,optionId:optId}); }
+function pollClose(id){ wsSend({type:'pollClose',pollId:id}); }
+function pollRemove(id){ wsSend({type:'pollRemove',pollId:id}); }
+
+/* ============ 知识库 ============ */
+function renderKnowledge(){
+  const list=S.DB.knowledge||[]; const me=S.me.account; const st=S.knowledgeStats||{};
+  const q=(S.kbQuery||'').toLowerCase();
+  const filtered=q?list.filter(k=>(k.title+k.content+(k.tags||[]).join('')+k.category).toLowerCase().includes(q)):list;
+  $('#main').innerHTML = `<div class="topbar"><div><h1>知识库</h1><div class="sub">规章制度 / 操作指引 / 设备说明 / 常见问题，一查就有</div></div>
+    <div class="fs"><input id="kbQ" placeholder="搜索标题、内容、标签…" value="${esc(S.kbQuery||'')}" oninput="S.kbQuery=this.value;render();"></div>
+    <button class="btn pri" onclick="openKnowledgeCreate()">＋ 发布文章</button></div>
+    <div class="cards">
+      <div class="card"><h3>📘 文章总数</h3><div style="font-size:30px;font-weight:800">${st.total||0}</div><div class="meta">篇</div></div>
+      <div class="card"><h3>👍 累计点赞</h3><div style="font-size:30px;font-weight:800">${st.liked||0}</div><div class="meta">次</div></div>
+      <div class="card"><h3>✍️ 贡献者</h3><div style="font-size:30px;font-weight:800">${st.authors||0}</div><div class="meta">人</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">📚 文章列表</h3>
+    <div class="list">${filtered.length?filtered.map(k=>`
+      <div class="row"><span><span class="who">${esc(k.title)} <span class="badge">${esc(k.category)}</span> ${k.tags.map(t=>`<span class="badge grey">${esc(t)}</span>`).join('')}</span>
+        <div class="desc">${esc((k.content||'').slice(0,120))}${(k.content||'').length>120?'…':''}</div>
+        <div class="when">${esc(k.authorName||'')} · ${fmtTime(k.createdAt)} · 👍 ${k.likeCount}</div>
+      </span><span class="fs"><button class="btn sm ${k.liked?'green':''}" onclick="knowledgeLike('${k.id}')">${k.liked?'👍 已赞':'👍 点赞'}</button>${k.authorAccount===me||S.admin?`<button class="btn sm" onclick="openKnowledgeEdit('${k.id}')">编辑</button><button class="btn danger sm" onclick="knowledgeDelete('${k.id}')">删除</button>`:''}</span></div>`).join(''):(q?'<div class="empty">没有匹配的文章</div>':'<div class="empty">还没有知识文章</div>')}</div>
+    ${(S.knowledgeOffset||0)<(S.knowledgeTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('knowledge')">加载更多（${S.knowledgeTotal-(S.knowledgeOffset||0)}）</button></div>`:''}`;
+}
+function openKnowledgeCreate(){
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>发布文章</h2><div class="form">
+    <div class="fld"><label>标题</label><input id="kbTitle" maxlength="50"></div>
+    <div class="fld"><label>分类</label><select id="kbCat">${['规章制度','操作指引','设备说明','常见问题','其他'].map(c=>`<option>${c}</option>`).join('')}</select></div>
+    <div class="fld"><label>标签（逗号分隔，最多 10 个）</label><input id="kbTags" placeholder="A4 纸, 打印"></div>
+    <div class="fld"><label>内容</label><textarea id="kbContent" rows="6"></textarea></div>
+    <button class="btn pri" onclick="submitKnowledgeCreate()">发布</button></div>`);
+}
+function submitKnowledgeCreate(){ wsSend({type:'knowledgeCreate',title:$('#kbTitle').value,content:$('#kbContent').value,category:$('#kbCat').value,tags:$('#kbTags').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)}); closeModal(); }
+function openKnowledgeEdit(id){
+  const k=(S.DB.knowledge||[]).find(x=>x.id===id); if(!k) return;
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>编辑文章</h2><div class="form">
+    <div class="fld"><label>标题</label><input id="kbTitle" maxlength="50" value="${esc(k.title)}"></div>
+    <div class="fld"><label>分类</label><select id="kbCat">${['规章制度','操作指引','设备说明','常见问题','其他'].map(c=>`<option ${c===k.category?'selected':''}>${c}</option>`).join('')}</select></div>
+    <div class="fld"><label>标签（逗号分隔）</label><input id="kbTags" value="${esc((k.tags||[]).join(','))}"></div>
+    <div class="fld"><label>内容</label><textarea id="kbContent" rows="6">${esc(k.content||'')}</textarea></div>
+    <button class="btn pri" onclick="submitKnowledgeEdit('${id}')">保存</button></div>`);
+}
+function submitKnowledgeEdit(id){ wsSend({type:'knowledgeEdit',id,title:$('#kbTitle').value,content:$('#kbContent').value,category:$('#kbCat').value,tags:$('#kbTags').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)}); closeModal(); }
+function knowledgeDelete(id){ wsSend({type:'knowledgeDelete',id}); }
+function knowledgeLike(id){ wsSend({type:'knowledgeLike',id}); }
 
 function renderAchievements(){
   const list = S.DB.achievements || [];

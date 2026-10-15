@@ -19,6 +19,9 @@ function createContext() {
   const FEEDBACK_CATEGORIES = ['建议', '吐槽', '问题', '表扬'];
   const MATERIAL_PRIORITIES = ['high', 'normal', 'low'];
   const MOOD_EMOJIS = ['😊', '😐', '😴', '😡', '🤩', '🥲'];
+  const EVENT_CATEGORIES = ['培训', '分享会', '团建', '生日会', '会议', '其它'];
+  const POLL_MAX_OPTIONS = 5;
+  const KNOWLEDGE_CATEGORIES = ['规章制度', '操作指引', '设备说明', '常见问题', '其他'];
   const LIST_PAGE = 30;
   const PERSIST_DEBOUNCE_MS = 500;
   const WS_PING_MS = 30000;
@@ -210,6 +213,9 @@ function createContext() {
       else if (r.kind === 'ooo') sp.ooo.set(data.id, data);
       else if (r.kind === 'feedback') sp.feedbacks.set(data.id, data);
       else if (r.kind === 'mood') sp.moods.set(data.id, data);
+      else if (r.kind === 'event') sp.events.set(data.id, data);
+      else if (r.kind === 'poll') sp.polls.set(data.id, data);
+      else if (r.kind === 'knowledge') sp.knowledge.set(data.id, data);
       else if (r.kind === 'notice') { sp.notices.push(data); sp.notices.sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
       else if (r.kind === 'stall') { const st = sp.stalls.find((s) => s.id === data.id); if (st) st.ratings = (data.ratings || []).slice(-60); }
     }
@@ -332,10 +338,10 @@ function createContext() {
 
   // ---------- 空间 ----------
   function weekKey(ts) { const d = new Date(ts || Date.now()); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
-  function newWeekly() { return { key: weekKey(), visits: 0, borrows: 0, requests: 0, repairs: 0, meetings: 0, attends: 0, desks: 0, ooo: 0 }; }
-  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, meetingActualDuration: 0, helperCount: 0, favoriteRooms: [], roomRatesGiven: 0, favoriteCount: 0, attendanceCount: 0, earlyCount: 0, deskCount: 0, oooCount: 0, weekly: newWeekly() }; }
+  function newWeekly() { return { key: weekKey(), visits: 0, borrows: 0, requests: 0, repairs: 0, meetings: 0, attends: 0, desks: 0, ooo: 0, events: 0, polls: 0 }; }
+  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, meetingActualDuration: 0, helperCount: 0, favoriteRooms: [], roomRatesGiven: 0, favoriteCount: 0, attendanceCount: 0, earlyCount: 0, deskCount: 0, oooCount: 0, eventCount: 0, eventAttendCount: 0, pollCreateCount: 0, pollVoteCount: 0, knowledgeCount: 0, knowledgeLikeCount: 0, weekly: newWeekly() }; }
   function recordWeekly(user, field) { if (!user.stats.weekly || user.stats.weekly.key !== weekKey()) user.stats.weekly = newWeekly(); user.stats.weekly[field] = (user.stats.weekly[field] || 0) + 1; }
-  function weeklyScore(stats) { const w = stats.weekly; if (!w || w.key !== weekKey()) return 0; return (w.visits || 0) + (w.borrows || 0) + (w.requests || 0) + (w.repairs || 0) + (w.meetings || 0) + (w.attends || 0) + (w.desks || 0) + (w.ooo || 0); }
+  function weeklyScore(stats) { const w = stats.weekly; if (!w || w.key !== weekKey()) return 0; return (w.visits || 0) + (w.borrows || 0) + (w.requests || 0) + (w.repairs || 0) + (w.meetings || 0) + (w.attends || 0) + (w.desks || 0) + (w.ooo || 0) + (w.events || 0) + (w.polls || 0); }
   function borrowOverdue(b, now) {
     if (!b || b.status !== 'borrowed') return false;
     const nowMs = now == null ? Date.now() : now;
@@ -366,6 +372,16 @@ function createContext() {
       if (r.reminded) return false;
       if (!r.remindAt) return false;
       return nowMs >= r.remindAt;
+    });
+  }
+  // 活动开始前提醒：开始前 10 分钟内提醒一次，避免刷屏
+  function dueEventReminders(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    return [...space.events.values()].filter((e) => {
+      if (e.cancelled) return false;
+      if (e.reminded) return false;
+      if (!e.remindAt) return false;
+      return nowMs >= e.remindAt && nowMs < e.startAt;
     });
   }
   // 借用临近到期（默认到期前 24 小时内）且尚未提醒过的在借用
@@ -449,6 +465,7 @@ function createContext() {
       tools: [], borrows: new Map(), toolWaitlist: new Map(), materialRequests: new Map(), materialTemplates: new Map(), repairs: new Map(), visitors: new Map(), urges: new Map(), inventory: [], inventoryIssues: new Map(),
       attendanceConfig: newAttendanceConfig(), attendance: new Map(),
       desks: [], deskReservations: new Map(), ooo: new Map(), feedbacks: new Map(), moods: new Map(),
+      events: new Map(), polls: new Map(), knowledge: new Map(),
     };
     sp.weeklyReportDate = null;
     sp.stalls = buildStalls(squat == null ? 4 : squat, urinal == null ? 3 : urinal);
@@ -902,6 +919,99 @@ function createContext() {
     return { total: [...space.moods.values()].filter((r) => r.date === key).length, counts };
   }
 
+  // ---------- 活动序列化 ----------
+  // 活动：培训 / 分享会 / 团建 / 生日会 / 会议，支持 RSVP 与开始前提醒
+  function eventPublic(space, info, user, now) {
+    const nowMs = now == null ? Date.now() : now;
+    return [...space.events.values()].sort((a, b) => (a.startAt || 0) - (b.startAt || 0)).map((e) => {
+      const host = info.get(e.hostAccount);
+      const rsvps = e.rsvps || {};
+      let going = 0, maybe = 0, notGoing = 0;
+      for (const v of Object.values(rsvps)) {
+        if (v === 'going') going++;
+        else if (v === 'maybe') maybe++;
+        else notGoing++;
+      }
+      let status = 'upcoming';
+      if (e.cancelled) status = 'cancelled';
+      else if (nowMs >= (e.endAt || 0)) status = 'ended';
+      else if (nowMs >= e.startAt) status = 'ongoing';
+      return {
+        id: e.id, title: e.title, description: e.description || '', category: e.category, location: e.location || '',
+        hostAccount: e.hostAccount, hostName: host ? host.display : e.hostName,
+        startAt: e.startAt, endAt: e.endAt, capacity: e.capacity || 0, status,
+        goingCount: going, maybeCount: maybe, notGoingCount: notGoing,
+        myRsvp: user ? (rsvps[user.account] || null) : null,
+        reminded: !!e.reminded, createdAt: e.createdAt || 0,
+      };
+    });
+  }
+  function eventStats(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const evs = [...space.events.values()];
+    return {
+      total: evs.length,
+      upcoming: evs.filter((e) => !e.cancelled && nowMs < e.startAt).length,
+      ongoing: evs.filter((e) => !e.cancelled && nowMs >= e.startAt && nowMs < e.endAt).length,
+      ended: evs.filter((e) => !e.cancelled && nowMs >= (e.endAt || 0)).length,
+      cancelled: evs.filter((e) => e.cancelled).length,
+      hostCount: new Set(evs.map((e) => e.hostAccount)).size,
+      todayCount: evs.filter((e) => !e.cancelled && todayKey(e.startAt) === todayKey(nowMs)).length,
+    };
+  }
+
+  // ---------- 投票序列化 ----------
+  // 投票：空间内快速决策（午饭 / 办公改进 / 时间安排），单账号单票，可匿名
+  function pollPublic(space, info, user, now) {
+    const nowMs = now == null ? Date.now() : now;
+    return [...space.polls.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map((p) => {
+      const creator = info.get(p.creatorAccount);
+      const votes = p.votes || {};
+      const options = (p.options || []).map((o) => ({ id: o.id, text: o.text, count: Object.values(votes).filter((v) => v === o.id).length }));
+      return {
+        id: p.id, question: p.question, options,
+        anonymous: !!p.anonymous,
+        creatorAccount: p.creatorAccount, creatorName: creator ? creator.display : p.creatorName,
+        status: p.status || 'open', createdAt: p.createdAt || 0, deadline: p.deadline || null,
+        myVote: user ? (votes[user.account] || null) : null,
+        totalVotes: Object.keys(votes).length,
+        closed: p.status === 'closed' || (p.deadline && nowMs >= p.deadline),
+      };
+    });
+  }
+  function pollStats(space) {
+    const ps = [...space.polls.values()];
+    return {
+      open: ps.filter((p) => p.status !== 'closed').length,
+      closed: ps.filter((p) => p.status === 'closed').length,
+      total: ps.length,
+      totalVotes: ps.reduce((s, p) => s + (p.votes ? Object.keys(p.votes).length : 0), 0),
+    };
+  }
+
+  // ---------- 知识库序列化 ----------
+  // 知识库：办公规章制度 / 操作指引 / 设备说明 / 常见问题，支持点赞与检索
+  function knowledgePublic(space, info, user) {
+    return [...space.knowledge.values()].sort((a, b) => {
+      const la = a.likes ? a.likes.length : 0, lb = b.likes ? b.likes.length : 0;
+      if (lb !== la) return lb - la;
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    }).map((k) => {
+      const author = info.get(k.authorAccount);
+      const likes = k.likes || [];
+      return {
+        id: k.id, title: k.title, content: k.content || '', category: k.category, tags: k.tags || [],
+        authorAccount: k.authorAccount, authorName: author ? author.display : k.authorName,
+        likeCount: likes.length, liked: user ? likes.includes(user.account) : false,
+        createdAt: k.createdAt || 0, updatedAt: k.updatedAt || 0,
+      };
+    });
+  }
+  function knowledgeStats(space) {
+    const ks = [...space.knowledge.values()];
+    return { total: ks.length, liked: ks.reduce((s, k) => s + (k.likes ? k.likes.length : 0), 0), authors: new Set(ks.map((k) => k.authorAccount)).size };
+  }
+
   // ---------- 广播 ----------
   function broadcast(spaceId, type, payload) { broadcastTo(spaceId, Object.assign({ type }, payload)); }
   function broadcastUsers(sp) {
@@ -957,6 +1067,21 @@ function createContext() {
     const info = spaceUserInfo(sp.id);
     broadcast(sp.id, 'mood', { records: moodPublic(sp, info), stats: moodStats(sp) });
   }
+  function eventsBroadcast(sp) {
+    const info = spaceUserInfo(sp.id);
+    const events = eventPublic(sp, info, null);
+    broadcast(sp.id, 'events', { events: events.slice(0, LIST_PAGE), total: events.length, stats: eventStats(sp) });
+  }
+  function pollsBroadcast(sp) {
+    const info = spaceUserInfo(sp.id);
+    const polls = pollPublic(sp, info, null);
+    broadcast(sp.id, 'polls', { polls: polls.slice(0, LIST_PAGE), total: polls.length, stats: pollStats(sp) });
+  }
+  function knowledgeBroadcast(sp) {
+    const info = spaceUserInfo(sp.id);
+    const knowledge = knowledgePublic(sp, info, null);
+    broadcast(sp.id, 'knowledge', { knowledge: knowledge.slice(0, LIST_PAGE), total: knowledge.length, stats: knowledgeStats(sp) });
+  }
   function broadcastAll(sp) {
     const info = spaceUserInfo(sp.id);
     const reservations = roomReservationsPublic(sp, info);
@@ -979,6 +1104,9 @@ function createContext() {
     oooBroadcast(sp);
     feedbackBroadcast(sp);
     moodBroadcast(sp);
+    eventsBroadcast(sp);
+    pollsBroadcast(sp);
+    knowledgeBroadcast(sp);
     broadcastUsers(sp);
     broadcastLeaderboard(sp);
   }
@@ -1008,6 +1136,12 @@ function createContext() {
     { id: 'deskKnight', name: '工位达人', desc: '预约工位累计5次', icon: '🪑', check: (u) => (u.stats.deskCount || 0) >= 5 },
     { id: 'awayReporter', name: '外出报备达人', desc: '外出登记累计5次', icon: '🧳', check: (u) => (u.stats.oooCount || 0) >= 5 },
     { id: 'listener', name: '倾听达人', desc: '回复意见反馈累计3条', icon: '👂', check: (u) => (u.stats.feedbackReplyCount || 0) >= 3 },
+    { id: 'eventHost', name: '活动主办', desc: '举办活动累计3次', icon: '🎤', check: (u) => (u.stats.eventCount || 0) >= 3 },
+    { id: 'eventAttendee', name: '活动达人', desc: '参加活动累计5次', icon: '🎟️', check: (u) => (u.stats.eventAttendCount || 0) >= 5 },
+    { id: 'pollMaker', name: '决策发起人', desc: '发起投票累计3次', icon: '🗳️', check: (u) => (u.stats.pollCreateCount || 0) >= 3 },
+    { id: 'pollVoter', name: '参与决策者', desc: '参与投票累计5次', icon: '🙋', check: (u) => (u.stats.pollVoteCount || 0) >= 5 },
+    { id: 'knowledgeAuthor', name: '知识贡献者', desc: '发布知识累计3篇', icon: '📝', check: (u) => (u.stats.knowledgeCount || 0) >= 3 },
+    { id: 'knowledgeLiked', name: '知识之星', desc: '获得点赞累计10个', icon: '⭐', check: (u) => (u.stats.knowledgeLikeCount || 0) >= 10 },
   ];
   function checkAchievements(user) {
     let changed = false;
@@ -1036,6 +1170,12 @@ function createContext() {
     deskKnight: { field: 'deskCount', target: 5 },
     awayReporter: { field: 'oooCount', target: 5 },
     listener: { field: 'feedbackReplyCount', target: 3 },
+    eventHost: { field: 'eventCount', target: 3 },
+    eventAttendee: { field: 'eventAttendCount', target: 5 },
+    pollMaker: { field: 'pollCreateCount', target: 3 },
+    pollVoter: { field: 'pollVoteCount', target: 5 },
+    knowledgeAuthor: { field: 'knowledgeCount', target: 3 },
+    knowledgeLiked: { field: 'knowledgeLikeCount', target: 10 },
   };
   function achievementProgress(user, def) {
     const t = ACH_TARGETS[def.id] || { field: 'totalVisits', target: 1 };
@@ -1057,7 +1197,8 @@ function createContext() {
 
   // ---------- 每日看点 ----------
   function buildDigest(space, user, now) {
-    const day0 = new Date(now == null ? Date.now() : now); day0.setHours(0, 0, 0, 0);
+    const nowMs = now == null ? Date.now() : now;
+    const day0 = new Date(nowMs); day0.setHours(0, 0, 0, 0);
     const today0 = day0.getTime(), todayEnd = today0 + 86400000;
     const todayMeetings = roomReservationsPublic(space).filter((r) => r.startAt >= today0 && r.startAt < todayEnd && r.status !== 'cancelled' && r.status !== 'expired');
     const overdue = [...space.borrows.values()].filter((b) => borrowOverdue(b));
@@ -1074,8 +1215,10 @@ function createContext() {
     const deskStatsToday = deskUsageStats(space, now);
     const todayMeetingMinutes = todayMeetings.reduce((s, r) => s + Math.max(0, Math.round((Math.min(r.endAt, todayEnd) - r.startAt) / 60000)), 0);
     const todayBorrowMinutes = [...space.borrows.values()].filter((b) => b.returnedAt && b.returnedAt >= today0 && b.returnedAt < todayEnd).reduce((s, b) => s + Math.max(0, Math.round((b.returnedAt - b.borrowedAt) / 60000)), 0);
+    const todayEvents = [...space.events.values()].filter((e) => !e.cancelled && e.startAt >= today0 && e.startAt < todayEnd);
+    const myUpcomingEvents = [...space.events.values()].filter((e) => !e.cancelled && e.startAt >= nowMs && e.startAt <= nowMs + 60 * 60000 && (e.rsvps && e.rsvps.get(user.account) === 'going'));
     const mvp = leaderboardPublic(space).rankings.find((r) => r.mvp) || null;
-    return { todayMeetingCount: todayMeetings.length, todayMeetings: todayMeetings.slice(0, 5), todayMeetingMinutes, todayBorrowMinutes, overdueCount: overdue.length, myBorrows: myBorrows.length, pendingMaterialsCount: pendingMaterials.length, openRepairsCount: openRepairs.length, resolvedRepairsCount: resolvedRepairs.length, resolvedMaterialsCount: resolvedMaterials.length, pendingVisitorsCount: pendingVisitors.length, pendingVisitors: pendingVisitors.slice(0, 5).map((v) => ({ visitorName: v.visitorName, hostName: v.hostName, status: v.status })), attendanceCheckedIn: todayAttendance.checkedIn, attendanceLate: todayAttendance.late, attendanceCompleteRate: todayAttendance.completeRate, oooActiveCount: oooStatsToday.activeCount, activeOoo, deskTodayCount, deskUtilizationPct: deskStatsToday.utilizationPct, mvp };
+    return { todayMeetingCount: todayMeetings.length, todayMeetings: todayMeetings.slice(0, 5), todayMeetingMinutes, todayBorrowMinutes, overdueCount: overdue.length, myBorrows: myBorrows.length, pendingMaterialsCount: pendingMaterials.length, openRepairsCount: openRepairs.length, resolvedRepairsCount: resolvedRepairs.length, resolvedMaterialsCount: resolvedMaterials.length, pendingVisitorsCount: pendingVisitors.length, pendingVisitors: pendingVisitors.slice(0, 5).map((v) => ({ visitorName: v.visitorName, hostName: v.hostName, status: v.status })), attendanceCheckedIn: todayAttendance.checkedIn, attendanceLate: todayAttendance.late, attendanceCompleteRate: todayAttendance.completeRate, oooActiveCount: oooStatsToday.activeCount, activeOoo, deskTodayCount, deskUtilizationPct: deskStatsToday.utilizationPct, todayEventCount: todayEvents.length, todayEvents: todayEvents.slice(0, 5).map((e) => ({ id: e.id, title: e.title, startAt: e.startAt, endAt: e.endAt })), upcomingEventCount: myUpcomingEvents.length, mvp };
   }
 
   // ---------- 我的待办 ----------
@@ -1089,6 +1232,7 @@ function createContext() {
     const assignedRepairs = [...space.repairs.values()].filter((r) => r.handlerAccount === user.account && (r.status === 'reported' || r.status === 'in_progress'));
     const upcomingDesk = [...space.deskReservations.values()].filter((r) => r.account === user.account && r.status === 'pending' && r.startAt >= nowMs && r.startAt <= nowMs + 60 * 60000);
     const activeOoo = [...space.ooo.values()].filter((r) => r.account === user.account && r.status === 'active');
+    const upcomingEvents = [...space.events.values()].filter((e) => !e.cancelled && e.startAt >= nowMs && e.startAt <= nowMs + 60 * 60000 && (e.rsvps && e.rsvps.get(user.account) === 'going' || e.hostAccount === user.account));
     return {
       overdueCount: overdue.length,
       overdue: overdue.map((b) => ({ id: b.id, toolId: b.toolId, qty: b.qty, dueAt: b.dueAt || null, days: Math.floor((nowMs - (b.borrowedAt || nowMs)) / 86400000) })),
@@ -1104,6 +1248,8 @@ function createContext() {
       upcomingDesk: upcomingDesk.map((r) => ({ id: r.id, deskId: r.deskId, startAt: r.startAt, endAt: r.endAt })),
       activeOooCount: activeOoo.length,
       activeOoo: activeOoo.map((r) => ({ id: r.id, category: r.category, expectedReturnAt: r.expectedReturnAt || null })),
+      upcomingEventCount: upcomingEvents.length,
+      upcomingEvents: upcomingEvents.map((e) => ({ id: e.id, title: e.title, startAt: e.startAt, endAt: e.endAt, host: e.hostAccount === user.account })),
     };
   }
 
@@ -1114,7 +1260,7 @@ function createContext() {
     const today0 = new Date(); today0.setHours(0, 0, 0, 0);
     const dayStart = today0.getTime() - (n - 1) * 86400000;
     const buckets = [];
-    for (let i = 0; i < n; i++) buckets.push({ date: dayStart + i * 86400000, meetings: 0, borrows: 0, requests: 0, repairs: 0, visitors: 0, attends: 0, desks: 0, ooo: 0 });
+    for (let i = 0; i < n; i++) buckets.push({ date: dayStart + i * 86400000, meetings: 0, borrows: 0, requests: 0, repairs: 0, visitors: 0, attends: 0, desks: 0, ooo: 0, events: 0, polls: 0 });
     const idxOf = (ts) => Math.floor((ts - dayStart) / 86400000);
     const bump = (b, k) => { if (b >= 0 && b < n) buckets[b][k]++; };
     for (const r of space.roomReservations.values()) {
@@ -1128,7 +1274,9 @@ function createContext() {
     for (const r of space.attendance.values()) { if (r.checkInAt) bump(idxOf(r.checkInAt), 'attends'); }
     for (const r of space.deskReservations.values()) { if (r.status !== 'cancelled' && r.status !== 'expired') bump(idxOf(r.startAt), 'desks'); }
     for (const r of space.ooo.values()) { bump(idxOf(r.startAt), 'ooo'); }
-    return buckets.map((b) => ({ date: b.date, meetings: b.meetings, borrows: b.borrows, requests: b.requests, repairs: b.repairs, visitors: b.visitors, attends: b.attends, desks: b.desks, ooo: b.ooo }));
+    for (const e of space.events.values()) { if (!e.cancelled) bump(idxOf(e.startAt), 'events'); }
+    for (const p of space.polls.values()) { bump(idxOf(p.createdAt), 'polls'); }
+    return buckets.map((b) => ({ date: b.date, meetings: b.meetings, borrows: b.borrows, requests: b.requests, repairs: b.repairs, visitors: b.visitors, attends: b.attends, desks: b.desks, ooo: b.ooo, events: b.events, polls: b.polls }));
   }
 
   // ---------- 空间周报 ----------
@@ -1146,6 +1294,8 @@ function createContext() {
     const attendance = [...space.attendance.values()].filter((r) => r.checkInAt && inWeek(r.checkInAt));
     const ooo = [...space.ooo.values()].filter((r) => inWeek(r.startAt));
     const desks = [...space.deskReservations.values()].filter((r) => r.status !== 'cancelled' && r.status !== 'expired' && inWeek(r.startAt));
+    const events = [...space.events.values()].filter((e) => !e.cancelled && inWeek(e.startAt));
+    const polls = [...space.polls.values()].filter((p) => inWeek(p.createdAt));
     const resolvedRepairs = [...space.repairs.values()].filter((r) => r.status === 'resolved' && r.handledAt && inWeek(r.handledAt));
     const fulfilledMaterials = [...space.materialRequests.values()].filter((m) => m.status === 'fulfilled' && m.handledAt && inWeek(m.handledAt));
     const lowStock = space.tools.filter((t) => isToolLowStock(t)).map((t) => ({ id: t.id, name: t.name, available: t.available, minAvailable: t.minAvailable || 1 }));
@@ -1162,6 +1312,8 @@ function createContext() {
       attendance: attendance.length,
       ooo: ooo.length,
       desks: desks.length,
+      events: events.length,
+      polls: polls.length,
       openRepairsCount: openRepairs.length,
       pendingMaterialsCount: pendingMaterials.length,
       lowStockTools: lowStock,
@@ -1172,7 +1324,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, EVENT_CATEGORIES, POLL_MAX_OPTIONS, KNOWLEDGE_CATEGORIES, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -1184,11 +1336,11 @@ function createContext() {
     // 持久化
     saveSpace, saveAccount, saveProfile, saveEntity, deleteEntity, saveStallRating, saveStatsToSpace,
     // 空间
-    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
+    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats,
     // 广播
-    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, noticesBroadcast, pushNotice, visitorsBroadcast,
+    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, eventsBroadcast, pollsBroadcast, knowledgeBroadcast, noticesBroadcast, pushNotice, visitorsBroadcast,
     // 坑位辅助
     activeStallCount, checkAchievements, notifyUrge, ACHIEVEMENT_DEFS,
     achievementProgress, achievementDefsPublic,

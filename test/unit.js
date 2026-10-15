@@ -79,7 +79,7 @@ const p3 = api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id =
 assert(p3.unlocked === true, '累计 10 次解锁蹲坑之王');
 assertEq(p3.pct, 100, '蹲坑之王达成后进度 100');
 const pub = api.achievementDefsPublic(user);
-assertEq(pub.length, 18, '成就公开列表含 18 项');
+assertEq(pub.length, 24, '成就公开列表含 24 项');
 assert(pub.every((a) => a.id && a.name && a.desc && a.icon), '公开成就含 id/name/desc/icon');
 user.stats.borrowCount = 3;
 assert(api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'borrower')).unlocked === true, '借用 3 次解锁借阅达人');
@@ -724,6 +724,76 @@ const moodSt = api.moodStats(moodSp);
 assertEq(moodSt.total, 2, 'moodStats 统计今日总人数');
 assertEq(moodSt.counts['😴'], 1, 'moodStats 统计单种表情数量');
 assertEq(moodSt.counts['😊'], 1, 'moodStats 统计多种表情数量');
+
+// ---------- 活动序列化 + 统计 ----------
+console.log('\n📋 43. 活动序列化 / 统计 / 提醒');
+const evSp = api.createSpace('s45', '活动空间', 1, 0);
+const tEv = new Date('2026-10-17T10:00:00+08:00').getTime();
+evSp.events.set('ev1', { id: 'ev1', title: 'Q4 分享会', description: '技术分享', category: '分享会', location: '3F', hostAccount: 'alice', hostName: '甲', startAt: tEv, endAt: tEv + 60 * 60000, capacity: 5, rsvps: { alice: 'going', bob: 'maybe' }, cancelled: false, reminded: false, remindAt: tEv - 10 * 60000, createdAt: 1 });
+evSp.events.set('ev2', { id: 'ev2', title: '团建', category: '团建', hostAccount: 'alice', hostName: '甲', startAt: tEv - 120 * 60000, endAt: tEv - 60 * 60000, capacity: 0, rsvps: {}, cancelled: false, reminded: false, remindAt: 0, createdAt: 2 });
+evSp.events.set('ev3', { id: 'ev3', title: '已取消', category: '会议', hostAccount: 'bob', hostName: '乙', startAt: tEv + 3600000, endAt: tEv + 7200000, capacity: 0, rsvps: {}, cancelled: true, reminded: false, remindAt: 0, createdAt: 3 });
+evSp.events.set('ev4', { id: 'ev4', title: '生日会', category: '生日会', hostAccount: 'alice', hostName: '甲', startAt: tEv + 3600000, endAt: tEv + 5400000, capacity: 0, rsvps: {}, cancelled: false, reminded: false, remindAt: 0, createdAt: 4 });
+const evPub = api.eventPublic(evSp, api.spaceUserInfo(evSp.id), null, tEv);
+assertEq(evPub.length, 4, 'eventPublic 返回全部活动');
+assertEq(evPub.find((e) => e.id === 'ev1').status, 'ongoing', '进行中的活动状态为 ongoing');
+assertEq(evPub.find((e) => e.id === 'ev2').status, 'ended', '已结束的活动状态为 ended');
+assertEq(evPub.find((e) => e.id === 'ev3').status, 'cancelled', '已取消的活动状态为 cancelled');
+assertEq(evPub.find((e) => e.id === 'ev1').goingCount, 1, 'eventPublic 统计参加人数');
+assertEq(evPub.find((e) => e.id === 'ev1').maybeCount, 1, 'eventPublic 统计可能人数');
+const evSt = api.eventStats(evSp, tEv);
+assertEq(evSt.total, 4, 'eventStats 统计活动总数');
+assertEq(evSt.upcoming, 1, 'eventStats 统计即将开始');
+assertEq(evSt.ongoing, 1, 'eventStats 统计进行中');
+assertEq(evSt.cancelled, 1, 'eventStats 统计已取消');
+const evRem = api.dueEventReminders(evSp, tEv - 5 * 60000);
+assertEq(evRem.length, 1, 'dueEventReminders 命中开始前 10 分钟内的活动');
+assertEq(api.dueEventReminders(evSp, tEv + 5 * 60000).length, 0, 'dueEventReminders 活动开始后不再提醒');
+
+// ---------- 投票序列化 + 统计 ----------
+console.log('\n📋 44. 投票序列化 / 统计');
+const plSp = api.createSpace('s46', '投票空间', 1, 0);
+plSp.polls.set('pl1', { id: 'pl1', question: '午饭吃什么', options: [{ id: 'o1', text: '面' }, { id: 'o2', text: '饭' }], anonymous: true, creatorAccount: 'alice', creatorName: '甲', status: 'open', createdAt: 1, deadline: null, votes: { alice: 'o1', bob: 'o2', carol: 'o1' } });
+const plPub = api.pollPublic(plSp, api.spaceUserInfo(plSp.id), { account: 'alice' });
+assertEq(plPub.length, 1, 'pollPublic 返回投票');
+assertEq(plPub[0].options[0].count, 2, 'pollPublic 统计选项票数');
+assertEq(plPub[0].options[1].count, 1, 'pollPublic 统计第二项票数');
+assertEq(plPub[0].myVote, 'o1', 'pollPublic 暴露本人投票');
+assertEq(plPub[0].totalVotes, 3, 'pollPublic 统计总投票数');
+assertEq(plPub[0].anonymous, true, 'pollPublic 保留匿名标记');
+const plSt = api.pollStats(plSp);
+assertEq(plSt.open, 1, 'pollStats 统计进行中');
+assertEq(plSt.totalVotes, 3, 'pollStats 统计总投票');
+
+// ---------- 知识库序列化 + 统计 ----------
+console.log('\n📋 45. 知识库序列化 / 统计');
+const kbSp = api.createSpace('s47', '知识空间', 1, 0);
+kbSp.knowledge.set('kb1', { id: 'kb1', title: 'A4 纸在哪', content: '打印区右侧柜子', category: '操作指引', tags: ['打印'], authorAccount: 'alice', authorName: '甲', likes: ['alice', 'bob'], createdAt: 1, updatedAt: 2 });
+kbSp.knowledge.set('kb2', { id: 'kb2', title: '会议室规则', content: '用完关灯', category: '规章制度', tags: [], authorAccount: 'bob', authorName: '乙', likes: [], createdAt: 3, updatedAt: 4 });
+const kbPub = api.knowledgePublic(kbSp, api.spaceUserInfo(kbSp.id), { account: 'alice' });
+assertEq(kbPub.length, 2, 'knowledgePublic 返回全部文章');
+assertEq(kbPub[0].title, 'A4 纸在哪', 'knowledgePublic 按点赞数排序');
+assertEq(kbPub[0].likeCount, 2, 'knowledgePublic 统计点赞数');
+assertEq(kbPub[0].liked, true, 'knowledgePublic 标记本人已赞');
+assertEq(kbPub[1].liked, false, 'knowledgePublic 未点赞为 false');
+const kbSt = api.knowledgeStats(kbSp);
+assertEq(kbSt.total, 2, 'knowledgeStats 统计文章数');
+assertEq(kbSt.liked, 2, 'knowledgeStats 统计点赞总数');
+
+// ---------- 扩展成就 ----------
+console.log('\n📋 46. 活动 / 投票 / 知识库成就');
+const achUser4 = { stats: api.newStats(), achievements: [] };
+achUser4.stats.eventCount = 3; achUser4.stats.eventAttendCount = 5;
+api.checkAchievements(achUser4);
+assert(achUser4.achievements.includes('eventHost'), '举办活动 3 次解锁活动主办');
+assert(achUser4.achievements.includes('eventAttendee'), '参加活动 5 次解锁活动达人');
+achUser4.stats.pollCreateCount = 3; achUser4.stats.pollVoteCount = 5;
+api.checkAchievements(achUser4);
+assert(achUser4.achievements.includes('pollMaker'), '发起投票 3 次解锁决策发起人');
+assert(achUser4.achievements.includes('pollVoter'), '参与投票 5 次解锁参与决策者');
+achUser4.stats.knowledgeCount = 3; achUser4.stats.knowledgeLikeCount = 10;
+api.checkAchievements(achUser4);
+assert(achUser4.achievements.includes('knowledgeAuthor'), '发布知识 3 篇解锁知识贡献者');
+assert(achUser4.achievements.includes('knowledgeLiked'), '获得 10 赞解锁知识之星');
 
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);

@@ -979,7 +979,7 @@ async function runTests() {
     await sendMsg(wA, { type: 'getAchievements' });
     const ach = last(wA, 'achievements');
     assert(ach && Array.isArray(ach.achievements), '成就墙返回 achievements 数组');
-    assert(ach.achievements.length === 18, '成就墙含 18 个成就');
+    assert(ach.achievements.length === 24, '成就墙含 24 个成就');
     assert(ach.achievements.every((a) => a.id && a.name && a.desc && a.icon), '每项成就含 id/name/desc/icon');
     assert(ach.achievements.every((a) => a.current != null && a.target != null && a.pct != null && typeof a.unlocked === 'boolean'), '每项成就含进度字段');
     assert(ach.achievements.find((a) => a.id === 'punctual').target === 3, '守时达人目标值为 3');
@@ -1381,6 +1381,104 @@ async function runTests() {
     await sendMsg(wA, { type: 'moodCheckIn', emoji: '🤩' });
     const mood2 = await waitFor(wA, 'mood', (m) => m.records && m.records.length === 2, 3000);
     assert(mood2 && mood2.stats.total === 2, '多人心情统计累计');
+    wA.close(); wB.close();
+  }
+
+  // ========== 测试33: 活动管理 ==========
+  console.log('\n📋 测试33: 活动管理');
+  {
+    const spE = (await httpJson('POST', '/api/spaces', { name: '活动办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aE = 'evt_' + runKey, bE = 'evtm_' + runKey;
+    await reg(aE, 'pw', '活动管理员'); await reg(bE, 'pw', '活动成员');
+    const wA = await createWSClient(); await loginTo(wA, spE.id, aE, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spE.id, bE, 'pw');
+    const startAt = Date.now() + 60 * 60000, endAt = Date.now() + 120 * 60000;
+    // 管理员发起活动
+    await sendMsg(wA, { type: 'eventCreate', title: 'Q4 分享会', description: '技术分享', category: '分享会', location: '3F', startAt, endAt, capacity: 5 });
+    const ev0 = await waitFor(wA, 'events', (e) => e.events && e.events.length === 1, 3000);
+    assert(ev0 && ev0.events[0].title === 'Q4 分享会', '管理员发起活动成功');
+    assert(ev0 && ev0.stats.total === 1, '活动统计总数为 1');
+    assert(ev0 && ev0.events[0].status === 'upcoming', '新活动状态为即将开始');
+    // 成员 RSVP 参加
+    const evId = ev0.events[0].id;
+    await sendMsg(wB, { type: 'eventRsvp', rsvpId: evId, status: 'going' });
+    const ev1 = await waitFor(wB, 'events', (e) => e.events && e.events.some((x) => x.id === evId && x.goingCount === 1), 3000);
+    assert(ev1 && ev1.events.find((x) => x.id === evId).goingCount === 1, '成员 RSVP 参加成功');
+    // 管理员也参与（maybe）
+    await sendMsg(wA, { type: 'eventRsvp', rsvpId: evId, status: 'maybe' });
+    const ev2 = await waitFor(wA, 'events', (e) => e.events && e.events.some((x) => x.id === evId && x.maybeCount === 1), 3000);
+    assert(ev2 && ev2.events.find((x) => x.id === evId).maybeCount === 1, '管理员 RSVP 可能参加成功');
+    // 成员不能取消他人活动
+    await sendMsg(wB, { type: 'eventCancel', rsvpId: evId });
+    const evErr = mk(wB, 'error');
+    assert(evErr.length > 0 && evErr[evErr.length - 1].message.includes('只能取消自己'), '成员取消他人活动被拒');
+    // 管理员取消活动
+    await sendMsg(wA, { type: 'eventCancel', rsvpId: evId });
+    const ev3 = await waitFor(wA, 'events', (e) => e.events && e.events.some((x) => x.id === evId && x.status === 'cancelled'), 3000);
+    assert(ev3 && ev3.events.find((x) => x.id === evId).status === 'cancelled', '管理员取消活动成功');
+    wA.close(); wB.close();
+  }
+
+  // ========== 测试34: 投票 ==========
+  console.log('\n📋 测试34: 投票');
+  {
+    const spP = (await httpJson('POST', '/api/spaces', { name: '投票办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aP = 'poll_' + runKey, bP = 'pollm_' + runKey;
+    await reg(aP, 'pw', '投票管理员'); await reg(bP, 'pw', '投票成员');
+    const wA = await createWSClient(); await loginTo(wA, spP.id, aP, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spP.id, bP, 'pw');
+    // 管理员发起匿名投票
+    await sendMsg(wA, { type: 'pollCreate', question: '午饭吃什么', options: ['面', '饭'], anonymous: true });
+    const pl0 = await waitFor(wA, 'polls', (p) => p.polls && p.polls.length === 1, 3000);
+    assert(pl0 && pl0.polls[0].question === '午饭吃什么', '管理员发起投票成功');
+    assert(pl0 && pl0.polls[0].options.length === 2, '投票包含两个选项');
+    assert(pl0 && pl0.polls[0].anonymous === true, '投票匿名标记正确');
+    // 成员投票
+    const plId = pl0.polls[0].id, optId = pl0.polls[0].options[0].id;
+    await sendMsg(wB, { type: 'pollVote', pollId: plId, optionId: optId });
+    const pl1 = await waitFor(wB, 'polls', (p) => p.polls && p.polls.some((x) => x.id === plId && x.totalVotes === 1), 3000);
+    assert(pl1 && pl1.polls.find((x) => x.id === plId).options[0].count === 1, '成员投票后票数正确');
+    const votedMsg = await waitFor(wB, 'pollVoted', (m) => m.pollId === plId && m.optionId === optId, 3000);
+    assert(votedMsg, '成员收到投票确认消息');
+    // 管理员关闭投票
+    await sendMsg(wA, { type: 'pollClose', pollId: plId });
+    const pl2 = await waitFor(wA, 'polls', (p) => p.polls && p.polls.some((x) => x.id === plId && x.status === 'closed'), 3000);
+    assert(pl2 && pl2.polls.find((x) => x.id === plId).status === 'closed', '管理员关闭投票成功');
+    wA.close(); wB.close();
+  }
+
+  // ========== 测试35: 知识库 ==========
+  console.log('\n📋 测试35: 知识库');
+  {
+    const spK = (await httpJson('POST', '/api/spaces', { name: '知识办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aK = 'kb_' + runKey, bK = 'kbm_' + runKey;
+    await reg(aK, 'pw', '知识管理员'); await reg(bK, 'pw', '知识成员');
+    const wA = await createWSClient(); await loginTo(wA, spK.id, aK, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spK.id, bK, 'pw');
+    // 管理员发布文章
+    await sendMsg(wA, { type: 'knowledgeCreate', title: '会议室规则', content: '用完关灯关空调', category: '规章制度', tags: ['会议室'] });
+    const kb0 = await waitFor(wA, 'knowledge', (k) => k.knowledge && k.knowledge.length === 1, 3000);
+    assert(kb0 && kb0.knowledge[0].title === '会议室规则', '管理员发布文章成功');
+    assert(kb0 && kb0.knowledge[0].likeCount === 0, '新文章点赞为 0');
+    // 成员点赞管理员文章
+    const kbId = kb0.knowledge[0].id;
+    await sendMsg(wB, { type: 'knowledgeLike', id: kbId });
+    const kb1 = await waitFor(wB, 'knowledge', (k) => k.knowledge && k.knowledge.some((x) => x.id === kbId && x.likeCount === 1), 3000);
+    assert(kb1 && kb1.knowledge.find((x) => x.id === kbId).likeCount === 1, '成员点赞成功，点赞数增加');
+    const likedMsg = await waitFor(wB, 'knowledgeLiked', (m) => m.id === kbId && m.liked === true, 3000);
+    assert(likedMsg, '成员收到点赞确认消息');
+    // 成员不能删除他人文章
+    await sendMsg(wB, { type: 'knowledgeDelete', id: kbId });
+    const kbErr = mk(wB, 'error');
+    assert(kbErr.length > 0 && kbErr[kbErr.length - 1].message.includes('只能删除自己的'), '成员删除他人文章被拒');
+    // 成员发布并删除自己的文章
+    await sendMsg(wB, { type: 'knowledgeCreate', title: '打印纸', content: 'A4 在打印区', category: '操作指引', tags: [] });
+    const kb2 = await waitFor(wB, 'knowledge', (k) => k.knowledge && k.knowledge.length === 2, 3000);
+    assert(kb2 && kb2.knowledge.length === 2, '成员发布自己的文章成功');
+    const ownId = kb2.knowledge.find((x) => x.authorAccount === bK).id;
+    await sendMsg(wB, { type: 'knowledgeDelete', id: ownId });
+    const kb3 = await waitFor(wB, 'knowledge', (k) => k.knowledge && k.knowledge.length === 1, 3000);
+    assert(kb3 && kb3.knowledge.length === 1, '成员删除自己的文章成功');
     wA.close(); wB.close();
   }
   console.log(`\n${'='.repeat(50)}`);

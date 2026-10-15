@@ -27,6 +27,9 @@ const desksModule = require('./src/modules/desks');
 const oooModule = require('./src/modules/ooo');
 const feedbackModule = require('./src/modules/feedback');
 const moodModule = require('./src/modules/mood');
+const eventsModule = require('./src/modules/events');
+const pollsModule = require('./src/modules/polls');
+const knowledgeModule = require('./src/modules/knowledge');
 
 // ---------- 上下文 ----------
 const api = createContext();
@@ -68,6 +71,9 @@ const desks = desksModule(api);
 const ooo = oooModule(api);
 const feedback = feedbackModule(api);
 const mood = moodModule(api);
+const events = eventsModule(api);
+const polls = pollsModule(api);
+const knowledge = knowledgeModule(api);
 
 // ---------- 分页加载 ----------
 function handleFetchPage(ws, user, space, msg) {
@@ -82,6 +88,9 @@ function handleFetchPage(ws, user, space, msg) {
   else if (msg.module === 'visitors') { const all = api.visitorsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
   else if (msg.module === 'borrows') { const all = api.borrowsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
   else if (msg.module === 'feedback') { const all = api.feedbackPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
+  else if (msg.module === 'events') { const all = api.eventPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
+  else if (msg.module === 'polls') { const all = api.pollPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
+  else if (msg.module === 'knowledge') { const all = api.knowledgePublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
   else return api.sendTo(ws, api.serError('不支持的分页模块'));
   api.sendTo(ws, { type: 'page', module: msg.module, offset, items, total });
 }
@@ -141,6 +150,12 @@ wss.on('connection', (ws) => {
         feedback.handleFeedback(ws, user, space, msg); break;
       case 'moodCheckIn':
         mood.handleMood(ws, user, space, msg); break;
+      case 'eventCreate': case 'eventRsvp': case 'eventCancel': case 'eventRemove':
+        events.handleEvents(ws, user, space, msg); break;
+      case 'pollCreate': case 'pollVote': case 'pollClose': case 'pollRemove':
+        polls.handlePolls(ws, user, space, msg); break;
+      case 'knowledgeCreate': case 'knowledgeEdit': case 'knowledgeDelete': case 'knowledgeLike':
+        knowledge.handleKnowledge(ws, user, space, msg); break;
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
       case 'announce': extras.announce(ws, user, space, msg); break;
       case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;
@@ -298,6 +313,17 @@ setInterval(() => {
         api.sendToAccount(r.ownerAccount, { type: 'roomReminder', reservationId: r.id, roomId: r.roomId, startAt: r.startAt });
       }
       rooms.roomsBroadcast(sp);
+    }
+    // 活动开始前提醒：开始前 10 分钟内提醒一次
+    const eventReminders = api.dueEventReminders(sp, now);
+    if (eventReminders.length) {
+      for (const e of eventReminders) {
+        e.reminded = true;
+        api.saveEntity(sp.id, 'event', e.id, e);
+        api.sendToAccount(e.hostAccount, { type: 'eventReminder', eventId: e.id, title: e.title, startAt: e.startAt });
+        for (const acc of Object.keys(e.rsvps || {})) api.sendToAccount(acc, { type: 'eventReminder', eventId: e.id, title: e.title, startAt: e.startAt });
+      }
+      api.eventsBroadcast(sp);
     }
     // 借用到期前提醒：到期前 24 小时内提醒一次，避免逾期
     const borrowSoonReminders = api.dueBorrowSoonReminders(sp, now);
