@@ -104,6 +104,8 @@ async function runTests() {
   await sendMsg(w2, { type: 'roomBook', roomId, startAt: t0 + 10 * 60000, endAt: t0 + 40 * 60000, title: '评审会' });
   rooms = last(w2, 'rooms');
   assert(rooms && rooms.reservations.length === 1 && rooms.reservations[0].status === 'pending', 'member 预约会议室成功');
+  const res0 = rooms.reservations[0];
+  assert(res0.remindAt && res0.remindAt <= res0.startAt && res0.remindAt >= res0.startAt - 10 * 60000, '预约携带开始前提醒时间 remindAt');
   const rs = last(w2, 'roomStats');
   assert(rs && rs.rooms.some(r => r.todayCount === 1) && rs.utilizationPct >= 0, 'roomStats 统计到今日会议');
   const resId = rooms.reservations[0].id;
@@ -678,6 +680,26 @@ async function runTests() {
     assert(t && Array.isArray(t.trend) && t.trend.length === 14, '趋势返回 14 天数组');
     assert(t.trend.every((b) => 'date' in b && 'meetings' in b && 'borrows' in b && 'requests' in b && 'repairs' in b && 'visitors' in b), '每项含 date 与五类计数');
     wT.close();
+  }
+
+  // ========== 测试21: 会议室开始前提醒 ==========
+  console.log('\n📋 测试21: 会议室开始前提醒');
+  {
+    const spRem = (await httpJson('POST', '/api/spaces', { name: '提醒办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aRm = 'remind_' + runKey;
+    await reg(aRm, 'pw', '提醒用户');
+    const wRem = await createWSClient(); await loginTo(wRem, spRem.id, aRm, 'pw');
+    await sendMsg(wRem, { type: 'roomCreate', name: '小会议室', capacity: 6 });
+    const roomsListMsg = last(wRem, 'rooms');
+    const roomId = roomsListMsg && roomsListMsg.rooms[0].id;
+    assert(roomId, '提醒测试会议室创建成功');
+    const startAt = Date.now() + 60000;
+    await sendMsg(wRem, { type: 'roomBook', roomId, startAt, endAt: startAt + 30 * 60000, title: '提醒会' });
+    // 等待 15s 定时器触发开始前提醒（提醒时间 = 预约时刻，立即满足）
+    await new Promise((r) => setTimeout(r, 18000));
+    const reminders = mk(wRem, 'roomReminder');
+    assert(reminders.length >= 1 && reminders[reminders.length - 1].startAt === startAt, '会议室开始前提醒定时送达');
+    wRem.close();
   }
 
   // ========== 总结 ==========

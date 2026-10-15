@@ -19,6 +19,7 @@ function createContext() {
   const WS_PING_MS = 30000;
   const RESERVE_CONFIRM_WINDOW_MS = 5 * 60000;
   const OVERDUE_REMIND_THROTTLE_MS = 24 * 3600 * 1000;
+  const ROOM_REMIND_WINDOW_MS = 10 * 60000;
   const VISIT_TOKEN_TTL_MS = 24 * 3600 * 1000;
 
   // ---------- 内存状态 ----------
@@ -320,6 +321,16 @@ function createContext() {
       return nowMs - last >= OVERDUE_REMIND_THROTTLE_MS;
     });
   }
+  // 会议室预约临近开始、且尚未提醒过的待开始预约
+  function dueRoomReminders(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    return [...space.roomReservations.values()].filter((r) => {
+      if (r.status !== 'pending') return false;
+      if (r.reminded) return false;
+      if (!r.remindAt) return false;
+      return nowMs >= r.remindAt;
+    });
+  }
   function createSpace(id, name, squat, urinal) {
     const sp = {
       id, name, squatCount: squat == null ? 4 : squat, urinalCount: urinal == null ? 3 : urinal,
@@ -385,7 +396,7 @@ function createContext() {
   function roomPublic(r) { return { id: r.id, name: r.name, capacity: r.capacity, location: r.location, description: r.description }; }
   function reservationPublic(res, info) {
     const who = info.get(res.ownerAccount);
-    return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status, repeat: res.repeat || null, seriesId: res.seriesId || null };
+    return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status, repeat: res.repeat || null, seriesId: res.seriesId || null, remindAt: res.remindAt || null };
   }
   function roomWaitlistPublic(space, info) {
     if (!info) info = spaceUserInfo(space.id);
@@ -683,7 +694,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -695,7 +706,7 @@ function createContext() {
     // 持久化
     saveSpace, saveAccount, saveProfile, saveEntity, deleteEntity, saveStallRating, saveStatsToSpace,
     // 空间
-    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, createSpace, buildStalls, applyProfileToUser,
+    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, createSpace, buildStalls, applyProfileToUser,
     // 序列化
     roomPublic, reservationPublic, roomWaitlistPublic, toolsPublic, materialsPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
     // 广播

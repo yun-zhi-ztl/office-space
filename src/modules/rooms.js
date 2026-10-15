@@ -2,7 +2,7 @@
 // 会议室模块：roomCreate / roomRemove / roomBook / roomWaitlist / roomWaitlistCancel
 //               / reservationCancel / reservationCancelSeries / roomStart / roomEnd
 module.exports = function roomsModule(api) {
-  const { roomReservationsPublic, roomPublic, roomWaitlistPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly, getUserByAccount, sendToUser, sendToAccount, saveProfile, broadcastLeaderboard, expandRecurring, roomStatsBroadcast } = api;
+  const { roomReservationsPublic, roomPublic, roomWaitlistPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly, getUserByAccount, sendToUser, sendToAccount, saveProfile, broadcastLeaderboard, expandRecurring, roomStatsBroadcast, ROOM_REMIND_WINDOW_MS } = api;
 
   function roomsBroadcast(space) {
     const reservations = roomReservationsPublic(space);
@@ -26,7 +26,7 @@ module.exports = function roomsModule(api) {
     }
     if (!target) return;
     target.status = 'promoted';
-    const res = { id: genId('res', null), roomId: target.roomId, ownerAccount: target.ownerAccount, ownerName: target.ownerName, title: target.title, startAt: target.startAt, endAt: target.endAt, note: target.note, status: 'pending', repeat: null, seriesId: null, seriesIndex: 0 };
+    const res = { id: genId('res', null), roomId: target.roomId, ownerAccount: target.ownerAccount, ownerName: target.ownerName, title: target.title, startAt: target.startAt, endAt: target.endAt, note: target.note, status: 'pending', repeat: null, seriesId: null, seriesIndex: 0, remindAt: Math.max(Date.now(), target.startAt - ROOM_REMIND_WINDOW_MS), reminded: false };
     space.roomReservations.set(res.id, res);
     saveEntity(space.id, 'room_reservation', res.id, res);
     const owner = getUserByAccount(target.ownerAccount);
@@ -75,7 +75,7 @@ module.exports = function roomsModule(api) {
       const clash = slots.some((slot) => [...space.roomReservations.values()].some((r) => r.roomId === room.id && (r.status === 'pending' || r.status === 'active') && slot.startAt < r.endAt && slot.endAt > r.startAt));
       if (clash) return sendTo(ws, { type: 'error', message: '该时段已被预约，可加入候补或另选时间', code: 'roomConflict' });
       slots.forEach((slot, i) => {
-        const res = { id: genId('res', null), roomId: room.id, ownerAccount: user.account, ownerName: user.nickname, title, startAt: slot.startAt, endAt: slot.endAt, note, status: 'pending', repeat: repeat || null, seriesId: seriesId || null, seriesIndex: i };
+        const res = { id: genId('res', null), roomId: room.id, ownerAccount: user.account, ownerName: user.nickname, title, startAt: slot.startAt, endAt: slot.endAt, note, status: 'pending', repeat: repeat || null, seriesId: seriesId || null, seriesIndex: i, remindAt: Math.max(Date.now(), slot.startAt - ROOM_REMIND_WINDOW_MS), reminded: false };
         space.roomReservations.set(res.id, res);
         saveEntity(space.id, 'room_reservation', res.id, res);
       });

@@ -317,6 +317,22 @@ assertEq(today.visitors, 1, '今日访客计数');
 assertEq(api.buildSpaceTrend(spT, 30).length, 30, '30 天上限返回 30 天');
 assertEq(api.buildSpaceTrend(spT, 999).length, 30, '超出上限截断为 30 天');
 
+// ---------- 会议室开始前提醒 ----------
+console.log('\n📋 23. 会议室开始前提醒');
+const spRoom = api.createSpace('s15', '会议提醒空间', 1, 0);
+const nowRoom = 1000000000;
+spRoom.roomReservations.set('rr1', { id: 'rr1', roomId: 'rm1', ownerAccount: 'alice', startAt: nowRoom + 3 * 60000, endAt: nowRoom + 9 * 60000, status: 'pending', remindAt: nowRoom - 1, reminded: false, title: '评审' });
+spRoom.roomReservations.set('rr2', { id: 'rr2', roomId: 'rm1', ownerAccount: 'bob', startAt: nowRoom + 20 * 60000, endAt: nowRoom + 30 * 60000, status: 'pending', remindAt: nowRoom + 100000, reminded: false, title: '周会' });
+spRoom.roomReservations.set('rr3', { id: 'rr3', roomId: 'rm1', ownerAccount: 'carol', startAt: nowRoom + 3 * 60000, endAt: nowRoom + 9 * 60000, status: 'pending', remindAt: nowRoom - 1, reminded: true, title: '评审' });
+spRoom.roomReservations.set('rr4', { id: 'rr4', roomId: 'rm1', ownerAccount: 'dave', startAt: nowRoom + 3 * 60000, endAt: nowRoom + 9 * 60000, status: 'cancelled', remindAt: nowRoom - 1, reminded: false, title: '评审' });
+spRoom.roomReservations.set('rr5', { id: 'rr5', roomId: 'rm1', ownerAccount: 'eve', startAt: nowRoom + 3 * 60000, endAt: nowRoom + 9 * 60000, status: 'pending', remindAt: null, reminded: false, title: '评审' });
+spRoom.roomReservations.set('rr6', { id: 'rr6', roomId: 'rm1', ownerAccount: 'frank', startAt: nowRoom + 3 * 60000, endAt: nowRoom + 9 * 60000, status: 'active', remindAt: nowRoom - 1, reminded: false, title: '评审' });
+const roomRem = api.dueRoomReminders(spRoom, nowRoom);
+assertEq(roomRem.map((r) => r.id), ['rr1'], '仅返回已到提醒时间且未提醒过的待开始预约');
+assertEq(api.ROOM_REMIND_WINDOW_MS, 10 * 60000, '会议提醒窗口为开始前 10 分钟');
+const resPub = api.reservationPublic(spRoom.roomReservations.get('rr1'), new Map());
+assertEq(resPub.remindAt, nowRoom - 1, 'reservationPublic 保留 remindAt');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

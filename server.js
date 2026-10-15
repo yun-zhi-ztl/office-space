@@ -243,6 +243,16 @@ setInterval(() => {
       }
       tools.toolsBroadcast(sp);
     }
+    // 会议室预约开始前提醒：开始前 10 分钟提醒一次，避免刷屏
+    const roomReminders = api.dueRoomReminders(sp, now);
+    if (roomReminders.length) {
+      for (const r of roomReminders) {
+        r.reminded = true;
+        api.saveEntity(sp.id, 'room_reservation', r.id, r);
+        api.sendToAccount(r.ownerAccount, { type: 'roomReminder', reservationId: r.id, roomId: r.roomId, startAt: r.startAt });
+      }
+      rooms.roomsBroadcast(sp);
+    }
   }
 }, 15000);
 
