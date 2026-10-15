@@ -1,7 +1,7 @@
 'use strict';
 // 报修模块：repairCreate / repairUpdate
 module.exports = function repairsModule(api) {
-  const { spaceUserInfo, repairsPublic, broadcast, LIST_PAGE, REPAIR_CATEGORIES, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, broadcastLeaderboard } = api;
+  const { spaceUserInfo, repairsPublic, broadcast, LIST_PAGE, REPAIR_CATEGORIES, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, isAdmin } = api;
 
   function repairsBroadcast(space) {
     const info = spaceUserInfo(space.id);
@@ -23,6 +23,20 @@ module.exports = function repairsModule(api) {
       saveEntity(space.id, 'repair', rep.id, rep);
       repairsBroadcast(space);
       broadcastLeaderboard(space);
+    } else if (msg.type === 'repairAssign') {
+      const rep = space.repairs.get(msg.repairId);
+      if (!rep) return sendTo(ws, serError('报修记录不存在'));
+      const isReporter = rep.reporterAccount === user.account;
+      if (!isReporter && !isAdmin(space, user.account)) return sendTo(ws, serError('仅上报人或管理员可指派负责人'));
+      const account = (msg.handlerAccount || '').trim().slice(0, 40);
+      if (!account) return sendTo(ws, serError('请选择负责人'));
+      const target = getUserByAccount(account);
+      if (!target || target.currentSpace !== space.id) return sendTo(ws, serError('负责人必须为空间内在线成员'));
+      rep.handlerAccount = target.account;
+      rep.handlerName = target.nickname;
+      rep.updatedAt = Date.now();
+      saveEntity(space.id, 'repair', rep.id, rep);
+      repairsBroadcast(space);
     } else if (msg.type === 'repairUpdate') {
       const rep = space.repairs.get(msg.repairId);
       if (!rep) return sendTo(ws, serError('报修记录不存在'));

@@ -102,9 +102,9 @@ wss.on('connection', (ws) => {
         rooms.handleRooms(ws, user, space, msg); break;
       case 'toolCreate': case 'toolDelete': case 'toolAdjust': case 'toolBorrow': case 'toolReturn':
         tools.handleTools(ws, user, space, msg); break;
-      case 'materialRequest': case 'materialCancel': case 'materialFulfill':
+      case 'materialRequest': case 'materialCancel': case 'materialFulfill': case 'materialAssign':
         materials.handleMaterials(ws, user, space, msg); break;
-      case 'repairCreate': case 'repairUpdate':
+      case 'repairCreate': case 'repairUpdate': case 'repairAssign':
         repairs.handleRepairs(ws, user, space, msg); break;
       case 'visitorCreate': case 'visitorArrived': case 'visitorLeft': case 'visitorCancel': case 'visitorRemove':
         visitors.handleVisitors(ws, user, space, msg); break;

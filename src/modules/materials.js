@@ -1,7 +1,7 @@
 'use strict';
 // 物资申领模块：materialRequest / materialCancel / materialFulfill
 module.exports = function materialsModule(api) {
-  const { spaceUserInfo, materialsPublic, broadcast, LIST_PAGE, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, broadcastLeaderboard } = api;
+  const { spaceUserInfo, materialsPublic, broadcast, LIST_PAGE, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, isAdmin } = api;
 
   function materialsBroadcast(space) {
     const info = spaceUserInfo(space.id);
@@ -31,10 +31,24 @@ module.exports = function materialsModule(api) {
       req.status = 'cancelled';
       saveEntity(space.id, 'material', req.id, req);
       materialsBroadcast(space);
+    } else if (msg.type === 'materialAssign') {
+      const req = space.materialRequests.get(msg.requestId);
+      if (!req) return sendTo(ws, serError('申领记录不存在'));
+      const isRequester = req.requesterAccount === user.account;
+      if (!isRequester && !isAdmin(space, user.account)) return sendTo(ws, serError('仅申请人或管理员可指派负责人'));
+      const account = (msg.handlerAccount || '').trim().slice(0, 40);
+      if (!account) return sendTo(ws, serError('请选择负责人'));
+      const target = getUserByAccount(account);
+      if (!target || target.currentSpace !== space.id) return sendTo(ws, serError('负责人必须为空间内在线成员'));
+      req.handlerAccount = target.account;
+      req.handlerName = target.nickname;
+      saveEntity(space.id, 'material', req.id, req);
+      materialsBroadcast(space);
     } else if (msg.type === 'materialFulfill') {
       const req = space.materialRequests.get(msg.requestId);
       if (!req) return sendTo(ws, serError('申领记录不存在'));
       if (req.requesterAccount === user.account) return sendTo(ws, serError('不能处理自己的申领'));
+      if (req.handlerAccount && req.handlerAccount !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('该申领已指派，由负责人处理'));
       if (req.status !== 'pending') return sendTo(ws, serError('该申领已处理'));
       req.status = 'fulfilled';
       req.handledAt = Date.now();

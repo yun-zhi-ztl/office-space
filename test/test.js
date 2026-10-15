@@ -182,6 +182,30 @@ async function runTests() {
   const fulfilled = mats.requests.find(r => r.id === reqId);
   assert(fulfilled && fulfilled.status === 'fulfilled', '他人可将申领置为已满足');
 
+  // ========== 测试5b: 物资申领指派 ==========
+  console.log('\n📋 测试5b: 物资申领指派负责人');
+  const THIRD = 'third_' + runKey;
+  const FOURTH = 'fourth_' + runKey;
+  await reg(THIRD, 'pw', '第三人');
+  await reg(FOURTH, 'pw', '第四人');
+  const w3 = await createWSClient();
+  await loginTo(w3, sp.id, THIRD, 'pw');
+  const w4 = await createWSClient();
+  await loginTo(w4, sp.id, FOURTH, 'pw');
+  await sendMsg(w2, { type: 'materialRequest', name: 'A4 纸', qty: 10, unit: '包', reason: '打印' });
+  let mats5 = last(w2, 'materials');
+  const reqA = mats5.requests.find(r => r.name === 'A4 纸');
+  await sendMsg(w2, { type: 'materialAssign', requestId: reqA.id, handlerAccount: THIRD });
+  mats5 = last(w2, 'materials');
+  const assignedA = mats5.requests.find(r => r.id === reqA.id);
+  assert(assignedA.handlerAccount === THIRD && assignedA.handlerName, '申请人指派负责人成功');
+  await sendMsg(w4, { type: 'materialFulfill', requestId: reqA.id });
+  const errFulfill = mk(w4, 'error');
+  assert(errFulfill.length > 0 && errFulfill[errFulfill.length - 1].message.includes('由负责人处理'), '非负责人处理已指派申领被拒');
+  await sendMsg(w3, { type: 'materialFulfill', requestId: reqA.id });
+  mats5 = last(w3, 'materials');
+  assert(mats5.requests.find(r => r.id === reqA.id).status === 'fulfilled', '负责人处理已指派申领成功');
+
   // ========== 测试6: 报修 ==========
   console.log('\n📋 测试6: 报修（提交/状态流转/越权取消）');
   await sendMsg(w2, { type: 'repairCreate', category: '灯光', location: '3F 走廊', description: '灯管闪烁' });
@@ -198,6 +222,19 @@ async function runTests() {
   await sendMsg(w1, { type: 'repairUpdate', repairId, status: 'cancelled' });
   const errRep = mk(w1, 'error');
   assert(errRep.length > 0 && errRep[errRep.length - 1].message.includes('仅上报人'), '非上报人取消被拒');
+
+  // ========== 测试6b: 报修指派 ==========
+  console.log('\n📋 测试6b: 报修指派负责人');
+  await sendMsg(w2, { type: 'repairCreate', category: '空调', location: '3F 会议室', description: '不制冷' });
+  let reps5 = last(w2, 'repairs');
+  const repB = reps5.repairs.find(r => r.description === '不制冷');
+  await sendMsg(w2, { type: 'repairAssign', repairId: repB.id, handlerAccount: THIRD });
+  reps5 = last(w2, 'repairs');
+  const repAssigned = reps5.repairs.find(r => r.id === repB.id);
+  assert(repAssigned.handlerAccount === THIRD && repAssigned.handlerName, '上报人指派负责人成功');
+  await sendMsg(w4, { type: 'repairAssign', repairId: repB.id, handlerAccount: FOURTH });
+  const errRepAssign = mk(w4, 'error');
+  assert(errRepAssign.length > 0 && errRepAssign[errRepAssign.length - 1].message.includes('仅上报人或管理员'), '非上报人指派被拒');
 
   // ========== 测试7: 坑位看板 ==========
   console.log('\n📋 测试7: 坑位看板（预约/提前确认被拒/评分校验）');
@@ -431,7 +468,7 @@ async function runTests() {
   console.log(`❌ 失败: ${failed}`);
   if (errors.length > 0) { console.log(`\n失败详情:`); errors.forEach(e => console.log(`  - ${e}`)); }
   console.log(`${'='.repeat(50)}\n`);
-  try { w1.close(); w2.close(); wsX.close(); wA.close(); } catch {}
+  try { w1.close(); w2.close(); wsX.close(); wA.close(); w3.close(); w4.close(); } catch {}
   process.exit(failed > 0 ? 1 : 0);
 }
 

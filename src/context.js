@@ -356,6 +356,8 @@ function createContext() {
       id: m.id, name: m.name, qty: m.qty, unit: m.unit, reason: m.reason, status: m.status,
       requesterAccount: m.requesterAccount,
       requesterName: info.get(m.requesterAccount) ? info.get(m.requesterAccount).display : m.requesterName,
+      handlerAccount: m.handlerAccount || null,
+      handlerName: info.get(m.handlerAccount) ? info.get(m.handlerAccount).display : (m.handlerName || ''),
       createdAt: m.createdAt, handledAt: m.handledAt,
     })).sort((a, b) => (b.createdAt - a.createdAt));
   }
@@ -364,6 +366,8 @@ function createContext() {
       id: r.id, category: r.category, location: r.location, description: r.description, status: r.status,
       reporterAccount: r.reporterAccount,
       reporterName: info.get(r.reporterAccount) ? info.get(r.reporterAccount).display : r.reporterName,
+      handlerAccount: r.handlerAccount || null,
+      handlerName: info.get(r.handlerAccount) ? info.get(r.handlerAccount).display : (r.handlerName || ''),
       createdAt: r.createdAt, updatedAt: r.updatedAt,
     })).sort((a, b) => (b.createdAt - a.createdAt));
   }

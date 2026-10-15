@@ -405,9 +405,9 @@ function renderMaterials(){
   const d=S.DB, me=S.me.account;
   $('#main').innerHTML = `<div class="topbar"><div><h1>物资申领</h1><div class="sub">需要电池、文具等物资时提交申请，由同事/管理员处理</div></div>
     <button class="btn pri" onclick="openMaterialRequest()">＋ 我要申领</button><button class="btn" onclick="exportModuleCsv('materials',MAT_COLS)">导出 CSV</button></div>
-    <div class="list">${d.requests.map(r=>{ const st=r.status; const badge=st==='pending'?'warn':st==='fulfilled'?'ok':'grey'; return `<div class="row"><span><span class="who">${esc(r.requesterName)}</span> 申领 <b>${esc(r.name)}</b> ×${r.qty}${r.unit?' '+esc(r.unit):''}<div class="desc">${esc(r.reason||'')}</div><div class="when">${fmtTime(r.createdAt)}</div></span>
+    <div class="list">${d.requests.map(r=>{ const st=r.status; const badge=st==='pending'?'warn':st==='fulfilled'?'ok':'grey'; const canAssign=r.requesterAccount===me||S.admin; const canFulfill=st==='pending'&&!(r.handlerAccount&&r.handlerAccount!==me&&!S.admin); return `<div class="row"><span><span class="who">${esc(r.requesterName)}</span> 申领 <b>${esc(r.name)}</b> ×${r.qty}${r.unit?' '+esc(r.unit):''}${r.handlerName?` · 负责人 ${esc(r.handlerName)}`:''}<div class="desc">${esc(r.reason||'')}</div><div class="when">${fmtTime(r.createdAt)}</div></span>
       <span class="fs"><span class="badge ${badge}">${st==='pending'?'待处理':st==='fulfilled'?'已满足':'已取消'}</span>
-      ${st==='pending'?`${r.requesterAccount===me?`<button class="btn danger sm" onclick="cancelRequest('${r.id}')">取消</button>`:`<button class="btn green sm" onclick="fulfillRequest('${r.id}')">已满足</button>`}`:''}
+      ${st==='pending'?`${r.requesterAccount===me?`<button class="btn danger sm" onclick="cancelRequest('${r.id}')">取消</button>`:(canFulfill?`<button class="btn green sm" onclick="fulfillRequest('${r.id}')">已满足</button>`:'')}${canAssign?`<button class="btn sm" onclick="openAssign('material','${r.id}')">指派</button>`:''}`:''}
       </span></div>`; }).join('')||'<div class="empty">暂无申领记录</div>'}
     </div>
     ${(S.DB.matOffset||0)<(S.DB.matTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('materials')">加载更多（${S.DB.matTotal-(S.DB.matOffset||0)}）</button></div>`:''}`;
@@ -428,13 +428,13 @@ function renderRepairs(){
   const label=s=>s==='reported'?'待处理':s==='in_progress'?'处理中':s==='resolved'?'已解决':'已取消';
   $('#main').innerHTML = `<div class="topbar"><div><h1>报修</h1><div class="sub">上报厕所、灯光、空调等设施故障并及时跟进</div></div>
     <button class="btn pri" onclick="openRepair()">＋ 我要报修</button><button class="btn" onclick="exportModuleCsv('repairs',REP_COLS)">导出 CSV</button></div>
-    <div class="list">${d.repairs.map(r=>`<div class="row"><span><span class="who">${esc(r.category)} · ${esc(r.location)}</span> <span class="when">${esc(r.reporterName)} ${fmtTime(r.createdAt)}</span><div class="desc">${esc(r.description)}</div></span>
+    <div class="list">${d.repairs.map(r=>{ const canAssign=r.reporterAccount===me||S.admin; return `<div class="row"><span><span class="who">${esc(r.category)} · ${esc(r.location)}</span> <span class="when">${esc(r.reporterName)} ${fmtTime(r.createdAt)}${r.handlerName?` · 负责人 ${esc(r.handlerName)}`:''}</span><div class="desc">${esc(r.description)}</div></span>
       <span class="fs">
       <span class="badge ${badge(r.status)}">${label(r.status)}</span>
       ${r.status==='reported'?`<button class="btn sm" onclick="setRepair('${r.id}','in_progress')">开始处理</button>`:''}
       ${(r.status==='reported'||r.status==='in_progress')?`<button class="btn green sm" onclick="setRepair('${r.id}','resolved')">已解决</button>`:''}
-      ${r.status==='reported'&&r.reporterAccount===me?`<button class="btn danger sm" onclick="setRepair('${r.id}','cancelled')">撤销</button>`:''}
-      </span></div>`).join('')||'<div class="empty">暂无报修记录</div>'}
+      ${r.status==='reported'?`${canAssign?`<button class="btn sm" onclick="openAssign('repair','${r.id}')">指派</button>`:''}${r.reporterAccount===me?`<button class="btn danger sm" onclick="setRepair('${r.id}','cancelled')">撤销</button>`:''}`:''}
+      </span></div>`; }).join('')||'<div class="empty">暂无报修记录</div>'}
     </div>
     ${(S.DB.repOffset||0)<(S.DB.repTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('repairs')">加载更多（${S.DB.repTotal-(S.DB.repOffset||0)}）</button></div>`:''}`;
 }
@@ -445,6 +445,19 @@ function openRepair(){ openModal(`<span class="close" onclick="closeModal()">×<
   <button class="btn pri" onclick="submitRepair()">提交</button></div>`); }
 function submitRepair(){ wsSend({type:'repairCreate',category:$('#rpCat').value,location:$('#rpLoc').value,description:$('#rpDesc').value}); closeModal(); }
 function setRepair(id,status){ wsSend({type:'repairUpdate',repairId:id,status}); }
+function openAssign(kind, id){
+  const opts=(S.DB.users||[]).filter(u=>u.account!==S.me.account).map(u=>`<option value="${u.account}">${esc(u.display||u.username||u.account)}（${esc(u.account)}）</option>`).join('');
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>指派负责人</h2><div class="form">
+    <div class="fld"><label>负责人（空间内在线成员）</label><select id="asAccount">${opts||'<option value="">暂无其他在线成员</option>'}</select></div>
+    <button class="btn pri" onclick="submitAssign('${kind}','${id}')">指派</button></div>`);
+}
+function submitAssign(kind, id){
+  const acc=$('#asAccount').value;
+  if(!acc){ toast('请选择负责人','error'); return; }
+  if(kind==='repair') wsSend({type:'repairAssign', repairId:id, handlerAccount:acc});
+  else wsSend({type:'materialAssign', requestId:id, handlerAccount:acc});
+  closeModal();
+}
 /* ============ 访客登记 ============ */
 function visitorBadge(s){ return s==='pending'?'warn':s==='arrived'?'info':s==='left'?'ok':'grey'; }
 function visitorLabel(s){ return s==='pending'?'待到访':s==='arrived'?'已到访':s==='left'?'已离开':'已取消'; }
