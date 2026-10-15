@@ -736,6 +736,25 @@ async function runTests() {
     wRem.close();
   }
 
+  // ========== 测试22: 访客预计到访提醒 ==========
+  console.log('\n📋 测试22: 访客预计到访提醒');
+  {
+    const spVis = (await httpJson('POST', '/api/spaces', { name: '访客提醒办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aVis = 'vrem_' + runKey;
+    await reg(aVis, 'pw', '访客提醒用户');
+    const wVis = await createWSClient(); await loginTo(wVis, spVis.id, aVis, 'pw');
+    const expectedAt = Date.now() + 5 * 60000;
+    await sendMsg(wVis, { type: 'visitorCreate', visitorName: '客户周', purpose: '拜访', expectedAt });
+    const vList = last(wVis, 'visitors');
+    const vRemind = vList && vList.visitors[0].remindAt;
+    assert(vRemind && vRemind <= expectedAt && vRemind >= expectedAt - 15 * 60000, '访客携带预计到访提醒时间 remindAt');
+    // 等待 15s 定时器触发到访前提醒（提醒时间 = 登记时刻，立即满足）
+    await new Promise((r) => setTimeout(r, 18000));
+    const vreminders = mk(wVis, 'visitorReminder');
+    assert(vreminders.length >= 1 && vreminders[vreminders.length - 1].visitorName === '客户周', '访客预计到访提醒定时送达');
+    wVis.close();
+  }
+
   // ========== 总结 ==========
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);

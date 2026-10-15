@@ -263,6 +263,16 @@ setInterval(() => {
       }
       tools.toolsBroadcast(sp);
     }
+    // 访客预计到访提醒：到访前 15 分钟内提醒接待人一次
+    const visitorReminders = api.dueVisitorReminders(sp, now);
+    if (visitorReminders.length) {
+      for (const v of visitorReminders) {
+        v.reminded = true;
+        api.saveEntity(sp.id, 'visitor', v.id, v);
+        api.sendToAccount(v.hostAccount, { type: 'visitorReminder', visitorId: v.id, visitorName: v.visitorName, expectedAt: v.expectedAt });
+      }
+      visitors.visitorsBroadcast(sp);
+    }
   }
 }, 15000);
 

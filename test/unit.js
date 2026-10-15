@@ -347,6 +347,20 @@ const soonRem = api.dueBorrowSoonReminders(spBorrow, nowB);
 assertEq(soonRem.map((b) => b.id), ['bb1'], '仅返回临近到期且未提醒过的在借用');
 assertEq(api.BORROW_SOON_WINDOW_MS, 24 * 3600 * 1000, '到期提醒窗口为到期前 24 小时');
 
+// ---------- 访客预计到访提醒 ----------
+console.log('\n📋 25. 访客预计到访提醒');
+const spVis = api.createSpace('s17', '访客提醒空间', 1, 0);
+const nowVis = 1000000000;
+spVis.visitors.set('vv1', { id: 'vv1', hostAccount: 'alice', hostName: '甲', visitorName: '王', purpose: '洽谈', expectedAt: nowVis + 10 * 60000, status: 'pending', createdAt: nowVis, code: '', remindAt: nowVis - 1, reminded: false });
+spVis.visitors.set('vv2', { id: 'vv2', hostAccount: 'bob', hostName: '乙', visitorName: '李', purpose: '拜访', expectedAt: nowVis + 20 * 60000, status: 'pending', createdAt: nowVis, code: '', remindAt: nowVis + 100000, reminded: false });
+spVis.visitors.set('vv3', { id: 'vv3', hostAccount: 'carol', hostName: '丙', visitorName: '赵', purpose: '拜访', expectedAt: nowVis + 10 * 60000, status: 'pending', createdAt: nowVis, code: '', remindAt: nowVis - 1, reminded: true });
+spVis.visitors.set('vv4', { id: 'vv4', hostAccount: 'dave', hostName: '丁', visitorName: '钱', purpose: '拜访', expectedAt: nowVis + 10 * 60000, status: 'arrived', createdAt: nowVis, code: '', remindAt: nowVis - 1, reminded: false });
+const visRem = api.dueVisitorReminders(spVis, nowVis);
+assertEq(visRem.map((v) => v.id), ['vv1'], '仅返回临近到访且未提醒过的待到访访客');
+assertEq(api.VISIT_REMIND_WINDOW_MS, 15 * 60000, '访客提醒窗口为到访前 15 分钟');
+const visPub = api.visitorsPublic(spVis, new Map());
+assertEq(visPub[0].remindAt, nowVis - 1, 'visitorsPublic 保留 remindAt');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

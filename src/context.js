@@ -21,6 +21,7 @@ function createContext() {
   const OVERDUE_REMIND_THROTTLE_MS = 24 * 3600 * 1000;
   const ROOM_REMIND_WINDOW_MS = 10 * 60000;
   const BORROW_SOON_WINDOW_MS = 24 * 3600 * 1000;
+  const VISIT_REMIND_WINDOW_MS = 15 * 60000;
   const VISIT_TOKEN_TTL_MS = 24 * 3600 * 1000;
 
   // ---------- 内存状态 ----------
@@ -342,6 +343,16 @@ function createContext() {
       return nowMs >= b.dueAt - BORROW_SOON_WINDOW_MS && nowMs < b.dueAt;
     });
   }
+  // 访客临近预计到访（默认到访前 15 分钟内）且尚未提醒过的待到访访客
+  function dueVisitorReminders(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    return [...space.visitors.values()].filter((v) => {
+      if (!v || v.status !== 'pending') return false;
+      if (v.reminded) return false;
+      if (!v.remindAt) return false;
+      return nowMs >= v.remindAt;
+    });
+  }
   function createSpace(id, name, squat, urinal) {
     const sp = {
       id, name, squatCount: squat == null ? 4 : squat, urinalCount: urinal == null ? 3 : urinal,
@@ -476,6 +487,7 @@ function createContext() {
       expectedAt: v.expectedAt || null, arrivedAt: v.arrivedAt || null, leftAt: v.leftAt || null,
       status: v.status, createdAt: v.createdAt, code: v.code || '',
       expiresAt: v.expiresAt || null, expired: visitorCodeExpired(v),
+       remindAt: v.remindAt || null,
     })).sort((a, b) => (b.createdAt - a.createdAt));
   }
   function visitorCodeExpired(v, now) {
@@ -705,7 +717,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, VISIT_REMIND_WINDOW_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -717,7 +729,7 @@ function createContext() {
     // 持久化
     saveSpace, saveAccount, saveProfile, saveEntity, deleteEntity, saveStallRating, saveStatsToSpace,
     // 空间
-    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, createSpace, buildStalls, applyProfileToUser,
+    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, dueVisitorReminders, createSpace, buildStalls, applyProfileToUser,
     // 序列化
     roomPublic, reservationPublic, roomWaitlistPublic, toolsPublic, materialsPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
     // 广播

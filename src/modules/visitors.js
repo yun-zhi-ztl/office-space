@@ -1,7 +1,7 @@
 'use strict';
 // 访客登记模块：visitorCreate / visitorArrived / visitorLeft / visitorCancel / visitorRemove / visitorCheckin
 module.exports = function visitorsModule(api) {
-  const { spaceUserInfo, visitorsPublic, visitorCodeExpired, VISIT_TOKEN_TTL_MS, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, genCheckinCode, saveEntity, deleteEntity, sendToAccount } = api;
+  const { spaceUserInfo, visitorsPublic, visitorCodeExpired, VISIT_TOKEN_TTL_MS, VISIT_REMIND_WINDOW_MS, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, genCheckinCode, saveEntity, deleteEntity, sendToAccount } = api;
 
   function visitorsBroadcast(space) {
     const info = spaceUserInfo(space.id);
@@ -29,6 +29,7 @@ module.exports = function visitorsModule(api) {
         arrivedAt: null, leftAt: null, status: 'pending', createdAt: Date.now(),
         code: genCheckinCode(space),
         expiresAt: Date.now() + VISIT_TOKEN_TTL_MS,
+        remindAt: expectedAt ? Math.max(Date.now(), expectedAt - VISIT_REMIND_WINDOW_MS) : null,
       };
       space.visitors.set(visitor.id, visitor);
       saveEntity(space.id, 'visitor', visitor.id, visitor);

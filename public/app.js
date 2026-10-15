@@ -86,6 +86,7 @@ function dispatch(m){
     case 'roomWaitlistPromoted': toast('🎉 候补已晋升：预约已自动创建（'+fmtTime(m.startAt)+'）','success'); render(); break;
     case 'visitorCreated': toast('✔ 访客已登记，签到码：'+m.code,'success'); render(); break;
     case 'visitorCheckinNotification': toast('🔔 '+m.visitorName+' 已凭签到码到访','success'); render(); break;
+    case 'visitorReminder': toast('🔔 '+m.visitorName+' 预计即将到访，请留意','warn'); render(); break;
     case 'visitorArrived': toast('🔔 '+m.visitorName+' 已到访','success'); render(); break;
     case 'visitorLeft': toast('🔔 '+m.visitorName+' 已离开','info'); render(); break;
     case 'visitorCheckedIn': toast('✔ '+m.visitorName+' 核销签到成功','success'); render(); break;
