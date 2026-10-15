@@ -167,6 +167,11 @@ async function runTests() {
   assert(returned1 && returned1.available === 2 && returned1.borrowedCount === 0, '归还后库存恢复');
   const stB = last(w2, 'stats');
   assert(stB && typeof stB.stats.borrowDuration === 'number' && stB.stats.borrowDuration >= 0, '归还后统计含 borrowDuration');
+  // 借用记录分页（导出 CSV 数据源）
+  await sendMsg(w2, { type: 'fetchPage', module: 'borrows', offset: 0, limit: 10 });
+  const bwPage = last(w2, 'page');
+  assert(bwPage && bwPage.module === 'borrows' && bwPage.items.length === 1 && bwPage.items[0].toolName === '测试机', '借用记录分页返回设备名');
+  assert(bwPage.items[0].status === 'returned' && bwPage.total === 1, '借用记录分页返回状态与总数');
 
   // ========== 测试4b: 工具续借 ==========
   console.log('\n📋 测试4b: 工具续借');
@@ -232,10 +237,11 @@ async function runTests() {
   assert(mats5.requests.find(r => r.id === reqA.id).status === 'fulfilled', '负责人处理已指派申领成功');
 
   // ========== 测试6: 报修 ==========
-  console.log('\n📋 测试6: 报修（提交/状态流转/越权取消）');
-  await sendMsg(w2, { type: 'repairCreate', category: '灯光', location: '3F 走廊', description: '灯管闪烁' });
+  console.log('\n📋 测试6: 报修（提交/状态流转/越权取消/优先级）');
+  await sendMsg(w2, { type: 'repairCreate', category: '灯光', priority: 'high', location: '3F 走廊', description: '灯管闪烁' });
   let repairs = last(w2, 'repairs');
   assert(repairs && repairs.repairs.length === 1 && repairs.repairs[0].status === 'reported', 'member 提交报修成功');
+  assert(repairs.repairs[0].priority === 'high', '报修保留优先级 high');
   const repairId = repairs.repairs[0].id;
   await sendMsg(w1, { type: 'repairUpdate', repairId, status: 'in_progress' });
   repairs = last(w1, 'repairs');
@@ -247,6 +253,13 @@ async function runTests() {
   await sendMsg(w1, { type: 'repairUpdate', repairId, status: 'cancelled' });
   const errRep = mk(w1, 'error');
   assert(errRep.length > 0 && errRep[errRep.length - 1].message.includes('仅上报人'), '非上报人取消被拒');
+  // 上报人调整优先级 + 非法优先级被拒
+  await sendMsg(w2, { type: 'repairUpdate', repairId, priority: 'low' });
+  repairs = last(w2, 'repairs');
+  assert(repairs.repairs.find(r => r.id === repairId).priority === 'low', '上报人调整优先级成功');
+  await sendMsg(w2, { type: 'repairUpdate', repairId, priority: 'urgent' });
+  const errPrio = mk(w2, 'error');
+  assert(errPrio.length > 0 && errPrio[errPrio.length - 1].message.includes('无效的优先级'), '非法优先级被拒');
 
   // ========== 测试6b: 报修指派 ==========
   console.log('\n📋 测试6b: 报修指派负责人');
@@ -485,6 +498,36 @@ async function runTests() {
     const uE = last(wE, 'users').users.find((u) => u.account === aE);
     assert(uE && uE.emergencyMode === true, '用户广播含紧急模式');
     wE.close();
+  }
+
+  // ========== 测试16: 空间暂停 ==========
+  console.log('\n📋 测试16: 空间暂停');
+  {
+    const spP = (await httpJson('POST', '/api/spaces', { name: '暂停办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aP = 'pause_' + runKey, bP = 'pausem_' + runKey;
+    await reg(aP, 'pw', '暂停管理员');
+    await reg(bP, 'pw', '暂停成员');
+    const wA = await createWSClient(); await loginTo(wA, spP.id, aP, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spP.id, bP, 'pw');
+    await sendMsg(wA, { type: 'roomCreate', name: '小会', capacity: 4 });
+    const rid = last(wA, 'rooms').rooms[0].id;
+    await sendMsg(wA, { type: 'toolCreate', name: '测试机', category: '测试电脑', total: 1 });
+    const tid = last(wA, 'tools').tools[0].id;
+    await sendMsg(wA, { type: 'spacePause', paused: true, reason: '搬迁' });
+    const paused = last(wB, 'spacePaused');
+    assert(paused && paused.paused === true && paused.reason === '搬迁', '暂停广播到全员');
+    await sendMsg(wB, { type: 'roomBook', roomId: rid, startAt: Date.now() + 10 * 60000, endAt: Date.now() + 40 * 60000 });
+    const errP = mk(wB, 'error');
+    assert(errP.length > 0 && errP[errP.length - 1].message.includes('空间已暂停'), '暂停时成员预约被拒');
+    await sendMsg(wB, { type: 'toolBorrow', toolId: tid, qty: 1 });
+    const errB2 = mk(wB, 'error');
+    assert(errB2.length > 0 && errB2[errB2.length - 1].message.includes('空间已暂停'), '暂停时成员借用被拒');
+    await sendMsg(wA, { type: 'spacePause', paused: false, reason: '' });
+    const resumed = last(wB, 'spacePaused');
+    assert(resumed && resumed.paused === false, '恢复空间广播到全员');
+    await sendMsg(wB, { type: 'roomBook', roomId: rid, startAt: Date.now() + 10 * 60000, endAt: Date.now() + 40 * 60000 });
+    assert(last(wB, 'rooms') && last(wB, 'rooms').reservations.length === 1, '恢复后成员可预约');
+    wA.close(); wB.close();
   }
 
   // ========== 总结 ==========

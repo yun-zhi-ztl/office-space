@@ -15,12 +15,12 @@
 | 会议室预约 | 预约时段、自动冲突检测、取消；逾期自动流转；支持每天 / 每周周期预约（自动展开全部场次并可整组取消）；概览展示会议室占用率统计 |
 | 工具借用 | 登记在库设备（测试电脑 / 测试机器 / 测试手机等），借用与归还、库存实时扣减、续借与到期提醒 |
 | 物资申领 | 提出需要电池等物资的请求，可指派负责人，由同事/管理员处理 |
-| 报修 | 上报厕所 / 灯光 / 空调等故障，可指派负责人并推进状态 |
+| 报修 | 上报厕所 / 灯光 / 空调等故障，支持高/中/低优先级、指派负责人并推进状态 |
 | 访客登记 | 登记访客姓名、事由、预计到访；负责人 / 管理员推进到访、离开、取消，实时同步 |
 | 坑位看板 | 卫生间坑位实时占用、预约、抢位、催促、三维评分，含排行榜与成就 |
 | 个人资料 | 成员可改展示名 / 头像，凭旧密码修改登录密码 |
-| 空间设置 | 管理员可改空间名、配置蹲坑 / 尿槽数量 |
-| 数据导出 | 物资申领 / 报修 / 访客 / 会议室预约一键导出 CSV（自动拉取全部分页） |
+| 空间设置 | 管理员可改空间名、配置蹲坑 / 尿槽数量，并可暂停空间（暂停预约 / 借用 / 申领 / 报修 / 访客登记） |
+| 数据导出 | 物资申领 / 报修 / 访客 / 会议室预约 / 借用记录一键导出 CSV（自动拉取全部分页） |
 | 趣味扩展 | 心情状态灯、一键喊话公告、每周之星 MVP、坑位段位传说榜、设备催还与占用王榜、一键智能选房、电视墙大屏、每日看点、紧急模式、使用时长统计 |
 
 - **空间隔离**：每个空间即一个办公室 / 层 / 组织，拥有独立的会议室、设备、物资、报修与坑位数据。
@@ -132,7 +132,7 @@ npm run smoke         # 快速冒烟（需服务已启动）
 npm test              # 单元 + 会话恢复回归 + 完整 e2e（e2e 需服务已启动）
 ```
 
-包含单元测试（ID 生成 / 周统计 / 坑位段位 / 成就解锁 / 口令哈希 / 管理员判定 / 历史预约清理 / 段位缓存 / 访客序列化 / 每日看点 / 用户广播 / 会议室时长累计 / 周期预约展开 / 借用逾期判定 / 会议室占用率统计，53 项），以及会议室（冲突检测 / 取消 / 周期预约 / RBAC / 智能选房 / 占用率统计）、工具借用（借用 / 不足 / 归还 / 续借 / 逾期催还 / 归还时长统计）、物资申领（提交 / 指派 / 自处理限制 / 负责人处理）、报修（状态流转 / 指派 / 越权取消）、访客登记（登记 / 状态流转 / 越权 / 管理员删除）、个人资料（改名头像 / 改密 / 旧密码校验）、空间设置（改名 / RBAC）、紧急模式，坑位看板（预约时间窗、评分越界、重复评分、同账号多开限制、切换空间守卫、重配守卫、段位），以及分页、状态灯、公告、每周之星 MVP、每日看点等 **84 项 e2e 断言**。push 到 `main` 或提 PR 时，CI（`.github/workflows/ci.yml`）会自动执行 lint + compose 校验 + docker 构建 + smoke + e2e。
+包含单元测试（ID 生成 / 周统计 / 坑位段位 / 成就解锁 / 口令哈希 / 管理员判定 / 历史预约清理 / 段位缓存 / 访客序列化 / 每日看点 / 用户广播 / 会议室时长累计 / 周期预约展开 / 借用逾期判定 / 会议室占用率统计 / 报修优先级序列化 / 借用记录序列化，59 项），以及会议室（冲突检测 / 取消 / 周期预约 / RBAC / 智能选房 / 占用率统计）、工具借用（借用 / 不足 / 归还 / 续借 / 逾期催还 / 归还时长统计 / 借用记录分页）、物资申领（提交 / 指派 / 自处理限制 / 负责人处理）、报修（状态流转 / 优先级 / 指派 / 越权取消）、访客登记（登记 / 状态流转 / 越权 / 管理员删除）、个人资料（改名头像 / 改密 / 旧密码校验）、空间设置（改名 / RBAC / 暂停恢复）、紧急模式，坑位看板（预约时间窗、评分越界、重复评分、同账号多开限制、切换空间守卫、重配守卫、段位），以及分页、状态灯、公告、每周之星 MVP、每日看点、借用导出 CSV 等 **94 项 e2e 断言**。push 到 `main` 或提 PR 时，CI（`.github/workflows/ci.yml`）会自动执行 lint + compose 校验 + docker 构建 + smoke + e2e。
 
 ---
 
@@ -142,13 +142,16 @@ npm test              # 单元 + 会话恢复回归 + 完整 e2e（e2e 需服务
 
 | 模块 | 客户端→服务端消息 |
 | --- | --- |
-| 会议室 | `roomCreate` / `roomRemove`(admin) · `roomBook` · `reservationCancel` |
-| 工具借用 | `toolCreate` / `toolDelete` / `toolAdjust`(admin) · `toolBorrow` / `toolReturn` |
-| 物资申领 | `materialRequest` / `materialCancel` / `materialFulfill` |
-| 报修 | `repairCreate` / `repairUpdate` |
+| 会议室 | `roomCreate` / `roomRemove`(admin) · `roomBook` · `reservationCancel` · `reservationCancelSeries` |
+| 工具借用 | `toolCreate` / `toolDelete` / `toolAdjust`(admin) · `toolBorrow` / `toolReturn` / `toolExtend` |
+| 物资申领 | `materialRequest` / `materialCancel` / `materialFulfill` / `materialAssign` |
+| 报修 | `repairCreate` / `repairUpdate`(状态+优先级) / `repairAssign` |
+| 访客登记 | `visitorCreate` / `visitorArrived` / `visitorLeft` / `visitorCancel` / `visitorRemove` |
+| 个人资料 | `profileUpdate` / `passwordChange` |
+| 空间设置 | `spaceRename` · `stallConfig`(admin) · `spacePause`(admin 暂停/恢复) |
 | 坑位看板 | `reserve` / `cancel` / `grab` / `startUse` / `finish` / `release` / `urge` / `rate` / `toggleEmergency` · `stallConfig`(admin) |
 
-服务端广播全量列表：`rooms`、`tools`、`materials`、`repairs`、`stalls`、`users`、`leaderboard`（均含 `account` 身份、`role`、`display`）。
+服务端广播全量列表：`rooms`、`tools`、`materials`、`repairs`、`stalls`、`users`、`leaderboard`（均含 `account` 身份、`role`、`display`），并另有 `roomStats`、`spacePaused` 等即时广播。分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows`）。
 
 **命名约定**：`account` 为全局唯一身份键（区分大小写）；`display` 为展示名（重名时自动追加账号区分）。
 

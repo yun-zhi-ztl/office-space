@@ -15,6 +15,7 @@ module.exports = function visitorsModule(api) {
 
   function handleVisitors(ws, user, space, msg) {
     if (msg.type === 'visitorCreate') {
+      if (space.paused) return sendTo(ws, serError('空间已暂停，暂不可登记访客'));
       const visitorName = (msg.visitorName || '').trim().slice(0, 20);
       const purpose = (msg.purpose || '').trim().slice(0, 30);
       const contact = (msg.contact || '').trim().slice(0, 30);

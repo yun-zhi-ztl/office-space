@@ -1,7 +1,7 @@
 'use strict';
 // 报修模块：repairCreate / repairUpdate
 module.exports = function repairsModule(api) {
-  const { spaceUserInfo, repairsPublic, broadcast, LIST_PAGE, REPAIR_CATEGORIES, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, isAdmin } = api;
+  const { spaceUserInfo, repairsPublic, broadcast, LIST_PAGE, REPAIR_CATEGORIES, REPAIR_PRIORITIES, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, isAdmin } = api;
 
   function repairsBroadcast(space) {
     const info = spaceUserInfo(space.id);
@@ -11,11 +11,13 @@ module.exports = function repairsModule(api) {
 
   function handleRepairs(ws, user, space, msg) {
     if (msg.type === 'repairCreate') {
+      if (space.paused) return sendTo(ws, serError('空间已暂停，暂不可报修'));
       const category = REPAIR_CATEGORIES.includes(msg.category) ? msg.category : '其它';
       const location = (msg.location || '').trim().slice(0, 40);
       const description = (msg.description || '').trim().slice(0, 160);
+      const priority = REPAIR_PRIORITIES.includes(msg.priority) ? msg.priority : 'normal';
       if (!location || !description) return sendTo(ws, serError('请填写故障位置与描述'));
-      const rep = { id: genId('rp', null), reporterAccount: user.account, reporterName: user.nickname, category, location, description, status: 'reported', createdAt: Date.now(), updatedAt: Date.now() };
+      const rep = { id: genId('rp', null), reporterAccount: user.account, reporterName: user.nickname, category, location, description, priority, status: 'reported', createdAt: Date.now(), updatedAt: Date.now() };
       space.repairs.set(rep.id, rep);
       user.stats.repairCount = (user.stats.repairCount || 0) + 1;
       recordWeekly(user, 'repairs');
@@ -43,6 +45,18 @@ module.exports = function repairsModule(api) {
       const to = msg.status;
       const from = rep.status;
       const isReporter = rep.reporterAccount === user.account;
+      const isAdminUser = isAdmin(space, user.account);
+      if (msg.priority !== undefined) {
+        if (!REPAIR_PRIORITIES.includes(msg.priority)) return sendTo(ws, serError('无效的优先级'));
+        if (!isReporter && !isAdminUser) return sendTo(ws, serError('仅上报人或管理员可调整优先级'));
+        rep.priority = msg.priority;
+      }
+      if (to === undefined) {
+        rep.updatedAt = Date.now();
+        saveEntity(space.id, 'repair', rep.id, rep);
+        repairsBroadcast(space);
+        return;
+      }
       if (to === 'cancelled') {
         if (!isReporter || from !== 'reported') return sendTo(ws, serError('仅上报人可取消未处理的报修'));
       } else if (to === 'in_progress') {

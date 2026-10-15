@@ -40,7 +40,7 @@ module.exports = function sessionApi(api) {
     ws._ns = sp.id;
     sp.clients.add(ws);
     if (u) u.currentSpace = sp.id;
-    sendTo(ws, { type: 'joined', space: { id: sp.id, name: sp.name, squat_count: sp.squatCount, urinal_count: sp.urinalCount, isAdmin: u ? isAdmin(sp, u.account) : false } });
+    sendTo(ws, { type: 'joined', space: { id: sp.id, name: sp.name, squat_count: sp.squatCount, urinal_count: sp.urinalCount, paused: sp.paused, pausedReason: sp.pausedReason || '', isAdmin: u ? isAdmin(sp, u.account) : false } });
     if (u && sp.admins.size === 0) { sp.admins.add(u.account); saveSpace(sp); }
     broadcastAll(sp);
   }

@@ -194,6 +194,24 @@ assertEq(usage.rooms[0].todayMinutes, 60, '今日时长统计 60 分钟');
 assertEq(usage.rooms[0].upcomingCount, 1, '待开始场次统计为 1');
 assert(usage.utilizationPct >= 0 && usage.utilizationPct <= 100, '占用率在 0-100 区间');
 
+console.log('\n📋 16. 报修优先级序列化');
+const spR = api.createSpace('s8', '报修空间', 1, 0);
+spR.repairs.set('r8', { id: 'r8', reporterAccount: 'alice', reporterName: '甲', category: '灯光', priority: 'high', location: '走廊', description: '闪烁', status: 'reported', createdAt: Date.now(), updatedAt: Date.now() });
+const rp = api.repairsPublic(spR, new Map());
+assertEq(rp[0].priority, 'high', 'repairsPublic 保留优先级');
+assertEq(rp[0].location, '走廊', 'repairsPublic 保留位置');
+
+// ---------- 借用记录序列化 ----------
+console.log('\n📋 17. 借用记录序列化');
+const spBw = api.createSpace('s9', '借用空间', 1, 0);
+spBw.tools.push({ id: 't9', name: '测试手机', category: '测试手机', total: 2, available: 0, location: '机柜', description: '' });
+spBw.borrows.set('bw9', { id: 'bw9', toolId: 't9', borrowerAccount: 'alice', borrowerName: '甲', qty: 2, borrowedAt: Date.now() - 3 * 86400000, dueAt: Date.now() - 2 * 86400000, returnedAt: null, status: 'borrowed' });
+const bwp = api.borrowsPublic(spBw, new Map());
+assertEq(bwp.length, 1, 'borrowsPublic 返回借用记录');
+assertEq(bwp[0].toolName, '测试手机', 'borrowsPublic 关联设备名称');
+assertEq(bwp[0].status, 'borrowed', 'borrowsPublic 保留状态');
+assertEq(bwp[0].overdue, true, 'borrowsPublic 标记逾期');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

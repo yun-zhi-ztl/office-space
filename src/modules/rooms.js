@@ -32,6 +32,7 @@ module.exports = function roomsModule(api) {
       deleteEntity(space.id, 'room', room.id);
       roomsBroadcast(space);
     } else if (msg.type === 'roomBook') {
+      if (space.paused) return sendTo(ws, serError('空间已暂停，暂不可预约'));
       const room = space.rooms.find((r) => r.id === msg.roomId);
       if (!room) return sendTo(ws, serError('会议室不存在'));
       const startAt = Math.floor(+msg.startAt || 0);

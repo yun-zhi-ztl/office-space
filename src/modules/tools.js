@@ -44,6 +44,7 @@ module.exports = function toolsModule(api) {
       saveEntity(space.id, 'tool', tool.id, tool);
       toolsBroadcast(space);
     } else if (msg.type === 'toolBorrow') {
+      if (space.paused) return sendTo(ws, serError('空间已暂停，暂不可借用'));
       const tool = space.tools.find((t) => t.id === msg.toolId);
       if (!tool) return sendTo(ws, serError('设备不存在'));
       const qty = parseInt(msg.qty, 10);

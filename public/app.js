@@ -18,8 +18,9 @@ const S = {
   lastSpace: localStorage.getItem('os_space')||'',
   ws: null, me:null, space:null, module:'rooms',
   pendingLogin:null,
-  DB:{ rooms:[], reservations:[], tools:[], requests:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[] },
+  DB:{ rooms:[], reservations:[], tools:[], requests:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[] },
   visitorTotal:0, visitorOffset:0,
+  borrowTotal:0, borrowOffset:0,
   roomStats:null,
   admin:false, sockOpen:false,
 };
@@ -69,6 +70,7 @@ function dispatch(m){
     case 'profileUpdated': if(S.me){ S.me.nickname=m.nickname; S.me.avatar=m.avatar; } toast('✔ 个人资料已更新','success'); render(); break;
     case 'passwordChanged': toast('✔ 密码已修改','success'); break;
     case 'spaceRenamed': if(S.space) S.space.name=m.name; renderSidebar(); render(); break;
+    case 'spacePaused': if(S.space){ S.space.paused=!!m.paused; S.space.pausedReason=m.reason||''; } render(); break;
     case 'emergencyToggled': if(S.me) S.me.emergencyMode=!!m.enabled; toast(m.enabled?'🆘 已开启紧急模式':'✅ 已退出紧急模式'); render(); break;
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
@@ -76,7 +78,12 @@ function dispatch(m){
   if(['rooms','tools','materials','repairs','visitors','stalls','roomStats','users','leaderboard','notices','digest'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); }
+function renderPauseBanner(){
+  const b=$('#pause-banner'); if(!b) return;
+  if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
+  else { b.style.display='none'; }
+}
 function renderAll(){ render(); }
 function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); }
 
@@ -87,6 +94,7 @@ function handlePage(m){
   else if(m.module==='repairs'){ S.DB.repairs=(S.DB.repairs||[]).concat(m.items); S.DB.repOffset=m.offset+m.items.length; }
   else if(m.module==='rooms'){ S.DB.reservations=(S.DB.reservations||[]).concat(m.items); S.DB.revOffset=m.offset+m.items.length; }
   else if(m.module==='visitors'){ S.DB.visitors=(S.DB.visitors||[]).concat(m.items); S.visitorOffset=m.offset+m.items.length; }
+  else if(m.module==='borrows'){ S.DB.borrows=(S.DB.borrows||[]).concat(m.items); S.borrowOffset=m.offset+m.items.length; }
   render();
 }
 function loadMore(module){ wsSend({type:'fetchPage', module, offset: module==='materials'?S.DB.matOffset:module==='repairs'?S.DB.repOffset:module==='visitors'?S.visitorOffset:S.DB.revOffset, limit:PAGE}); }
@@ -99,9 +107,10 @@ function rowsToCsv(columns, rows){
 }
 const CSV_FMT = { time: (v)=>v?fmtTime(v):'' };
 const MAT_COLS=[{key:'requesterName',label:'申请人'},{key:'name',label:'物资'},{key:'qty',label:'数量'},{key:'unit',label:'单位'},{key:'reason',label:'说明'},{key:'status',label:'状态'},{key:'createdAt',label:'时间',fmt:CSV_FMT.time}];
-const REP_COLS=[{key:'category',label:'类别'},{key:'location',label:'位置'},{key:'description',label:'描述'},{key:'reporterName',label:'上报人'},{key:'status',label:'状态'},{key:'createdAt',label:'时间',fmt:CSV_FMT.time}];
+const REP_COLS=[{key:'category',label:'类别'},{key:'priority',label:'优先级'},{key:'location',label:'位置'},{key:'description',label:'描述'},{key:'reporterName',label:'上报人'},{key:'status',label:'状态'},{key:'createdAt',label:'时间',fmt:CSV_FMT.time}];
 const VIS_COLS=[{key:'hostName',label:'接待人'},{key:'visitorName',label:'访客'},{key:'purpose',label:'事由'},{key:'contact',label:'联系方式'},{key:'status',label:'状态'},{key:'expectedAt',label:'预计到访',fmt:CSV_FMT.time},{key:'createdAt',label:'登记时间',fmt:CSV_FMT.time}];
 const ROOM_COLS=[{key:'title',label:'主题'},{key:'ownerName',label:'预约人'},{key:'startAt',label:'开始',fmt:CSV_FMT.time},{key:'endAt',label:'结束',fmt:CSV_FMT.time},{key:'status',label:'状态'}];
+const BW_COLS=[{key:'toolName',label:'设备'},{key:'toolCategory',label:'类别'},{key:'borrowerName',label:'借用人'},{key:'qty',label:'数量'},{key:'borrowedAt',label:'借出',fmt:CSV_FMT.time},{key:'dueAt',label:'应还',fmt:CSV_FMT.time},{key:'returnedAt',label:'归还',fmt:CSV_FMT.time},{key:'status',label:'状态'}];
 function downloadCsv(filename, csv){
   const blob=new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
@@ -119,14 +128,14 @@ function nextPage(module, offset){
 async function exportModuleCsv(module, columns){
   if(!S.ws || S.ws.readyState!==1){ toast('未连接服务器','error'); return; }
   while(true){
-    const offset = module==='rooms'?S.DB.revOffset:module==='materials'?S.DB.matOffset:module==='repairs'?S.DB.repOffset:S.visitorOffset;
-    const total = module==='rooms'?S.DB.revTotal:module==='materials'?S.DB.matTotal:module==='repairs'?S.DB.repTotal:S.visitorTotal;
+    const offset = module==='rooms'?S.DB.revOffset:module==='materials'?S.DB.matOffset:module==='repairs'?S.DB.repOffset:module==='borrows'?S.borrowOffset:S.visitorOffset;
+    const total = module==='rooms'?S.DB.revTotal:module==='materials'?S.DB.matTotal:module==='repairs'?S.DB.repTotal:module==='borrows'?S.borrowTotal:S.visitorTotal;
     if(offset >= (total||0)) break;
     await nextPage(module, offset);
   }
-  const rows = module==='rooms'?S.DB.reservations:module==='materials'?S.DB.requests:module==='repairs'?S.DB.repairs:S.DB.visitors;
+  const rows = module==='rooms'?S.DB.reservations:module==='materials'?S.DB.requests:module==='repairs'?S.DB.repairs:module==='borrows'?S.DB.borrows:S.DB.visitors;
   const csv = rowsToCsv(columns, rows||[]);
-  const name = {materials:'物资申领',repairs:'报修',visitors:'访客登记',rooms:'会议室预约'}[module]||module;
+  const name = {materials:'物资申领',repairs:'报修',visitors:'访客登记',rooms:'会议室预约',borrows:'借用记录'}[module]||module;
   downloadCsv(name+'_'+(S.space?S.space.name:'')+'.csv', csv);
   toast('已导出 '+(rows||[]).length+' 条记录','success');
 }
@@ -214,12 +223,18 @@ function openSpaceSettings(){
     <div class="fld"><label>空间名（最多 30 字）</label><input id="spNewName" maxlength="30" value="${esc(S.space?S.space.name:'')}"></div>
     <button class="btn pri" onclick="submitSpaceRename()">保存名称</button></div>
     <hr style="margin:16px 0;border:none;border-top:1px solid var(--line)">
+    <div class="fld"><label>暂停状态</label><div class="fs"><select id="spPaused"><option value="">未暂停</option><option value="1" ${S.space&&S.space.paused?'selected':''}>已暂停</option></select>
+    <input id="spPauseReason" placeholder="原因（如：办公室搬迁）" maxlength="40" style="flex:1"></div></div>
+    <button class="btn pri" onclick="submitPause()">保存暂停状态</button>
+    <div class="hint">暂停后全员暂不可预约、借用、申领、报修、登记访客</div></div>
+    <hr style="margin:16px 0;border:none;border-top:1px solid var(--line)">
     <div class="fld"><label>蹲坑数量 (0-10)</label><input id="scSquat" type="number" min="0" max="10" value="${S.DB.stalls.reduce((a,s)=>s.type==='squat'?a+1:a,0)}"></div>
     <div class="fld"><label>尿槽数量 (0-10)</label><input id="scUr" type="number" min="0" max="10" value="${S.DB.stalls.reduce((a,s)=>s.type==='urinal'?a+1:a,0)}"></div>
     <button class="btn pri" onclick="submitConfig()">保存坑位配置</button>
     <div class="hint">坑位改动会使未开始的预约失效</div></div>`);
 }
 function submitSpaceRename(){ wsSend({type:'spaceRename', name:$('#spNewName').value}); closeModal(); }
+function submitPause(){ const paused=!!$('#spPaused').value; wsSend({type:'spacePause', paused, reason:$('#spPauseReason').value}); closeModal(); }
 
 /* ============ 概览 ============ */
 const ACH = { punctual:'守时达人', endurance:'持久战', night:'夜行者', king:'蹲坑之王', grabber:'抢位达人', rater:'评论家' };
@@ -373,7 +388,8 @@ function bookSugg(roomId){ const st=new Date($('#sgStart').value).getTime(), en=
 function renderTools(){
   const d=S.DB, me=S.me.account;
   $('#main').innerHTML = `<div class="topbar"><div><h1>工具借用</h1><div class="sub">测试电脑 / 测试机器 / 测试手机等在库设备的借还</div></div>
-    ${S.admin?'<button class="btn pri" onclick="openToolCreate()">＋ 新增设备</button>':''}</div>
+    ${S.admin?'<button class="btn pri" onclick="openToolCreate()">＋ 新增设备</button>':''}
+    <button class="btn" onclick="exportModuleCsv('borrows',BW_COLS)">导出 CSV</button></div>
     <div class="cards">${d.tools.map(t=>`<div class="card"><h3>${esc(t.name)} <span class="badge ${t.available>0?'ok':'bad'}">${t.available}/${t.total}</span></h3>
       <div class="meta">${t.category}${t.location?' · '+esc(t.location):''}</div>
       <div class="bar"><i style="width:${t.total?Math.round(t.available/t.total*100):0}%"></i></div>
@@ -434,13 +450,17 @@ function renderRepairs(){
   const d=S.DB, me=S.me.account;
   const badge=s=>s==='reported'?'warn':s==='in_progress'?'info':s==='resolved'?'ok':'grey';
   const label=s=>s==='reported'?'待处理':s==='in_progress'?'处理中':s==='resolved'?'已解决':'已取消';
+  const pBadge=p=>p==='high'?'bad':p==='normal'?'info':'grey';
+  const pLabel=p=>p==='high'?'高':p==='normal'?'中':'低';
   $('#main').innerHTML = `<div class="topbar"><div><h1>报修</h1><div class="sub">上报厕所、灯光、空调等设施故障并及时跟进</div></div>
     <button class="btn pri" onclick="openRepair()">＋ 我要报修</button><button class="btn" onclick="exportModuleCsv('repairs',REP_COLS)">导出 CSV</button></div>
     <div class="list">${d.repairs.map(r=>{ const canAssign=r.reporterAccount===me||S.admin; return `<div class="row"><span><span class="who">${esc(r.category)} · ${esc(r.location)}</span> <span class="when">${esc(r.reporterName)} ${fmtTime(r.createdAt)}${r.handlerName?` · 负责人 ${esc(r.handlerName)}`:''}</span><div class="desc">${esc(r.description)}</div></span>
       <span class="fs">
       <span class="badge ${badge(r.status)}">${label(r.status)}</span>
+      <span class="badge ${pBadge(r.priority)}">${pLabel(r.priority)}优先</span>
       ${r.status==='reported'?`<button class="btn sm" onclick="setRepair('${r.id}','in_progress')">开始处理</button>`:''}
       ${(r.status==='reported'||r.status==='in_progress')?`<button class="btn green sm" onclick="setRepair('${r.id}','resolved')">已解决</button>`:''}
+      ${r.status==='reported'||r.status==='in_progress'?`${r.reporterAccount===me||S.admin?`<button class="btn sm" onclick="openPriority('${r.id}','${esc(r.priority||'normal')}')">改优先级</button>`:''}`:''}
       ${r.status==='reported'?`${canAssign?`<button class="btn sm" onclick="openAssign('repair','${r.id}')">指派</button>`:''}${r.reporterAccount===me?`<button class="btn danger sm" onclick="setRepair('${r.id}','cancelled')">撤销</button>`:''}`:''}
       </span></div>`; }).join('')||'<div class="empty">暂无报修记录</div>'}
     </div>
@@ -448,11 +468,16 @@ function renderRepairs(){
 }
 function openRepair(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>提交报修</h2><div class="form">
   <div class="fld"><label>类别</label><select id="rpCat"><option>厕所</option><option>灯光</option><option>空调</option><option>其它</option></select></div>
+  <div class="fld"><label>优先级</label><select id="rpPri"><option value="normal">中</option><option value="high">高</option><option value="low">低</option></select></div>
   <div class="fld"><label>位置</label><input id="rpLoc" placeholder="如：三层男厕第二个坑位"></div>
   <div class="fld"><label>描述</label><input id="rpDesc" placeholder="故障现象"></div>
   <button class="btn pri" onclick="submitRepair()">提交</button></div>`); }
-function submitRepair(){ wsSend({type:'repairCreate',category:$('#rpCat').value,location:$('#rpLoc').value,description:$('#rpDesc').value}); closeModal(); }
+function submitRepair(){ wsSend({type:'repairCreate',category:$('#rpCat').value,priority:$('#rpPri').value,location:$('#rpLoc').value,description:$('#rpDesc').value}); closeModal(); }
 function setRepair(id,status){ wsSend({type:'repairUpdate',repairId:id,status}); }
+function openPriority(id,cur){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>调整优先级</h2><div class="form">
+  <div class="fld"><label>优先级</label><select id="ppPri"><option value="high" ${cur==='high'?'selected':''}>高</option><option value="normal" ${cur==='normal'?'selected':''}>中</option><option value="low" ${cur==='low'?'selected':''}>低</option></select></div>
+  <button class="btn pri" onclick="submitPriority('${id}')">保存</button></div>`); }
+function submitPriority(id){ wsSend({type:'repairUpdate',repairId:id,priority:$('#ppPri').value}); closeModal(); }
 function openAssign(kind, id){
   const opts=(S.DB.users||[]).filter(u=>u.account!==S.me.account).map(u=>`<option value="${u.account}">${esc(u.display||u.username||u.account)}（${esc(u.account)}）</option>`).join('');
   openModal(`<span class="close" onclick="closeModal()">×</span><h2>指派负责人</h2><div class="form">

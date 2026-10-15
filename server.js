@@ -68,6 +68,7 @@ function handleFetchPage(ws, user, space, msg) {
   else if (msg.module === 'repairs') { const all = api.repairsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
   else if (msg.module === 'rooms') { const all = api.roomReservationsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
   else if (msg.module === 'visitors') { const all = api.visitorsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
+  else if (msg.module === 'borrows') { const all = api.borrowsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
   else return api.sendTo(ws, api.serError('不支持的分页模块'));
   api.sendTo(ws, { type: 'page', module: msg.module, offset, items, total });
 }
@@ -115,6 +116,7 @@ wss.on('connection', (ws) => {
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
       case 'announce': extras.announce(ws, user, space, msg); break;
       case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;
+      case 'spacePause': extras.pause(ws, user, space, msg); break;
       case 'suggestRoom': extras.suggestRoom(ws, user, space, msg); break;
       case 'remindReturn': extras.remindReturn(ws, user, space, msg); break;
       default:

@@ -36,6 +36,16 @@ module.exports = function extrasModule(api) {
     sendTo(ws, { type: 'suggestRooms', suggestions: list.map(roomPublic) });
   }
 
+  function handlePause(ws, user, space, msg) {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可暂停/恢复空间'));
+    const paused = !!msg.paused;
+    const reason = (msg.reason || '').trim().slice(0, 40);
+    space.paused = paused;
+    space.pausedReason = paused ? reason : '';
+    saveSpace(space);
+    broadcast(space.id, 'spacePaused', { paused, reason: space.pausedReason });
+  }
+
   function handleRenameSpace(ws, user, space, msg) {
     if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可修改空间'));
     const name = (msg.name || '').trim().slice(0, 30);
@@ -57,5 +67,5 @@ module.exports = function extrasModule(api) {
     sendTo(ws, { type: 'remindSent', count: n });
   }
 
-  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace };
+  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace, pause: handlePause };
 };

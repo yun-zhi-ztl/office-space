@@ -12,6 +12,7 @@ function createContext() {
   const TOKEN_TTL = 7 * 24 * 60 * 60 * 1000;
   const SPACE_ID_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
   const REPAIR_CATEGORIES = ['厕所', '灯光', '空调', '其它'];
+  const REPAIR_PRIORITIES = ['high', 'normal', 'low'];
   const TOOL_CATEGORIES = ['测试电脑', '测试机器', '测试手机', '其它'];
   const LIST_PAGE = 30;
   const PERSIST_DEBOUNCE_MS = 500;
@@ -98,6 +99,7 @@ function createContext() {
       id text PRIMARY KEY, name text NOT NULL,
       admins jsonb NOT NULL DEFAULT '[]'::jsonb,
       squat_count int NOT NULL DEFAULT 4, urinal_count int NOT NULL DEFAULT 3,
+      paused boolean NOT NULL DEFAULT false, paused_reason text NOT NULL DEFAULT '',
       created_at timestamptz NOT NULL DEFAULT now())`);
     await pool.query(`CREATE TABLE IF NOT EXISTS accounts(
       account text PRIMARY KEY, password_hash text NOT NULL,
@@ -118,6 +120,8 @@ function createContext() {
       PRIMARY KEY(space, kind, id))`);
 
     await pool.query(`ALTER TABLE spaces ADD COLUMN IF NOT EXISTS admins jsonb NOT NULL DEFAULT '[]'::jsonb`);
+    await pool.query(`ALTER TABLE spaces ADD COLUMN IF NOT EXISTS paused boolean NOT NULL DEFAULT false`);
+    await pool.query(`ALTER TABLE spaces ADD COLUMN IF NOT EXISTS paused_reason text NOT NULL DEFAULT ''`);
     await pool.query(`DO $$ BEGIN
       IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='profiles' AND column_name='ns_id') THEN
         ALTER TABLE profiles RENAME COLUMN ns_id TO space;
@@ -135,8 +139,8 @@ function createContext() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_stall_ratings_space_stall ON stall_ratings(space, stall_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_stall_ratings_space_time ON stall_ratings(space, created_at)`);
 
-    const spRows = await pool.query('SELECT id,name,admins,squat_count,urinal_count FROM spaces');
-    for (const r of spRows.rows) { const sp = createSpace(r.id, r.name, r.squat_count, r.urinal_count); sp.admins = new Set(r.admins || []); }
+    const spRows = await pool.query('SELECT id,name,admins,squat_count,urinal_count,paused,paused_reason FROM spaces');
+    for (const r of spRows.rows) { const sp = createSpace(r.id, r.name, r.squat_count, r.urinal_count); sp.admins = new Set(r.admins || []); sp.paused = !!r.paused; sp.pausedReason = r.paused_reason || ''; }
     const accRows = await pool.query('SELECT account,password_hash,username,avatar FROM accounts');
     for (const r of accRows.rows) accounts.set(r.account, { account: r.account, passwordHash: r.password_hash, username: r.username, avatar: r.avatar || '🧑' });
     const pr = await pool.query('SELECT space,account,nick,avatar,stats,achievements FROM profiles');
@@ -173,9 +177,9 @@ function createContext() {
 
   function saveSpace(sp) {
     if (!usePg) return;
-    trackWrite(pool.query(`INSERT INTO spaces(id,name,admins,squat_count,urinal_count) VALUES($1,$2,$3,$4,$5)
-      ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, admins=EXCLUDED.admins, squat_count=EXCLUDED.squat_count, urinal_count=EXCLUDED.urinal_count`,
-      [sp.id, sp.name, JSON.stringify([...sp.admins]), sp.squatCount, sp.urinalCount]).catch(() => {}));
+    trackWrite(pool.query(`INSERT INTO spaces(id,name,admins,squat_count,urinal_count,paused,paused_reason) VALUES($1,$2,$3,$4,$5,$6,$7)
+      ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, admins=EXCLUDED.admins, squat_count=EXCLUDED.squat_count, urinal_count=EXCLUDED.urinal_count, paused=EXCLUDED.paused, paused_reason=EXCLUDED.paused_reason`,
+      [sp.id, sp.name, JSON.stringify([...sp.admins]), sp.squatCount, sp.urinalCount, !!sp.paused, sp.pausedReason || '']).catch(() => {}));
   }
   function saveAccount(acct) {
     if (!usePg) return;
@@ -295,6 +299,7 @@ function createContext() {
     const sp = {
       id, name, squatCount: squat == null ? 4 : squat, urinalCount: urinal == null ? 3 : urinal,
       admins: new Set(), clients: new Set(), notices: [],
+      paused: false, pausedReason: '',
       rooms: [], roomReservations: new Map(), reservations: new Map(),
       tools: [], borrows: new Map(), materialRequests: new Map(), repairs: new Map(), visitors: new Map(), urges: new Map(),
     };
@@ -388,13 +393,25 @@ function createContext() {
   }
   function repairsPublic(sp, info) {
     return [...sp.repairs.values()].map((r) => ({
-      id: r.id, category: r.category, location: r.location, description: r.description, status: r.status,
+      id: r.id, category: r.category, priority: r.priority || 'normal', location: r.location, description: r.description, status: r.status,
       reporterAccount: r.reporterAccount,
       reporterName: info.get(r.reporterAccount) ? info.get(r.reporterAccount).display : r.reporterName,
       handlerAccount: r.handlerAccount || null,
       handlerName: info.get(r.handlerAccount) ? info.get(r.handlerAccount).display : (r.handlerName || ''),
       createdAt: r.createdAt, updatedAt: r.updatedAt,
     })).sort((a, b) => (b.createdAt - a.createdAt));
+  }
+  function borrowsPublic(sp, info) {
+    return [...sp.borrows.values()].map((b) => {
+      const tool = sp.tools.find((t) => t.id === b.toolId);
+      return {
+        id: b.id, toolId: b.toolId, toolName: tool ? tool.name : '', toolCategory: tool ? tool.category : '',
+        borrowerAccount: b.borrowerAccount,
+        borrowerName: info.get(b.borrowerAccount) ? info.get(b.borrowerAccount).display : b.borrowerName,
+        qty: b.qty, borrowedAt: b.borrowedAt, dueAt: b.dueAt || null, returnedAt: b.returnedAt || null,
+        status: b.status, overdue: borrowOverdue(b),
+      };
+    }).sort((a, b) => (b.borrowedAt - a.borrowedAt));
   }
   function visitorsPublic(sp, info) {
     return [...sp.visitors.values()].map((v) => ({
@@ -553,7 +570,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, WS_PING_MS, REPAIR_CATEGORIES, TOOL_CATEGORIES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -567,7 +584,7 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, reservationPublic, toolsPublic, materialsPublic, repairsPublic, visitorsPublic, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
+    roomPublic, reservationPublic, toolsPublic, materialsPublic, repairsPublic, borrowsPublic, visitorsPublic, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
     // 广播
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, noticesBroadcast, visitorsBroadcast,
     // 坑位辅助

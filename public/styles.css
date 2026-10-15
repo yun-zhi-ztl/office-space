@@ -33,6 +33,7 @@
   .btn.grp{display:flex; gap:6px; flex-wrap:wrap;}
   /* 主区 */
   .main{flex:1; padding:20px 24px 60px; max-width:1200px; min-width:0;}
+  #pause-banner{display:none; flex:0 0 auto; width:100%; background:rgba(251,191,36,.14); border-bottom:1px solid rgba(251,191,36,.35); color:var(--yellow); padding:10px 24px; font-size:13px;}
   .topbar{display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; flex-wrap:wrap; gap:10px;}
   .topbar h1{font-size:20px;}
   .topbar .sub{color:var(--muted); font-size:12px; margin-top:2px;}

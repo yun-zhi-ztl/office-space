@@ -11,6 +11,7 @@ module.exports = function materialsModule(api) {
 
   function handleMaterials(ws, user, space, msg) {
     if (msg.type === 'materialRequest') {
+      if (space.paused) return sendTo(ws, serError('空间已暂停，暂不可申领'));
       const name = (msg.name || '').trim().slice(0, 30);
       const qty = parseInt(msg.qty, 10);
       if (!name) return sendTo(ws, serError('请输入物资名称'));
