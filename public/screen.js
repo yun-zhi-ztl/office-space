@@ -1,7 +1,7 @@
 
-var DB={rooms:[],reservations:[],stalls:[],tools:[],requests:[],repairs:[],visitors:[],visitorTotal:0,users:[],leaderboard:[],notices:[]};
-var STATE={view:0,count:5,paused:false,ms:12000};
-var VIEWS=['rooms','overview','stalls','notices','visitors'];
+var DB={rooms:[],reservations:[],stalls:[],tools:[],requests:[],repairs:[],visitors:[],visitorTotal:0,users:[],leaderboard:[],notices:[],tasks:[]};
+var STATE={view:0,count:6,paused:false,ms:12000};
+var VIEWS=['rooms','overview','stalls','notices','visitors','tasks'];
 var ws=null;
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function pad(n){return (n<10?'0':'')+n;}
@@ -22,6 +22,7 @@ function connect(){
     if(m.type==='users')DB.users=m.users;
     if(m.type==='leaderboard')DB.leaderboard=m.rankings||[];
     if(m.type==='notices')DB.notices=m.notices||[];
+    if(m.type==='tasks')DB.tasks=m.tasks||[];
     renderAll();
   }catch(e){}};
   ws.onclose=function(){ setTimeout(connect,1500); };
@@ -82,7 +83,14 @@ function buildVisitors(){
     return '<div class="roomrow"><span>'+esc(v.hostName)+' 接待 <b>'+esc(v.visitorName)+'</b> <span class="next">'+esc(v.purpose||'')+'</span></span><span class="'+(v.status==='pending'?'wait':'ok')+'">'+(v.status==='pending'?'待到访':'已到访')+'</span></div>';
   }).join(''):'<div class="empty">暂无待接待访客</div>');
 }
-function renderAll(){ buildRooms(); buildOverview(); buildStalls(); buildNotices(); buildVisitors(); }
+function buildTasks(){
+  var pri={high:'bad',normal:'',low:'ok'}, st={pending:'待办',in_progress:'进行中',done:'已完成',cancelled:'已取消'};
+  var open=DB.tasks.filter(function(t){return t.status==='pending'||t.status==='in_progress';});
+  qs('#tasks').innerHTML = (open.length?open.map(function(t){
+    return '<div class="roomrow"><span>'+esc(t.title)+' <span class="badge '+pri[t.priority||'normal']+'">'+(({high:'高',normal:'中',low:'低'}[t.priority||'normal']))+'</span> '+(t.assigneeName?'→ '+esc(t.assigneeName):'开放认领')+'</span><span class="'+(t.status==='in_progress'?'now':'next')+'">'+st[t.status]+'</span></div>';
+  }).join(''):'<div class="empty">暂无进行中 / 待办任务</div>');
+}
+function renderAll(){ buildRooms(); buildOverview(); buildStalls(); buildNotices(); buildVisitors(); buildTasks(); }
 /* ---- 启动 ---- */
 VIEWS.forEach(function(k,idx){ var d=document.createElement('div'); d.className='dot'; d.onclick=function(){ show(idx); }; document.getElementById('dots').appendChild(d); });
 show(0);

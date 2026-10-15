@@ -1212,12 +1212,9 @@ function createContext() {
   }
   function tasksBroadcast(sp) {
     const info = spaceUserInfo(sp.id);
-    const stats = taskStats(sp);
-    // 与 notificationsBroadcast 一致：按用户下发，使 myAssignee / myCreator / myTask 个性化
-    for (const u of getUsersIn(sp.id)) {
-      const tasks = tasksPublic(sp, info, u);
-      sendToUser(u.id, { type: 'tasks', tasks: tasks.slice(0, LIST_PAGE), total: tasks.length, stats });
-    }
+    const tasks = tasksPublic(sp, info, null);
+    // 全空间广播（含未登录大屏）；个人权限在前端按 creatorAccount / assigneeAccount 计算
+    broadcast(sp.id, 'tasks', { tasks: tasks.slice(0, LIST_PAGE), total: tasks.length, stats: taskStats(sp) });
   }
   function notificationsBroadcast(sp) {
     const info = spaceUserInfo(sp.id);

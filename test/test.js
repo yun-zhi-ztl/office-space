@@ -1494,14 +1494,14 @@ async function runTests() {
     const tk0 = await waitFor(wA, 'tasks', (t) => t.tasks && t.tasks.length === 1, 3000);
     assert(tk0 && tk0.tasks[0].title === '修复会议室投影', '管理员创建任务成功');
     assert(tk0 && tk0.tasks[0].status === 'pending' && tk0.tasks[0].assigneeAccount === bT, '任务初始 pending 且带指派对象');
-    assert(tk0 && tk0.tasks[0].priority === 'high' && tk0.tasks[0].myAssignee === false, '任务保留优先级，创建人视角 myAssignee=false');
+    assert(tk0 && tk0.tasks[0].priority === 'high' && tk0.tasks[0].assigneeAccount === bT, '任务保留优先级并带指派对象');
     const tkId = tk0.tasks[0].id;
     // 成员收到指派通知
     const assigned = await waitFor(wB, 'notifications', (n) => n.notifications && n.notifications.some((x) => x.type === 'taskAssigned'), 3000);
     assert(assigned && assigned.notifications.some((x) => x.type === 'taskAssigned'), '指派后成员收到通知');
-    // 成员视角任务列表
-    const tkB = await waitFor(wB, 'tasks', (t) => t.tasks && t.tasks.some((x) => x.id === tkId && x.myAssignee === true), 3000);
-    assert(tkB && tkB.tasks.find((x) => x.id === tkId).myAssignee === true, '成员任务列表标记 myAssignee');
+    // 成员任务列表包含指派给自己的任务
+    const tkB = await waitFor(wB, 'tasks', (t) => t.tasks && t.tasks.some((x) => x.id === tkId && x.assigneeAccount === bT), 3000);
+    assert(tkB && tkB.tasks.find((x) => x.id === tkId).assigneeAccount === bT, '成员任务列表包含指派给自己的任务');
     // 负责人推进：开始 + 完成
     await sendMsg(wB, { type: 'taskStart', taskId: tkId });
     const tk1 = await waitFor(wB, 'tasks', (t) => t.tasks && t.tasks.some((x) => x.id === tkId && x.status === 'in_progress'), 3000);
