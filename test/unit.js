@@ -141,9 +141,11 @@ assertEq(digest.pendingVisitorsCount, 1, 'digest 统计待接待访客');
 assertEq(digest.pendingVisitors[0].visitorName, '李四', 'digest 含访客姓名');
 assertEq(digest.todayMeetingMinutes, 0, 'digest 初始今日会议时长为 0');
 assertEq(digest.todayBorrowMinutes, 0, 'digest 初始今日借用时长为 0');
-dv.borrows.set('bw', { id: 'bw', toolId: 't1', borrowerAccount: 'alice', qty: 1, borrowedAt: Date.now() - 10 * 60000, returnedAt: Date.now() - 5 * 60000, status: 'returned' });
-dv.roomReservations.set('rm', { id: 'rm', roomId: 'r1', ownerAccount: 'bob', startAt: Date.now() - 30 * 60000, endAt: Date.now() - 10 * 60000, status: 'completed' });
-const digest2 = api.buildDigest(dv, du);
+const today0ForDigest = new Date(); today0ForDigest.setHours(12, 0, 0, 0);
+const digestNow = today0ForDigest.getTime();
+dv.borrows.set('bw', { id: 'bw', toolId: 't1', borrowerAccount: 'alice', qty: 1, borrowedAt: digestNow - 10 * 60000, returnedAt: digestNow - 5 * 60000, status: 'returned' });
+dv.roomReservations.set('rm', { id: 'rm', roomId: 'r1', ownerAccount: 'bob', startAt: digestNow - 30 * 60000, endAt: digestNow - 10 * 60000, status: 'completed' });
+const digest2 = api.buildDigest(dv, du, digestNow);
 assertEq(digest2.todayBorrowMinutes, 5, 'digest 统计今日归还借用时长');
 assertEq(digest2.todayMeetingMinutes, 20, 'digest 统计今日会议时长');
 
@@ -246,6 +248,7 @@ assertEq(bwp[0].toolName, '测试手机', 'borrowsPublic 关联设备名称');
 assertEq(bwp[0].status, 'borrowed', 'borrowsPublic 保留状态');
 assertEq(bwp[0].overdue, true, 'borrowsPublic 标记逾期');
 assertEq(bwp[0].extensions, 1, 'borrowsPublic 暴露续借次数');
+assertEq(bwp[0].condition, 'intact', 'borrowsPublic 默认归还状态为 intact');
 
 // ---------- 工具在借明细序列化 ----------
 console.log('\n📋 17b. 工具在借明细序列化');
@@ -490,7 +493,7 @@ assertEq(spN.notices[0].text, '第二条', 'pushNotice 新公告置顶');
 
 // ---------- 报修处理时长统计 ----------
 console.log('\n📋 31. 报修处理时长统计');
-const nowH = Date.now() - 30 * 60000;
+const nowH = (() => { const d = new Date(); d.setHours(12, 0, 0, 0); return d.getTime() - 30 * 60000; })();
 const spHandle = api.createSpace('s23', '处理时长空间', 1, 0);
 spHandle.repairs.set('h1', { id: 'h1', category: '灯光', location: '走廊', reporterAccount: 'alice', reporterName: '甲', priority: 'normal', description: '闪烁', status: 'resolved', createdAt: nowH, updatedAt: nowH, handledAt: nowH + 60 * 60000 });
 spHandle.repairs.set('h2', { id: 'h2', category: '空调', location: '会议室', reporterAccount: 'bob', reporterName: '乙', priority: 'normal', description: '不制冷', status: 'reported', createdAt: nowH, updatedAt: nowH });
@@ -503,7 +506,8 @@ spHandle.materialRequests.set('mh1', { id: 'mh1', name: '电池', qty: 4, unit: 
 const matHandle = api.materialsPublic(spHandle, new Map());
 assertEq(matHandle.find((m) => m.id === 'mh1').handleDurationMinutes, 1, '已满足申领暴露处理时长');
 const duHandle = { account: 'alice', stats: api.newStats(), achievements: [] };
-const dig = api.buildDigest(spHandle, duHandle);
+const nowDigest = nowH + 30 * 60000;
+const dig = api.buildDigest(spHandle, duHandle, nowDigest);
 assertEq(dig.resolvedRepairsCount, 1, 'digest 统计今日已解决报修');
 assertEq(dig.resolvedMaterialsCount, 1, 'digest 统计今日已满足申领');
 

@@ -528,7 +528,7 @@ function createContext() {
         borrowerAccount: b.borrowerAccount,
         borrowerName: info.get(b.borrowerAccount) ? info.get(b.borrowerAccount).display : b.borrowerName,
         qty: b.qty, borrowedAt: b.borrowedAt, dueAt: b.dueAt || null, returnedAt: b.returnedAt || null,
-        status: b.status, overdue: borrowOverdue(b), soonReminded: !!b.soonRemindedAt, extensions: b.extensions || 0,
+        status: b.status, condition: b.condition || 'intact', overdue: borrowOverdue(b), soonReminded: !!b.soonRemindedAt, extensions: b.extensions || 0,
       };
     }).sort((a, b) => (b.borrowedAt - a.borrowedAt));
   }
@@ -722,8 +722,8 @@ function createContext() {
   }
 
   // ---------- 每日看点 ----------
-  function buildDigest(space, user) {
-    const day0 = new Date(); day0.setHours(0, 0, 0, 0);
+  function buildDigest(space, user, now) {
+    const day0 = new Date(now == null ? Date.now() : now); day0.setHours(0, 0, 0, 0);
     const today0 = day0.getTime(), todayEnd = today0 + 86400000;
     const todayMeetings = roomReservationsPublic(space).filter((r) => r.startAt >= today0 && r.startAt < todayEnd && r.status !== 'cancelled' && r.status !== 'expired');
     const overdue = [...space.borrows.values()].filter((b) => borrowOverdue(b));

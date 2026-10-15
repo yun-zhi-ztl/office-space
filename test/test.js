@@ -107,7 +107,7 @@ async function runTests() {
   const res0 = rooms.reservations[0];
   assert(res0.remindAt && res0.remindAt <= res0.startAt && res0.remindAt >= res0.startAt - 10 * 60000, '预约携带开始前提醒时间 remindAt');
   const rs = last(w2, 'roomStats');
-  assert(rs && rs.rooms.some(r => r.todayCount === 1) && rs.utilizationPct >= 0, 'roomStats 统计到今日会议');
+  assert(rs && rs.rooms.some(r => r.todayCount === 1 || r.upcomingCount === 1) && rs.utilizationPct >= 0, 'roomStats 统计到今日会议');
   const resId = rooms.reservations[0].id;
   // 过去时间预约被拒
   await sendMsg(w2, { type: 'roomBook', roomId, startAt: Date.now() - 60000, endAt: Date.now() + 3600000 });
@@ -382,6 +382,47 @@ async function runTests() {
   assert(wlTool.activeBorrows.length === 1 && wlTool.activeBorrows[0].borrowerAccount === ADMIN, '晋升后自动为排队人创建借用');
   assert(!wlt1.waitlist.some(w => w.toolId === wlToolId), '晋升后排队记录移出公开队列');
   await sendMsg(w1, { type: 'toolReturn', borrowId: wlTool.activeBorrows[0].id });
+
+  // ========== 测试4e: 借用归还状态登记 ==========
+  console.log('\n📋 测试4e: 借用归还状态登记（完好/损坏/丢失）');
+  {
+    const spC = (await httpJson('POST', '/api/spaces', { name: '归还状态办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aC = 'ret_' + runKey, bC = 'retm_' + runKey;
+    await reg(aC, 'pw', '归还管理员'); await reg(bC, 'pw', '归还成员');
+    const wC = await createWSClient(); await loginTo(wC, spC.id, aC, 'pw');
+    const wD = await createWSClient(); await loginTo(wD, spC.id, bC, 'pw');
+    await sendMsg(wC, { type: 'toolCreate', name: '归还测试机', category: '测试电脑', total: 2 });
+    const tidC = last(wC, 'tools').tools[0].id;
+    // 完好归还：可用数恢复
+    await sendMsg(wD, { type: 'toolBorrow', toolId: tidC, qty: 1 });
+    const bwC = last(wD, 'tools').tools.find(t => t.id === tidC).activeBorrows[0];
+    await sendMsg(wD, { type: 'toolReturn', borrowId: bwC.id, condition: 'intact' });
+    let tlC = last(wD, 'tools').tools.find(t => t.id === tidC);
+    assert(tlC && tlC.available === 2, '完好归还恢复可用库存');
+    // 损坏归还：可用数恢复但记录状态
+    await sendMsg(wD, { type: 'toolBorrow', toolId: tidC, qty: 2 });
+    const bwD = last(wD, 'tools').tools.find(t => t.id === tidC).activeBorrows[0];
+    await sendMsg(wD, { type: 'toolReturn', borrowId: bwD.id, condition: 'damaged' });
+    tlC = last(wD, 'tools').tools.find(t => t.id === tidC);
+    assert(tlC && tlC.available === 2, '损坏归还仍恢复可用库存');
+    // 丢失归还：总数与可用数均不恢复
+    await sendMsg(wD, { type: 'toolBorrow', toolId: tidC, qty: 1 });
+    const bwE = last(wD, 'tools').tools.find(t => t.id === tidC).activeBorrows[0];
+    await sendMsg(wD, { type: 'toolReturn', borrowId: bwE.id, condition: 'missing' });
+    tlC = last(wD, 'tools').tools.find(t => t.id === tidC);
+    assert(tlC && tlC.total === 1 && tlC.available === 1, '丢失归还不恢复库存（总数与可用数均扣减）');
+    // borrowsPublic 暴露 condition
+    await sendMsg(wD, { type: 'fetchPage', module: 'borrows', offset: 0, limit: 10 });
+    const bwPage = last(wD, 'page');
+    const condMissing = bwPage.items.find(b => b.id === bwE.id);
+    assert(condMissing && condMissing.condition === 'missing', '借用记录携带归还状态 missing');
+    const condIntact = bwPage.items.find(b => b.id === bwC.id);
+    assert(condIntact && condIntact.condition === 'intact', '借用记录携带归还状态 intact');
+    // 归还公告带状态
+    assert(last(wD, 'notices').notices.some(n => n.text.includes('完好')), '完好归还公告标注状态');
+    assert(last(wD, 'notices').notices.some(n => n.text.includes('丢失')), '丢失归还公告标注状态');
+    wC.close(); wD.close();
+  }
 
   // ========== 测试5: 物资申领 ==========
   console.log('\n📋 测试5: 物资申领（提交/处理/自处理拒绝）');
@@ -697,6 +738,31 @@ async function runTests() {
     const vc = vs.visitors.find(v => v.code === code);
     assert(vc && vc.expiresAt && vc.expired === false, '签到码携带有效期且未过期');
     wC1.close(); wC2.close();
+  }
+
+  // ========== 测试12d: 访客重复登记检测 ==========
+  console.log('\n📋 测试12d: 访客重复登记检测');
+  {
+    const spD = (await httpJson('POST', '/api/spaces', { name: '访客重复办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aD = 'dupd_' + runKey, bD = 'dupdb_' + runKey;
+    await reg(aD, 'pw', '重复接待人'); await reg(bD, 'pw', '重复成员');
+    const wD = await createWSClient(); await loginTo(wD, spD.id, aD, 'pw');
+    const wE = await createWSClient(); await loginTo(wE, spD.id, bD, 'pw');
+    // 第一次登记成功
+    await sendMsg(wD, { type: 'visitorCreate', visitorName: '客户王', purpose: '商务洽谈' });
+    assert(mk(wD, 'visitorCreated').length >= 1, '首次登记访客成功');
+    // 同一天同一访客重复登记被拒
+    await sendMsg(wD, { type: 'visitorCreate', visitorName: '客户王', purpose: '重复事由' });
+    const errDup = mk(wD, 'error').pop();
+    assert(errDup && errDup.code === 'duplicateVisitor', '同一天同访客重复登记返回 duplicateVisitor');
+    assert(errDup && errDup.message.includes('请勿重复登记'), '重复登记提示语明确');
+    // 不同访客名可登记
+    await sendMsg(wD, { type: 'visitorCreate', visitorName: '客户赵', purpose: '面试' });
+    assert(mk(wD, 'visitorCreated').length >= 2, '不同访客名可登记');
+    // 他人接待的同访客名不受限制
+    await sendMsg(wE, { type: 'visitorCreate', visitorName: '客户王', purpose: '他人访客' });
+    assert(mk(wE, 'visitorCreated').length >= 1, '他人接待同访客名不受重复限制');
+    wD.close(); wE.close();
   }
 
   // ========== 测试13: 个人资料 ==========

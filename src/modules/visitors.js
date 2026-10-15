@@ -21,6 +21,17 @@ module.exports = function visitorsModule(api) {
       const contact = (msg.contact || '').trim().slice(0, 30);
       const expectedAt = Math.floor(+msg.expectedAt || 0) || null;
       if (!visitorName || !purpose) return sendTo(ws, serError('请填写访客姓名和来访事由'));
+      // 重复登记检测：同一接待人对同一访客，在同一天仍存在待到访/已到访记录
+      const dupDay = expectedAt ? new Date(expectedAt) : new Date();
+      dupDay.setHours(0, 0, 0, 0);
+      const dup = [...space.visitors.values()].find((v) => {
+        if (v.status !== 'pending' && v.status !== 'arrived') return false;
+        if (v.hostAccount !== user.account) return false;
+        if (v.visitorName !== visitorName) return false;
+        const vDay = new Date(v.expectedAt || v.createdAt); vDay.setHours(0, 0, 0, 0);
+        return vDay.getTime() === dupDay.getTime();
+      });
+      if (dup) return sendTo(ws, { type: 'error', message: `该访客今日已有登记（${dup.purpose}），请勿重复登记`, code: 'duplicateVisitor' });
       const visitor = {
         id: genId('vs', null),
         hostAccount: user.account,

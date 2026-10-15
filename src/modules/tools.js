@@ -17,7 +17,7 @@ module.exports = function toolsModule(api) {
       const tool = space.tools.find((t) => t.id === entry.toolId);
       if (!tool || tool.available < entry.qty) continue;
       tool.available -= entry.qty;
-      const borrow = { id: genId('bw', null), toolId: tool.id, borrowerAccount: entry.account, borrowerName: entry.name, qty: entry.qty, borrowedAt: now, dueAt: now + 7 * 86400000, returnedAt: null, status: 'borrowed', lastRemindedAt: null, soonRemindedAt: null, extensions: 0 };
+      const borrow = { id: genId('bw', null), toolId: tool.id, borrowerAccount: entry.account, borrowerName: entry.name, qty: entry.qty, borrowedAt: now, dueAt: now + 7 * 86400000, returnedAt: null, status: 'borrowed', lastRemindedAt: null, soonRemindedAt: null, extensions: 0, condition: 'intact' };
       space.borrows.set(borrow.id, borrow);
       entry.status = 'promoted';
       entry.promotedAt = now;
@@ -97,7 +97,7 @@ module.exports = function toolsModule(api) {
       if (!Number.isInteger(qty) || qty < 1) return sendTo(ws, serError('请输入有效借用数量'));
       if (qty > tool.available) return sendTo(ws, serError('库存不足，当前可用 ' + tool.available));
       tool.available -= qty;
-      const borrow = { id: genId('bw', null), toolId: tool.id, borrowerAccount: user.account, borrowerName: user.nickname, qty, borrowedAt: Date.now(), dueAt: Date.now() + 7 * 86400000, returnedAt: null, status: 'borrowed', lastRemindedAt: null, soonRemindedAt: null, extensions: 0 };
+      const borrow = { id: genId('bw', null), toolId: tool.id, borrowerAccount: user.account, borrowerName: user.nickname, qty, borrowedAt: Date.now(), dueAt: Date.now() + 7 * 86400000, returnedAt: null, status: 'borrowed', lastRemindedAt: null, soonRemindedAt: null, extensions: 0, condition: 'intact' };
       space.borrows.set(borrow.id, borrow);
       user.stats.borrowCount = (user.stats.borrowCount || 0) + 1;
       recordWeekly(user, 'borrows');
@@ -125,11 +125,19 @@ module.exports = function toolsModule(api) {
       if (borrow.borrowerAccount !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('只能归还自己的借用'));
       const tool = space.tools.find((t) => t.id === borrow.toolId);
       if (!tool) return sendTo(ws, serError('设备不存在'));
+      const condition = ['intact', 'damaged', 'missing'].includes(msg.condition) ? msg.condition : 'intact';
       borrow.status = 'returned';
       borrow.returnedAt = Date.now();
-      tool.available = Math.min(tool.total, tool.available + borrow.qty);
+      borrow.condition = condition;
+      if (condition === 'missing') {
+        // 设备丢失：库存总数扣减，且不恢复可用数
+        tool.total = Math.max(0, tool.total - borrow.qty);
+      } else {
+        tool.available = Math.min(tool.total, tool.available + borrow.qty);
+      }
       promoteToolWaitlist(space);
-      pushNotice(space, `已归还设备：${tool.name} ×${borrow.qty}`, user.account, user.nickname);
+      const condLabel = condition === 'intact' ? '完好' : condition === 'damaged' ? '损坏' : '丢失';
+      pushNotice(space, `已归还设备：${tool.name} ×${borrow.qty}（${condLabel}）`, user.account, user.nickname);
       const borrower = getUserByAccount(borrow.borrowerAccount);
       if (borrower) {
         borrower.stats.borrowDuration += Math.max(0, Math.round((borrow.returnedAt - borrow.borrowedAt) / 60000));

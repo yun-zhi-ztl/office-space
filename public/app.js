@@ -136,12 +136,12 @@ function rowsToCsv(columns, rows){
   const body=rows.map(r=>columns.map(c=>csvCell(c.fmt?c.fmt(r[c.key]):r[c.key])).join(',')).join('\r\n');
   return head+'\r\n'+body;
 }
-const CSV_FMT = { time: (v)=>v?fmtTime(v):'' };
+const CSV_FMT = { time: (v)=>v?fmtTime(v):'' , condition: (v)=>({intact:'完好',damaged:'损坏',missing:'丢失'}[v]||v||'') };
 const MAT_COLS=[{key:'requesterName',label:'申请人'},{key:'name',label:'物资'},{key:'qty',label:'数量'},{key:'unit',label:'单位'},{key:'reason',label:'说明'},{key:'status',label:'状态'},{key:'createdAt',label:'时间',fmt:CSV_FMT.time},{key:'handledAt',label:'处理时间',fmt:CSV_FMT.time}];
 const REP_COLS=[{key:'category',label:'类别'},{key:'priority',label:'优先级'},{key:'location',label:'位置'},{key:'description',label:'描述'},{key:'reporterName',label:'上报人'},{key:'status',label:'状态'},{key:'createdAt',label:'时间',fmt:CSV_FMT.time},{key:'handledAt',label:'处理时间',fmt:CSV_FMT.time}];
 const VIS_COLS=[{key:'hostName',label:'接待人'},{key:'visitorName',label:'访客'},{key:'purpose',label:'事由'},{key:'contact',label:'联系方式'},{key:'status',label:'状态'},{key:'expectedAt',label:'预计到访',fmt:CSV_FMT.time},{key:'createdAt',label:'登记时间',fmt:CSV_FMT.time}];
 const ROOM_COLS=[{key:'title',label:'主题'},{key:'ownerName',label:'预约人'},{key:'startAt',label:'开始',fmt:CSV_FMT.time},{key:'endAt',label:'结束',fmt:CSV_FMT.time},{key:'status',label:'状态'}];
-const BW_COLS=[{key:'toolName',label:'设备'},{key:'toolCategory',label:'类别'},{key:'borrowerName',label:'借用人'},{key:'qty',label:'数量'},{key:'borrowedAt',label:'借出',fmt:CSV_FMT.time},{key:'dueAt',label:'应还',fmt:CSV_FMT.time},{key:'returnedAt',label:'归还',fmt:CSV_FMT.time},{key:'status',label:'状态'}];
+const BW_COLS=[{key:'toolName',label:'设备'},{key:'toolCategory',label:'类别'},{key:'borrowerName',label:'借用人'},{key:'qty',label:'数量'},{key:'borrowedAt',label:'借出',fmt:CSV_FMT.time},{key:'dueAt',label:'应还',fmt:CSV_FMT.time},{key:'returnedAt',label:'归还',fmt:CSV_FMT.time},{key:'condition',label:'归还状态',fmt:CSV_FMT.condition},{key:'status',label:'状态'}];
 function downloadCsv(filename, csv){
   const blob=new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
@@ -478,7 +478,7 @@ function renderTools(){
         ${t.available>0?`<button class="btn pri sm" onclick="openBorrow('${t.id}','${esc(t.name)}',${t.available})">借用</button>`:`<button class="btn sm" onclick="openToolWaitlist('${t.id}','${esc(t.name)}',${t.total})">加入排队</button>`}
         ${S.admin?`<button class="btn danger sm" onclick="removeTool('${t.id}')">删</button><button class="btn sm" onclick="openAdjust('${t.id}','${esc(t.name)}',${t.total},${t.borrowedCount})">改库存</button>`:''}
       </div>
-      ${t.activeBorrows&&t.activeBorrows.length?`<div class="meta">在借：${t.activeBorrows.map(b=>{ const can=b.borrowerAccount===me||S.admin; return `${esc(b.borrowerName)}×${b.qty}${b.dueAt?' · 应还 '+fmtTime(b.dueAt):''}${b.days>=0?' · '+b.days+'天':''}${b.overdue?'<span class="badge bad">逾期</span>':''}${b.reminded?'<span class="badge grey">已提醒</span>':''}${b.dueSoon?'<span class="badge warn">即将到期</span>':''}${b.borrowerAccount===me?` <button class="btn green sm" onclick="returnTool('${b.id}')">归还</button>`:''}${can?(b.extensions>=2?'<span class="hint">续借已用完</span>':`<button class="btn sm" onclick="openExtend('${b.id}','${esc(b.borrowerName)}')">续借 (${2-(b.extensions||0)}次)</button>`):''}${b.borrowerAccount!==me&&b.overdue?` <button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒</button>`:''}`; }).join('，')}</div>`:''}
+      ${t.activeBorrows&&t.activeBorrows.length?`<div class="meta">在借：${t.activeBorrows.map(b=>{ const can=b.borrowerAccount===me||S.admin; return `${esc(b.borrowerName)}×${b.qty}${b.dueAt?' · 应还 '+fmtTime(b.dueAt):''}${b.days>=0?' · '+b.days+'天':''}${b.overdue?'<span class="badge bad">逾期</span>':''}${b.reminded?'<span class="badge grey">已提醒</span>':''}${b.dueSoon?'<span class="badge warn">即将到期</span>':''}${b.borrowerAccount===me?` <button class="btn green sm" onclick="openReturn('${b.id}')">归还</button>`:''}${can?(b.extensions>=2?'<span class="hint">续借已用完</span>':`<button class="btn sm" onclick="openExtend('${b.id}','${esc(b.borrowerName)}')">续借 (${2-(b.extensions||0)}次)</button>`):''}${b.borrowerAccount!==me&&b.overdue?` <button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒</button>`:''}`; }).join('，')}</div>`:''}
     </div>`).join('')||'<div class="empty">还没有设备，管理员可新增</div>'}
     </div>`;
 }
@@ -504,7 +504,17 @@ function openToolWaitlist(id,name,total){ openModal(`<span class="close" onclick
   <div class="hint">轮到你时会自动借用，并在归还后优先分配给你</div>
   <button class="btn pri" onclick="submitToolWaitlist('${id}')">加入排队</button></div>`); }
 function submitToolWaitlist(id){ wsSend({type:'toolWaitlist',toolId:id,qty:parseInt($('#wlQty').value,10)}); closeModal(); }
-function returnTool(id){ wsSend({type:'toolReturn',borrowId:id}); }
+/* 归还登记：选择归还状态（完好/损坏/丢失），丢失不恢复可用库存 */
+function openReturn(id){
+  const b=(S.DB.borrows||[]).find(x=>x.id===id);
+  if(!b){ wsSend({type:'toolReturn',borrowId:id}); return; }
+  S.lastReturnId=id;
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>归还设备 · ${esc(b.toolName||'设备')}</h2><div class="form">
+    <div class="fld"><label>归还状态</label><select id="rtCond"><option value="intact">完好</option><option value="damaged">损坏</option><option value="missing">丢失</option></select></div>
+    <div class="hint">「丢失」不会恢复库存总数；「损坏」仍计入归还但记录状态</div>
+    <button class="btn pri" onclick="submitReturn()">确认归还</button></div>`);
+}
+function submitReturn(){ wsSend({type:'toolReturn',borrowId:S.lastReturnId,condition:$('#rtCond').value}); closeModal(); }
 function openExtend(id,name){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>续借 · ${esc(name)}</h2><div class="form">
   <div class="fld"><label>续借天数（1-30）</label><input id="exDays" type="number" min="1" max="30" value="7"></div>
   <button class="btn pri" onclick="submitExtend('${id}')">确认续借</button></div>`); }
@@ -601,7 +611,8 @@ function openVisitorCreate(){ openModal(`<span class="close" onclick="closeModal
   <div class="fld"><label>来访事由</label><input id="vsPurpose" placeholder="如：商务拜访 / 面试 / 送修"></div>
   <div class="fld"><label>联系方式（可选）</label><input id="vsContact" placeholder="手机号或内部短号"></div>
   <div class="fld"><label>预计到访（可选）</label><input id="vsExpected" type="datetime-local"></div>
-  <button class="btn pri" onclick="submitVisitorCreate()">登记</button></div>`); }
+  <button class="btn pri" onclick="submitVisitorCreate()">登记</button>
+  <div class="hint">同一访客同一天的重复登记会被识别并拒绝</div></div>`); }
 function submitVisitorCreate(){ const st=$('#vsExpected').value?new Date($('#vsExpected').value).getTime():0; wsSend({type:'visitorCreate',visitorName:$('#vsName').value,purpose:$('#vsPurpose').value,contact:$('#vsContact').value,expectedAt:st||0}); closeModal(); }
 /* 访客签到码核销：访客到访时输入/报出 6 位签到码 */
 function openCheckin(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>🔑 凭签到码核销</h2><div class="form">
