@@ -598,6 +598,24 @@ const achGuide = api.achievementDefsPublic(achUser).find((a) => a.id === 'roomGu
 assertEq(achGuide.unlocked, true, '会议室向导已解锁');
 assertEq(achGuide.target, 3, '会议室向导目标值 3');
 
+// ---------- 物资库存台账 ----------
+console.log('\n📋 38. 物资库存台账');
+assert(api.isStockLow({ available: 1, total: 3, minAvailable: 1 }), '可用数等于阈值判定为库存告急');
+assert(!api.isStockLow({ available: 2, total: 3, minAvailable: 1 }), '可用数高于阈值不判定为库存告急');
+assert(api.isStockLow({ available: 0, total: 1 }), '默认阈值 1 时可用 0 判定为库存告急');
+const spInv = api.createSpace('s28', '库存空间', 1, 0);
+spInv.inventory.push({ id: 'inv1', name: '5号电池', category: '电池', unit: '节', total: 3, available: 1, minAvailable: 1, location: '茶水间', description: '' });
+spInv.inventory.push({ id: 'inv2', name: 'A4纸', category: '打印耗材', unit: '包', total: 2, available: 2, minAvailable: 1, location: '前台', description: '' });
+spInv.inventoryIssues.set('ivs1', { id: 'ivs1', itemId: 'inv1', itemName: '5号电池', issuerAccount: 'alice', issuerName: '甲', qty: 1, status: 'issued', createdAt: Date.now(), returnedAt: null, dueAt: Date.now() + 3 * 86400000 });
+const invPub = api.inventoryPublic(spInv, new Map());
+assertEq(invPub.find((i) => i.id === 'inv1').lowStock, true, '库存告急物资 lowStock=true');
+assertEq(invPub.find((i) => i.id === 'inv1').borrowedCount, 1, '物资在领数量统计');
+assertEq(invPub.find((i) => i.id === 'inv1').activeIssues.length, 1, '物资在领明细序列化');
+assertEq(invPub.find((i) => i.id === 'inv2').lowStock, false, '库存充足物资 lowStock=false');
+const invIssues = api.inventoryIssuesPublic(spInv, new Map());
+assertEq(invIssues.length, 1, '库存领用记录仅返回在领状态');
+assertEq(invIssues[0].itemName, '5号电池', '库存领用记录关联物资名称');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

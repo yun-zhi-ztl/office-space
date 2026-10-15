@@ -18,7 +18,7 @@ const S = {
   lastSpace: localStorage.getItem('os_space')||'',
   ws: null, me:null, space:null, module:'rooms',
   pendingLogin:null,
-  DB:{ rooms:[], reservations:[], waitlist:[], waitlistTotal:0, tools:[], requests:[], materialTemplates:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[] },
+  DB:{ rooms:[], reservations:[], waitlist:[], waitlistTotal:0, tools:[], requests:[], materialTemplates:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[], inventory:{items:[],issues:[]} },
   visitorTotal:0, visitorOffset:0,
   borrowTotal:0, borrowOffset:0,
   roomStats:null,
@@ -27,7 +27,7 @@ const S = {
   weeklyReport:null,
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -56,6 +56,7 @@ function dispatch(m){
       $('#gate').style.display='none'; $('#app').style.display='flex'; renderAll(); break;
     case 'rooms': S.DB.rooms=m.rooms; S.DB.reservations=m.reservations; S.DB.revTotal=m.reservationTotal||0; S.DB.revOffset=S.DB.reservations.length; S.DB.waitlist=m.waitlist||[]; S.DB.waitlistTotal=m.waitlistTotal||0; break;
     case 'tools': S.DB.tools=m.tools; S.DB.toolWaitlist=m.waitlist||[]; break;
+    case 'inventory': S.DB.inventory={ items:m.items||[], issues:m.issues||[] }; break;
     case 'materials': S.DB.requests=m.requests; S.DB.materialTemplates=m.templates||[]; S.DB.matTotal=m.total||0; S.DB.matOffset=S.DB.requests.length; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; break;
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
@@ -77,6 +78,7 @@ function dispatch(m){
     case 'borrowReminder': toast('🔔 '+(m.from||'有人')+'提醒你归还设备',"urge"); break;
     case 'overdueReminder': toast('⏰ 你借的设备已逾期，请尽快归还','urge'); break;
     case 'toolLowStock': toast('⚠️ 设备库存告急：'+(m.toolName||'')+' 可用 '+m.available+'（阈值 '+m.minAvailable+'）','warn'); render(); break;
+    case 'inventoryLowStock': toast('⚠️ 物资库存告急：'+(m.itemName||'')+' 可用 '+m.available+'（阈值 '+m.minAvailable+'）','warn'); render(); break;
     case 'borrowDueSoon': toast('🔔 你借的设备即将到期，请按时归还','warn'); render(); break;
     case 'roomReminder': { const rm=(S.DB.rooms||[]).find(r=>r.id===m.roomId); toast('🔔 '+(rm?rm.name:'会议室')+' 即将开始：'+fmtTime(m.startAt),'success'); break; }
     case 'materialAssigned': toast('📌 物资申领已指派给你：'+(m.name||''),'info'); render(); break;
@@ -117,7 +119,7 @@ function dispatch(m){
   if(['rooms','tools','materials','repairs','visitors','stalls','roomStats','users','leaderboard','achievements','myReminders','spaceTrend','notices','digest'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
@@ -613,6 +615,47 @@ function submitTemplate(){ wsSend({type:'materialTemplateCreate',name:$('#tplNam
 function deleteTemplate(id){ if(confirm('确认删除该常用模板？')) wsSend({type:'materialTemplateDelete',templateId:id}); }
 function cancelRequest(id){ wsSend({type:'materialCancel',requestId:id}); }
 function fulfillRequest(id){ wsSend({type:'materialFulfill',requestId:id}); }
+
+/* ============ 物资库存台账 ============ */
+function renderInventory(){
+  const me=S.me.account;
+  const items=(S.DB.inventory&&S.DB.inventory.items)||[];
+  $('#main').innerHTML = `<div class="topbar"><div><h1>物资库存</h1><div class="sub">登记办公文具、耗材等公共物资库存，成员按需领用并归还</div></div>
+    ${S.admin?'<button class="btn pri" onclick="openInventoryCreate()">＋ 新增物资</button>':''}</div>
+    <div class="cards">${items.map(it=>{ const overdue=(it.activeIssues||[]).filter(r=>r.overdue).length; return `<div class="card"><h3>${esc(it.name)} <span class="badge ${it.available>0?'ok':'bad'}">${it.available}/${it.total}${it.unit?' '+esc(it.unit):''}</span></h3>
+      <div class="meta">${esc(it.category)}${it.location?' · '+esc(it.location):''}${it.minAvailable&&it.minAvailable>1?' · 阈值 '+it.minAvailable:''}${it.borrowedCount?' · 在领 '+it.borrowedCount:''}${overdue?' · <span class="badge bad">逾期</span>':''}</div>
+      <div class="meta">${it.lowStock?'<span class="badge bad">库存告急</span>':''}</div>
+      <div class="bar"><i style="width:${it.total?Math.round(it.available/it.total*100):0}%"></i></div>
+      <div class="foot fs">
+        ${it.available>0?`<button class="btn pri sm" onclick="openInventoryIssue('${it.id}','${esc(it.name)}',${it.available})">领用</button>`:'<span class="hint">库存已用尽</span>'}
+        ${S.admin?`<button class="btn danger sm" onclick="removeInventory('${it.id}')">删</button><button class="btn sm" onclick="openInventoryAdjust('${it.id}','${esc(it.name)}',${it.total},${it.available},${it.minAvailable||1})">改库存</button>`:''}
+      </div>
+      ${(it.activeIssues||[]).length?`<div class="meta">在领：${it.activeIssues.map(r=>{ const can=r.issuerAccount===me||S.admin; return `${esc(r.issuerName)}×${r.qty}${r.dueAt?' · 应还 '+fmtTime(r.dueAt):''}${r.days>=0?' · '+r.days+'天':''}${r.overdue?'<span class="badge bad">逾期</span>':''}${can?` <button class="btn green sm" onclick="returnInventory('${r.id}')">归还</button>`:''}`; }).join('，')}</div>`:''}
+    </div>`; }).join('')||'<div class="empty">暂无库存物资，管理员可新增</div>'}
+    </div>`;
+}
+function openInventoryCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>新增物资</h2><div class="form">
+  <div class="fld"><label>名称</label><input id="ivName" placeholder="如：5号电池"></div>
+  <div class="fld"><label>类别</label><select id="ivCat"><option>办公文具</option><option>打印耗材</option><option>电池</option><option>清洁用品</option><option>食品饮料</option><option>其它</option></select></div>
+  <div class="fld"><label>单位</label><input id="ivUnit" placeholder="个 / 节 / 盒"></div>
+  <div class="fld"><label>库存数量</label><input id="ivTotal" type="number" min="1" value="10"></div>
+  <div class="fld"><label>库存告急阈值（0-库存）</label><input id="ivMin" type="number" min="0" value="2"></div>
+  <div class="fld"><label>位置</label><input id="ivLoc" placeholder="可选"></div>
+  <div class="fld"><label>备注</label><input id="ivDesc" placeholder="可选"></div>
+  <button class="btn pri" onclick="submitInventoryCreate()">创建</button></div>`); }
+function submitInventoryCreate(){ wsSend({type:'inventoryCreate',name:$('#ivName').value,category:$('#ivCat').value,unit:$('#ivUnit').value,total:parseInt($('#ivTotal').value,10),minAvailable:parseInt($('#ivMin').value,10),location:$('#ivLoc').value,description:$('#ivDesc').value}); closeModal(); }
+function removeInventory(id){ if(confirm('删除该物资？')) wsSend({type:'inventoryDelete',itemId:id}); }
+function openInventoryAdjust(id,name,total,available,min){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>调整库存 · ${esc(name)}</h2><div class="form">
+  <div class="fld"><label>在领 ${available==null?'':Math.max(0,total-available)} · 当前总库存 ${total}</label><input id="ivAdTotal" type="number" min="1" value="${total}"></div>
+  <div class="fld"><label>库存告急阈值（0-库存）</label><input id="ivAdMin" type="number" min="0" value="${min||1}"></div>
+  <button class="btn pri" onclick="submitInventoryAdjust('${id}')">保存</button></div>`); }
+function submitInventoryAdjust(id){ wsSend({type:'inventoryAdjust',itemId:id,total:parseInt($('#ivAdTotal').value,10),minAvailable:parseInt($('#ivAdMin').value,10)}); closeModal(); }
+function openInventoryIssue(id,name,avail){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>领用 · ${esc(name)}</h2><div class="form">
+  <div class="fld"><label>可领用 ${avail}</label><input id="ivQty" type="number" min="1" value="1"></div>
+  <div class="hint">领用后将扣减库存，默认 3 天内归还，逾期会在在领明细中标记</div>
+  <button class="btn pri" onclick="submitInventoryIssue('${id}')">领用</button></div>`); }
+function submitInventoryIssue(id){ wsSend({type:'inventoryIssue',itemId:id,qty:parseInt($('#ivQty').value,10)}); closeModal(); }
+function returnInventory(issueId){ wsSend({type:'inventoryReturn',issueId}); }
 
 /* ============ 报修 ============ */
 function renderRepairs(){

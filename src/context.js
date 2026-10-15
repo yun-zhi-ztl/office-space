@@ -14,6 +14,7 @@ function createContext() {
   const REPAIR_CATEGORIES = ['厕所', '灯光', '空调', '其它'];
   const REPAIR_PRIORITIES = ['high', 'normal', 'low'];
   const TOOL_CATEGORIES = ['测试电脑', '测试机器', '测试手机', '其它'];
+  const INVENTORY_CATEGORIES = ['办公文具', '打印耗材', '电池', '清洁用品', '食品饮料', '其它'];
   const LIST_PAGE = 30;
   const PERSIST_DEBOUNCE_MS = 500;
   const WS_PING_MS = 30000;
@@ -184,6 +185,8 @@ function createContext() {
       else if (r.kind === 'borrow') sp.borrows.set(data.id, data);
       else if (r.kind === 'material') sp.materialRequests.set(data.id, data);
       else if (r.kind === 'material_template') sp.materialTemplates.set(data.id, data);
+      else if (r.kind === 'inventory') sp.inventory.push(data);
+      else if (r.kind === 'inventory_issue') sp.inventoryIssues.set(data.id, data);
       else if (r.kind === 'repair') sp.repairs.set(data.id, data);
       else if (r.kind === 'visitor') sp.visitors.set(data.id, data);
       else if (r.kind === 'notice') { sp.notices.push(data); sp.notices.sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
@@ -319,11 +322,12 @@ function createContext() {
     return nowMs >= dueAt;
   }
   // 低库存预警：可用数 ≤ 阈值（默认 1）即视为库存告急
-  function isToolLowStock(tool) {
-    if (!tool) return false;
-    const min = Number.isInteger(tool.minAvailable) ? tool.minAvailable : 1;
-    return tool.available <= min;
+  function isStockLow(item) {
+    if (!item) return false;
+    const min = Number.isInteger(item.minAvailable) ? item.minAvailable : 1;
+    return item.available <= min;
   }
+  function isToolLowStock(tool) { return isStockLow(tool); }
   // 逾期但尚未在静默期内重复提醒的借用（按 lastRemindedAt 去重）
   function dueBorrowReminders(space, now) {
     const nowMs = now == null ? Date.now() : now;
@@ -411,7 +415,7 @@ function createContext() {
       admins: new Set(), clients: new Set(), notices: [],
       paused: false, pausedReason: '',
       rooms: [], roomReservations: new Map(), roomWaitlist: new Map(), reservations: new Map(),
-      tools: [], borrows: new Map(), toolWaitlist: new Map(), materialRequests: new Map(), materialTemplates: new Map(), repairs: new Map(), visitors: new Map(), urges: new Map(),
+      tools: [], borrows: new Map(), toolWaitlist: new Map(), materialRequests: new Map(), materialTemplates: new Map(), repairs: new Map(), visitors: new Map(), urges: new Map(), inventory: [], inventoryIssues: new Map(),
     };
     sp.weeklyReportDate = null;
     sp.stalls = buildStalls(squat == null ? 4 : squat, urinal == null ? 3 : urinal);
@@ -529,6 +533,48 @@ function createContext() {
         qty: w.qty, status: w.status, createdAt: w.createdAt,
       };
     }).sort((a, b) => a.createdAt - b.createdAt);
+  }
+  function inventoryPublic(sp, info) {
+    const now = Date.now();
+    const activeByItem = new Map();
+    for (const r of sp.inventoryIssues.values()) {
+      if (r.status !== 'issued') continue;
+      const arr = activeByItem.get(r.itemId) || [];
+      arr.push(r);
+      activeByItem.set(r.itemId, arr);
+    }
+    return sp.inventory.map((it) => {
+      const active = activeByItem.get(it.id) || [];
+      return {
+        id: it.id, name: it.name, category: it.category, unit: it.unit,
+        total: it.total, available: it.available, minAvailable: it.minAvailable || 1, lowStock: isStockLow(it),
+        location: it.location, description: it.description,
+        borrowedCount: active.reduce((s, r) => s + r.qty, 0),
+        activeIssues: active.map((r) => {
+          const days = Math.floor((now - r.createdAt) / 86400000);
+          return {
+            id: r.id, qty: r.qty, issuerAccount: r.issuerAccount,
+            issuerName: info.get(r.issuerAccount) ? info.get(r.issuerAccount).display : r.issuerName,
+            borrowedAt: r.createdAt, dueAt: r.dueAt || null, days,
+            overdue: r.dueAt ? now >= r.dueAt : false,
+          };
+        }),
+      };
+    });
+  }
+  function inventoryIssuesPublic(sp, info) {
+    return [...sp.inventoryIssues.values()]
+      .filter((r) => r.status === 'issued')
+      .map((r) => {
+        const item = sp.inventory.find((it) => it.id === r.itemId);
+        return {
+          id: r.id, itemId: r.itemId, itemName: item ? item.name : '', qty: r.qty,
+          issuerAccount: r.issuerAccount,
+          issuerName: info.get(r.issuerAccount) ? info.get(r.issuerAccount).display : r.issuerName,
+          borrowedAt: r.createdAt, dueAt: r.dueAt || null,
+        };
+      })
+      .sort((a, b) => b.borrowedAt - a.borrowedAt);
   }
   function materialTemplatePublic(t) {
     return { id: t.id, name: t.name, defaultQty: t.defaultQty, defaultUnit: t.defaultUnit || '', defaultReason: t.defaultReason || '', createdAt: t.createdAt };
@@ -695,6 +741,7 @@ function createContext() {
     const visitors = visitorsPublic(sp, info);
     broadcast(sp.id, 'rooms', { rooms: sp.rooms.map((r) => roomPublic(sp, r)), reservations: reservations.slice(0, LIST_PAGE), reservationTotal: reservations.length, waitlist: waitlist.slice(0, LIST_PAGE), waitlistTotal: waitlist.length });
     broadcast(sp.id, 'tools', { tools: toolsPublic(sp, info) });
+    broadcast(sp.id, 'inventory', { items: inventoryPublic(sp, info), issues: inventoryIssuesPublic(sp, info) });
     broadcast(sp.id, 'materials', { requests: materials.slice(0, LIST_PAGE), total: materials.length });
     broadcast(sp.id, 'repairs', { repairs: repairs.slice(0, LIST_PAGE), total: repairs.length });
     broadcast(sp.id, 'visitors', { visitors: visitors.slice(0, LIST_PAGE), total: visitors.length });
@@ -864,13 +911,13 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
     initDb, flushWrites, scheduleFlush,
     // 工具
-    genId, genSpaceId, genCheckinCode, sendTo, broadcastTo, sendToUser, sendToAccount, getUsersIn, getUserByAccount, isAdmin, serError, lk, spaceUserInfo, isToolLowStock,
+    genId, genSpaceId, genCheckinCode, sendTo, broadcastTo, sendToUser, sendToAccount, getUsersIn, getUserByAccount, isAdmin, serError, lk, spaceUserInfo, isToolLowStock, isStockLow,
     // 认证
     hashPassword, verifyPassword, issueToken, accountByLogin,
     // 持久化
@@ -878,7 +925,7 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, inventoryPublic, inventoryIssuesPublic,
     // 广播
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, noticesBroadcast, pushNotice, visitorsBroadcast,
     // 坑位辅助

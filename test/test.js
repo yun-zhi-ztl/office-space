@@ -1178,6 +1178,49 @@ async function runTests() {
     wM.close();
   }
 
+  // ========== 测试28: 物资库存台账 ==========
+  console.log('\n📋 测试28: 物资库存台账');
+  {
+    const spV = (await httpJson('POST', '/api/spaces', { name: '库存办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aV = 'inv_' + runKey, bV = 'invm_' + runKey;
+    await reg(aV, 'pw', '库存管理员'); await reg(bV, 'pw', '库存成员');
+    const wA = await createWSClient(); await loginTo(wA, spV.id, aV, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spV.id, bV, 'pw');
+    // 创建阈值等于库存的物资，创建时即触发库存告急
+    await sendMsg(wA, { type: 'inventoryCreate', name: '5号电池', category: '电池', unit: '节', total: 2, minAvailable: 2, location: '茶水间' });
+    const inv0 = last(wA, 'inventory');
+    const item0 = inv0 && inv0.items && inv0.items[0];
+    assert(item0 && item0.lowStock === true, '库存阈值等于库存时返回 lowStock=true');
+    assert(item0 && item0.minAvailable === 2, '物资库存暴露 minAvailable');
+    const invLow = mk(wA, 'inventoryLowStock');
+    assert(invLow.length >= 1 && invLow[invLow.length - 1].itemName === '5号电池', '创建即触发管理员库存告急通知');
+    // 阈值超过总库存被拒
+    await sendMsg(wA, { type: 'inventoryCreate', name: 'A4纸', category: '打印耗材', unit: '包', total: 1, minAvailable: 2 });
+    const errInv = mk(wA, 'error');
+    assert(errInv.length > 0 && errInv[errInv.length - 1].message.includes('库存阈值需为 0 到总库存之间'), '创建物资阈值超过库存被拒');
+    // 成员领用
+    await sendMsg(wB, { type: 'inventoryIssue', itemId: item0.id, qty: 1 });
+    const inv1 = last(wB, 'inventory');
+    const item1 = inv1 && inv1.items && inv1.items[0];
+    assert(item1 && item1.available === 1, '成员领用后可用库存扣减');
+    assert(item1 && item1.borrowedCount === 1, '成员领用后在领数量统计');
+    // 超库存领用被拒
+    await sendMsg(wB, { type: 'inventoryIssue', itemId: item0.id, qty: 2 });
+    const errInvIssue = mk(wB, 'error');
+    assert(errInvIssue.length > 0 && errInvIssue[errInvIssue.length - 1].message.includes('库存不足，无法领用'), '超库存领用被拒');
+    // 成员归还
+    await sendMsg(wB, { type: 'inventoryReturn', issueId: item1.activeIssues[0].id });
+    const inv2 = last(wB, 'inventory');
+    const item2 = inv2 && inv2.items && inv2.items[0];
+    assert(item2 && item2.available === 2, '成员归还后可用库存恢复');
+    assert(item2 && item2.borrowedCount === 0, '成员归还后在领数量清零');
+    // 管理员删除无在领记录的物资
+    await sendMsg(wA, { type: 'inventoryDelete', itemId: item2.id });
+    const inv3 = last(wA, 'inventory');
+    assert(inv3 && inv3.items && inv3.items.length === 0, '管理员删除物资成功');
+    wA.close(); wB.close();
+  }
+
   // ========== 总结 ==========
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);

@@ -16,6 +16,7 @@ const sessionApi = require('./src/session');
 const roomsModule = require('./src/modules/rooms');
 const toolsModule = require('./src/modules/tools');
 const materialsModule = require('./src/modules/materials');
+const inventoryModule = require('./src/modules/inventory');
 const repairsModule = require('./src/modules/repairs');
 const visitorsModule = require('./src/modules/visitors');
 const profileModule = require('./src/modules/profile');
@@ -51,6 +52,7 @@ const session = sessionApi(api);
 const rooms = roomsModule(api);
 const tools = toolsModule(api);
 const materials = materialsModule(api);
+const inventory = inventoryModule(api);
 const repairs = repairsModule(api);
 const visitors = visitorsModule(api);
 const profile = profileModule(api);
@@ -108,6 +110,8 @@ wss.on('connection', (ws) => {
         tools.handleTools(ws, user, space, msg); break;
       case 'materialRequest': case 'materialCancel': case 'materialFulfill': case 'materialAssign': case 'materialTemplateCreate': case 'materialTemplateDelete':
         materials.handleMaterials(ws, user, space, msg); break;
+      case 'inventoryCreate': case 'inventoryDelete': case 'inventoryAdjust': case 'inventoryIssue': case 'inventoryReturn':
+        inventory.handleInventory(ws, user, space, msg); break;
       case 'repairCreate': case 'repairUpdate': case 'repairAssign':
         repairs.handleRepairs(ws, user, space, msg); break;
       case 'visitorCreate': case 'visitorArrived': case 'visitorLeft': case 'visitorCancel': case 'visitorRemove': case 'visitorCheckin':
