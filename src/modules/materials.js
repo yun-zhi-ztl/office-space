@@ -1,7 +1,7 @@
 'use strict';
 // 物资申领模块：materialRequest / materialCancel / materialFulfill
 module.exports = function materialsModule(api) {
-  const { spaceUserInfo, materialsPublic, broadcast, LIST_PAGE, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToAccount, isAdmin } = api;
+  const { spaceUserInfo, materialsPublic, broadcast, LIST_PAGE, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToAccount, sendToUser, checkAchievements, isAdmin } = api;
 
   function materialsBroadcast(space) {
     const info = spaceUserInfo(space.id);
@@ -55,7 +55,11 @@ module.exports = function materialsModule(api) {
       req.status = 'fulfilled';
       req.handledAt = Date.now();
       saveEntity(space.id, 'material', req.id, req);
+      user.stats.helperCount = (user.stats.helperCount || 0) + 1;
+      checkAchievements(user);
+      saveProfile(user);
       sendToAccount(req.requesterAccount, { type: 'materialFulfilled', requestId: req.id, name: req.name });
+      sendToUser(user.id, { type: 'stats', stats: user.stats, achievements: user.achievements });
       materialsBroadcast(space);
     }
   }

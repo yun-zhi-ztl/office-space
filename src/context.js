@@ -307,7 +307,7 @@ function createContext() {
   // ---------- 空间 ----------
   function weekKey(ts) { const d = new Date(ts || Date.now()); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
   function newWeekly() { return { key: weekKey(), visits: 0, borrows: 0, requests: 0, repairs: 0, meetings: 0 }; }
-  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, weekly: newWeekly() }; }
+  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, helperCount: 0, weekly: newWeekly() }; }
   function recordWeekly(user, field) { if (!user.stats.weekly || user.stats.weekly.key !== weekKey()) user.stats.weekly = newWeekly(); user.stats.weekly[field] = (user.stats.weekly[field] || 0) + 1; }
   function weeklyScore(stats) { const w = stats.weekly; if (!w || w.key !== weekKey()) return 0; return (w.visits || 0) + (w.borrows || 0) + (w.requests || 0) + (w.repairs || 0) + (w.meetings || 0); }
   function borrowOverdue(b, now) {
@@ -636,6 +636,7 @@ function createContext() {
     { id: 'requester', name: '物资管家', desc: '累计申领物资超过3次', icon: '📦', check: (u) => (u.stats.requestCount || 0) >= 3 },
     { id: 'reporter', name: '热心市民', desc: '累计上报报修超过3次', icon: '🛠️', check: (u) => (u.stats.repairCount || 0) >= 3 },
     { id: 'meeter', name: '会议达人', desc: '累计会议时长超过60分钟', icon: '🗓️', check: (u) => (u.stats.meetingDuration || 0) >= 60 },
+    { id: 'logistician', name: '后勤达人', desc: '处理申领或解决报修累计5次', icon: '🛎️', check: (u) => (u.stats.helperCount || 0) >= 5 },
   ];
   function checkAchievements(user) {
     let changed = false;
@@ -656,6 +657,7 @@ function createContext() {
     requester: { field: 'requestCount', target: 3 },
     reporter: { field: 'repairCount', target: 3 },
     meeter: { field: 'meetingDuration', target: 60 },
+    logistician: { field: 'helperCount', target: 5 },
   };
   function achievementProgress(user, def) {
     const t = ACH_TARGETS[def.id] || { field: 'totalVisits', target: 1 };

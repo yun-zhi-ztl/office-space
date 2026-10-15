@@ -38,6 +38,7 @@ const stats = api.newStats();
 assertEq(stats.totalVisits, 0, 'newStats 初始 totalVisits=0');
 assertEq(stats.borrowDuration, 0, 'newStats 初始 borrowDuration=0');
 assertEq(stats.meetingDuration, 0, 'newStats 初始 meetingDuration=0');
+assertEq(stats.helperCount, 0, 'newStats 初始 helperCount=0');
 const weekUser = { stats };
 api.recordWeekly(weekUser, 'visits');
 api.recordWeekly(weekUser, 'borrows');
@@ -76,12 +77,15 @@ const p3 = api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id =
 assert(p3.unlocked === true, '累计 10 次解锁蹲坑之王');
 assertEq(p3.pct, 100, '蹲坑之王达成后进度 100');
 const pub = api.achievementDefsPublic(user);
-assertEq(pub.length, 10, '成就公开列表含 10 项');
+assertEq(pub.length, 11, '成就公开列表含 11 项');
 assert(pub.every((a) => a.id && a.name && a.desc && a.icon), '公开成就含 id/name/desc/icon');
 user.stats.borrowCount = 3;
 assert(api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'borrower')).unlocked === true, '借用 3 次解锁借阅达人');
 user.stats.meetingDuration = 60;
 assert(api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'meeter')).unlocked === true, '会议时长 60 分钟解锁会议达人');
+user.stats.helperCount = 5;
+assert(api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'logistician')).unlocked === true, '处理 5 次解锁后勤达人');
+assert(api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'logistician')).pct === 100, '后勤达人达成后进度 100');
 
 // ---------- 口令哈希 ----------
 console.log('\n📋 5. 口令哈希');

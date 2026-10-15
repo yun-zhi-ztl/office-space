@@ -1,7 +1,7 @@
 'use strict';
 // 报修模块：repairCreate / repairUpdate
 module.exports = function repairsModule(api) {
-  const { spaceUserInfo, repairsPublic, broadcast, LIST_PAGE, REPAIR_CATEGORIES, REPAIR_PRIORITIES, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToAccount, isAdmin } = api;
+  const { spaceUserInfo, repairsPublic, broadcast, LIST_PAGE, REPAIR_CATEGORIES, REPAIR_PRIORITIES, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToAccount, sendToUser, checkAchievements, isAdmin } = api;
 
   function repairsBroadcast(space) {
     const info = spaceUserInfo(space.id);
@@ -71,7 +71,13 @@ module.exports = function repairsModule(api) {
       rep.updatedAt = Date.now();
       saveEntity(space.id, 'repair', rep.id, rep);
       if (to === 'in_progress') sendToAccount(rep.reporterAccount, { type: 'repairInProgress', repairId: rep.id, category: rep.category, location: rep.location });
-      if (to === 'resolved') sendToAccount(rep.reporterAccount, { type: 'repairResolved', repairId: rep.id, category: rep.category, location: rep.location });
+      if (to === 'resolved') {
+        user.stats.helperCount = (user.stats.helperCount || 0) + 1;
+        checkAchievements(user);
+        saveProfile(user);
+        sendToUser(user.id, { type: 'stats', stats: user.stats, achievements: user.achievements });
+        sendToAccount(rep.reporterAccount, { type: 'repairResolved', repairId: rep.id, category: rep.category, location: rep.location });
+      }
       repairsBroadcast(space);
     }
   }

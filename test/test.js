@@ -289,6 +289,7 @@ async function runTests() {
   const fulfilled = mats.requests.find(r => r.id === reqId);
   assert(fulfilled && fulfilled.status === 'fulfilled', '他人可将申领置为已满足');
   assert(mk(w2, 'materialFulfilled').length >= 1, '申领满足后申请人收到通知');
+  assert(last(w1, 'stats') && last(w1, 'stats').stats.helperCount === 1, '处理申领累计 helperCount=1');
 
   // ========== 测试5b: 物资申领指派 ==========
   console.log('\n📋 测试5b: 物资申领指派负责人');
@@ -331,6 +332,7 @@ async function runTests() {
   repairs = last(w1, 'repairs');
   assert(repairs.repairs.find(r => r.id === repairId).status === 'resolved', '报修已解决');
   assert(mk(w2, 'repairResolved').length >= 1, '报修解决后通知上报人');
+  assert(last(w1, 'stats') && last(w1, 'stats').stats.helperCount === 2, '解决报修累计 helperCount=2');
   // 他人不能取消成员上报的报修
   await sendMsg(w1, { type: 'repairUpdate', repairId, status: 'cancelled' });
   const errRep = mk(w1, 'error');
@@ -671,11 +673,12 @@ async function runTests() {
     await sendMsg(wA, { type: 'getAchievements' });
     const ach = last(wA, 'achievements');
     assert(ach && Array.isArray(ach.achievements), '成就墙返回 achievements 数组');
-    assert(ach.achievements.length === 10, '成就墙含 10 个成就');
+    assert(ach.achievements.length === 11, '成就墙含 11 个成就');
     assert(ach.achievements.every((a) => a.id && a.name && a.desc && a.icon), '每项成就含 id/name/desc/icon');
     assert(ach.achievements.every((a) => a.current != null && a.target != null && a.pct != null && typeof a.unlocked === 'boolean'), '每项成就含进度字段');
     assert(ach.achievements.find((a) => a.id === 'punctual').target === 3, '守时达人目标值为 3');
     assert(ach.achievements.some((a) => a.id === 'borrower' && a.target === 3), '含办公向成就借阅达人');
+    assert(ach.achievements.some((a) => a.id === 'logistician' && a.target === 5), '含后勤向成就后勤达人');
     wA.close();
   }
 
