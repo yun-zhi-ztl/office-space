@@ -55,10 +55,18 @@ domReady.forEach((cb) => cb()); // 触发 init()
 
 setTimeout(() => {
   const join = sent.find((m) => m.type === 'join');
-  if (join && join.spaceId === 'space42') {
+  const joinOk = !!(join && join.spaceId === 'space42');
+  let csvOk = false;
+  try {
+    const csv = sandbox.rowsToCsv([{ key: 'a', label: 'A' }, { key: 'b', label: 'B' }], [{ a: '1', b: 'x,y' }, { a: 2, b: 'he said "hi"' }]);
+    csvOk = sandbox.csvCell('a"b') === '"a""b"' && csv === 'A,B\r\n1,"x,y"\r\n2,"he said ""hi"""';
+  } catch (e) { csvOk = false; }
+  if (joinOk && csvOk) {
     console.log('✅ 恢复会话用保存的 spaceId 发送了 join');
+    console.log('✅ CSV 导出转义正确');
     process.exit(0);
   }
-  console.log('❌ 恢复会话未发送 join（已发送: ' + JSON.stringify(sent) + '）');
+  if (!joinOk) console.log('❌ 恢复会话未发送 join（已发送: ' + JSON.stringify(sent) + '）');
+  if (!csvOk) console.log('❌ CSV 导出转义失败');
   process.exit(1);
 }, 20);

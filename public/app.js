@@ -88,6 +88,46 @@ function handlePage(m){
   render();
 }
 function loadMore(module){ wsSend({type:'fetchPage', module, offset: module==='materials'?S.DB.matOffset:module==='repairs'?S.DB.repOffset:module==='visitors'?S.visitorOffset:S.DB.revOffset, limit:PAGE}); }
+/* ============ CSV 导出 ============ */
+function csvCell(v){ let s=String(v==null?'':v); if(/[",\n\r]/.test(s)) s='"'+s.replace(/"/g,'""')+'"'; return s; }
+function rowsToCsv(columns, rows){
+  const head=columns.map(c=>csvCell(c.label)).join(',');
+  const body=rows.map(r=>columns.map(c=>csvCell(c.fmt?c.fmt(r[c.key]):r[c.key])).join(',')).join('\r\n');
+  return head+'\r\n'+body;
+}
+const CSV_FMT = { time: (v)=>v?fmtTime(v):'' };
+const MAT_COLS=[{key:'requesterName',label:'申请人'},{key:'name',label:'物资'},{key:'qty',label:'数量'},{key:'unit',label:'单位'},{key:'reason',label:'说明'},{key:'status',label:'状态'},{key:'createdAt',label:'时间',fmt:CSV_FMT.time}];
+const REP_COLS=[{key:'category',label:'类别'},{key:'location',label:'位置'},{key:'description',label:'描述'},{key:'reporterName',label:'上报人'},{key:'status',label:'状态'},{key:'createdAt',label:'时间',fmt:CSV_FMT.time}];
+const VIS_COLS=[{key:'hostName',label:'接待人'},{key:'visitorName',label:'访客'},{key:'purpose',label:'事由'},{key:'contact',label:'联系方式'},{key:'status',label:'状态'},{key:'expectedAt',label:'预计到访',fmt:CSV_FMT.time},{key:'createdAt',label:'登记时间',fmt:CSV_FMT.time}];
+const ROOM_COLS=[{key:'title',label:'主题'},{key:'ownerName',label:'预约人'},{key:'startAt',label:'开始',fmt:CSV_FMT.time},{key:'endAt',label:'结束',fmt:CSV_FMT.time},{key:'status',label:'状态'}];
+function downloadCsv(filename, csv){
+  const blob=new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+function nextPage(module, offset){
+  return new Promise((resolve)=>{
+    const handler=(ev)=>{ try{const m=JSON.parse(ev.data); if(m.type==='page'&&m.module===module){ S.ws.removeEventListener('message',handler); resolve(m); } }catch{} };
+    S.ws.addEventListener('message', handler);
+    wsSend({type:'fetchPage', module, offset, limit:PAGE});
+  });
+}
+async function exportModuleCsv(module, columns){
+  if(!S.ws || S.ws.readyState!==1){ toast('未连接服务器','error'); return; }
+  while(true){
+    const offset = module==='rooms'?S.DB.revOffset:module==='materials'?S.DB.matOffset:module==='repairs'?S.DB.repOffset:S.visitorOffset;
+    const total = module==='rooms'?S.DB.revTotal:module==='materials'?S.DB.matTotal:module==='repairs'?S.DB.repTotal:S.visitorTotal;
+    if(offset >= (total||0)) break;
+    await nextPage(module, offset);
+  }
+  const rows = module==='rooms'?S.DB.reservations:module==='materials'?S.DB.requests:module==='repairs'?S.DB.repairs:S.DB.visitors;
+  const csv = rowsToCsv(columns, rows||[]);
+  const name = {materials:'物资申领',repairs:'报修',visitors:'访客登记',rooms:'会议室预约'}[module]||module;
+  downloadCsv(name+'_'+(S.space?S.space.name:'')+'.csv', csv);
+  toast('已导出 '+(rows||[]).length+' 条记录','success');
+}
 /* ============ 侧栏 ============ */
 const STATUS_OPTS = [['在岗',''],['开会','🧘'],['午饭','🍜'],['外出','🚪'],['休息','😴'],['勿扰','⚡']];
 function myStatus(){ const u=(S.DB.users||[]).find(x=>x.account===S.me.account); return (u&&u.status)||{label:'在岗',emoji:''}; }
@@ -232,7 +272,7 @@ function remindReturn(id){ wsSend({type:'remindReturn',borrowId:id}); }
 function renderRooms(){
   const d=S.DB, me=S.me.account, now=Date.now();
   $('#main').innerHTML = `<div class="topbar"><div><h1>会议室预约</h1><div class="sub">预约时段、冲突自动检测、实时同步</div></div>
-    <div class="btn grp"><button class="btn" onclick="openSuggest()">✨ 智能选房</button>${S.admin?'<button class="btn pri" onclick="openRoomCreate()">＋ 新增会议室</button>':''}</div></div>
+    <div class="btn grp"><button class="btn" onclick="openSuggest()">✨ 智能选房</button><button class="btn" onclick="exportModuleCsv('rooms',ROOM_COLS)">导出 CSV</button>${S.admin?'<button class="btn pri" onclick="openRoomCreate()">＋ 新增会议室</button>':''}</div></div>
     <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))">${d.rooms.map(r=>roomCard(r)).join('')||'<div class="empty">还没有会议室，管理员可新增</div>'}</div>
     <h3 style="margin:22px 0 10px">📅 全部预约</h3>
     <div class="list">${d.reservations.filter(r=>r.status!=='cancelled'&&r.status!=='expired').map(r=>{ const rm=d.rooms.find(x=>x.id===r.roomId); return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(r.title)} <span class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}</span></span><span class="fs">${r.status==='pending'?'<span class="badge warn">待开始</span>':r.status==='active'?'<span class="badge info">进行中</span>':'<span class="badge grey">'+r.status+'</span>'}${r.ownerAccount===me&&r.status==='pending'?`<button class="btn danger sm" onclick="cancelReservation('${r.id}')">取消</button>`:''}</span></div>`; }).join('')||'<div class="empty">暂无预约</div>'}
@@ -323,7 +363,7 @@ function returnTool(id){ wsSend({type:'toolReturn',borrowId:id}); }
 function renderMaterials(){
   const d=S.DB, me=S.me.account;
   $('#main').innerHTML = `<div class="topbar"><div><h1>物资申领</h1><div class="sub">需要电池、文具等物资时提交申请，由同事/管理员处理</div></div>
-    <button class="btn pri" onclick="openMaterialRequest()">＋ 我要申领</button></div>
+    <button class="btn pri" onclick="openMaterialRequest()">＋ 我要申领</button><button class="btn" onclick="exportModuleCsv('materials',MAT_COLS)">导出 CSV</button></div>
     <div class="list">${d.requests.map(r=>{ const st=r.status; const badge=st==='pending'?'warn':st==='fulfilled'?'ok':'grey'; return `<div class="row"><span><span class="who">${esc(r.requesterName)}</span> 申领 <b>${esc(r.name)}</b> ×${r.qty}${r.unit?' '+esc(r.unit):''}<div class="desc">${esc(r.reason||'')}</div><div class="when">${fmtTime(r.createdAt)}</div></span>
       <span class="fs"><span class="badge ${badge}">${st==='pending'?'待处理':st==='fulfilled'?'已满足':'已取消'}</span>
       ${st==='pending'?`${r.requesterAccount===me?`<button class="btn danger sm" onclick="cancelRequest('${r.id}')">取消</button>`:`<button class="btn green sm" onclick="fulfillRequest('${r.id}')">已满足</button>`}`:''}
@@ -346,7 +386,7 @@ function renderRepairs(){
   const badge=s=>s==='reported'?'warn':s==='in_progress'?'info':s==='resolved'?'ok':'grey';
   const label=s=>s==='reported'?'待处理':s==='in_progress'?'处理中':s==='resolved'?'已解决':'已取消';
   $('#main').innerHTML = `<div class="topbar"><div><h1>报修</h1><div class="sub">上报厕所、灯光、空调等设施故障并及时跟进</div></div>
-    <button class="btn pri" onclick="openRepair()">＋ 我要报修</button></div>
+    <button class="btn pri" onclick="openRepair()">＋ 我要报修</button><button class="btn" onclick="exportModuleCsv('repairs',REP_COLS)">导出 CSV</button></div>
     <div class="list">${d.repairs.map(r=>`<div class="row"><span><span class="who">${esc(r.category)} · ${esc(r.location)}</span> <span class="when">${esc(r.reporterName)} ${fmtTime(r.createdAt)}</span><div class="desc">${esc(r.description)}</div></span>
       <span class="fs">
       <span class="badge ${badge(r.status)}">${label(r.status)}</span>
@@ -370,7 +410,7 @@ function visitorLabel(s){ return s==='pending'?'待到访':s==='arrived'?'已到
 function renderVisitors(){
   const d=S.DB, me=S.me.account;
   $('#main').innerHTML = `<div class="topbar"><div><h1>访客登记</h1><div class="sub">登记访客姓名、事由与预计到访，负责人可推进状态</div></div>
-    <button class="btn pri" onclick="openVisitorCreate()">＋ 登记访客</button></div>
+    <button class="btn pri" onclick="openVisitorCreate()">＋ 登记访客</button><button class="btn" onclick="exportModuleCsv('visitors',VIS_COLS)">导出 CSV</button></div>
     <div class="list">${d.visitors.map(v=>{
       const mine = v.hostAccount===me;
       const can = mine||S.admin;
