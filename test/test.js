@@ -125,6 +125,24 @@ async function runTests() {
   const errsRBAC = mk(w2, 'error');
   assert(errsRBAC.length > 0 && errsRBAC[errsRBAC.length - 1].message.includes('仅管理员'), 'member 新增会议室被拒(RBAC)');
 
+  // ========== 测试3b: 周期预约 ==========
+  console.log('\n📋 测试3b: 会议室周期预约');
+  const tS = Date.now() + 3600000;
+  await sendMsg(w2, { type: 'roomBook', roomId, startAt: tS, endAt: tS + 30 * 60000, title: '周会', repeat: 'weekly', repeatCount: 4 });
+  rooms = last(w2, 'rooms');
+  const series = rooms.reservations.filter(r => r.seriesId);
+  assert(series.length === 4, '每周周期预约展开 4 场');
+  assert(series[0].repeat === 'weekly' && !!series[0].seriesId, '周期场次带 repeat/seriesId');
+  assert(series[1].startAt - series[0].startAt === 7 * 86400000, '周期间隔 7 天');
+  const seriesId = series[0].seriesId;
+  await sendMsg(wA, { type: 'reservationCancelSeries', seriesId });
+  const errS = mk(wA, 'error');
+  assert(errS.length > 0 && errS[errS.length - 1].message.includes('只能取消自己'), '他人取消周期预约被拒');
+  await sendMsg(w2, { type: 'reservationCancelSeries', seriesId });
+  rooms = last(w2, 'rooms');
+  const cancelledSeries = rooms.reservations.filter(r => r.seriesId === seriesId);
+  assert(cancelledSeries.length === 4 && cancelledSeries.every(r => r.status === 'cancelled'), '取消整组后全部场次置为 cancelled');
+
   // ========== 测试4: 工具借用 ==========
   console.log('\n📋 测试4: 工具借用（创建/借用/不足/归还）');
   await sendMsg(w1, { type: 'toolCreate', name: '测试机', category: '测试电脑', total: 2, location: '3F 机柜' });

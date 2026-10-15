@@ -269,14 +269,45 @@ function doAnnounce(){ const t=$('#annInput'); const v=(t?t.value:'').trim(); if
 function remindReturn(id){ wsSend({type:'remindReturn',borrowId:id}); }
 
 /* ============ 会议室 ============ */
+function roomResBadge(st){ return st==='pending'?'<span class="badge warn">待开始</span>':st==='active'?'<span class="badge info">进行中</span>':'<span class="badge grey">'+st+'</span>'; }
+function repeatLabel(repeat, first){
+  if(repeat==='daily') return '每天';
+  if(repeat==='weekly') return '每周' + '日一二三四五六'[new Date(first.startAt).getDay()];
+  return '';
+}
+function roomReservationGroups(list){
+  const groups=[]; const map=new Map();
+  for(const r of list){
+    if(r.seriesId){
+      let g=map.get(r.seriesId);
+      if(!g){ g={ seriesId:r.seriesId, repeat:r.repeat, items:[] }; map.set(r.seriesId,g); groups.push(g); }
+      g.items.push(r);
+    } else { groups.push({ single:r }); }
+  }
+  groups.sort((a,b)=> (a.items?a.items[0].startAt:a.single.startAt) - (b.items?b.items[0].startAt:b.single.startAt));
+  return groups;
+}
+function roomReservationListHtml(d, me){
+  const list=d.reservations.filter(r=>r.status!=='cancelled'&&r.status!=='expired');
+  if(!list.length) return '<div class="empty">暂无预约</div>';
+  return roomReservationGroups(list).map(g=>{
+    if(g.single){
+      const r=g.single; const rm=d.rooms.find(x=>x.id===r.roomId);
+      return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(r.title)} <span class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}</span></span><span class="fs">${roomResBadge(r.status)}${r.ownerAccount===me&&r.status==='pending'?`<button class="btn danger sm" onclick="cancelReservation('${r.id}')">取消</button>`:''}</span></div>`;
+    }
+    const first=g.items[0]; const rm=d.rooms.find(x=>x.id===first.roomId);
+    const pat=repeatLabel(g.repeat, first);
+    const isOwner = first.ownerAccount===me;
+    return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(first.title)} <span class="when">${pat} ${fmtTime(first.startAt)} → ${fmtTime(first.endAt)}（${g.items.length}场）</span></span><span class="fs">${roomResBadge(first.status)}${isOwner?`<button class="btn danger sm" onclick="cancelSeries('${g.seriesId}')">取消整组</button>`:''}</span></div>`;
+  }).join('');
+}
 function renderRooms(){
   const d=S.DB, me=S.me.account, now=Date.now();
   $('#main').innerHTML = `<div class="topbar"><div><h1>会议室预约</h1><div class="sub">预约时段、冲突自动检测、实时同步</div></div>
     <div class="btn grp"><button class="btn" onclick="openSuggest()">✨ 智能选房</button><button class="btn" onclick="exportModuleCsv('rooms',ROOM_COLS)">导出 CSV</button>${S.admin?'<button class="btn pri" onclick="openRoomCreate()">＋ 新增会议室</button>':''}</div></div>
     <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))">${d.rooms.map(r=>roomCard(r)).join('')||'<div class="empty">还没有会议室，管理员可新增</div>'}</div>
     <h3 style="margin:22px 0 10px">📅 全部预约</h3>
-    <div class="list">${d.reservations.filter(r=>r.status!=='cancelled'&&r.status!=='expired').map(r=>{ const rm=d.rooms.find(x=>x.id===r.roomId); return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(r.title)} <span class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}</span></span><span class="fs">${r.status==='pending'?'<span class="badge warn">待开始</span>':r.status==='active'?'<span class="badge info">进行中</span>':'<span class="badge grey">'+r.status+'</span>'}${r.ownerAccount===me&&r.status==='pending'?`<button class="btn danger sm" onclick="cancelReservation('${r.id}')">取消</button>`:''}</span></div>`; }).join('')||'<div class="empty">暂无预约</div>'}
-    </div>
+    <div class="list">${roomReservationListHtml(d, me)}</div>
     ${(S.DB.revOffset||0)<(S.DB.revTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('rooms')">加载更多（${S.DB.revTotal-(S.DB.revOffset||0)}）</button></div>`:''}`;
 }
 function roomCard(r){
@@ -301,14 +332,24 @@ function openBook(roomId){
     <div class="fld"><label>会议标题</label><input id="bkTitle" value="会议"></div>
     <div class="fld"><label>开始时间</label><input id="bkStart" type="datetime-local"></div>
     <div class="fld"><label>结束时间</label><input id="bkEnd" type="datetime-local"></div>
+    <div class="fld"><label>重复</label><select id="bkRepeat" onchange="document.getElementById('bkCountWrap').style.display=this.value?'block':'none'"><option value="">不重复</option><option value="daily">每天</option><option value="weekly">每周</option></select></div>
+    <div class="fld" id="bkCountWrap" style="display:none"><label>次数</label><input id="bkCount" type="number" min="1" max="52" value="8"></div>
     <div class="fld"><label>备注</label><input id="bkNote" placeholder="可选"></div>
     <button class="btn pri" onclick="submitBook('${roomId}')">提交预约</button>
-    <div class="hint">同一会议室时段不可重叠预约</div></div>`);
+    <div class="hint">同一会议室时段不可重叠预约；周期预约会按天/周展开</div></div>`);
   const d=(ms)=>{ const x=new Date(ms), off=x.getTimezoneOffset(); return new Date(ms-off).toISOString().slice(0,16); };
   $('#bkStart').value=d(start); $('#bkEnd').value=d(end);
 }
-function submitBook(roomId){ const st=new Date($('#bkStart').value).getTime(), en=new Date($('#bkEnd').value).getTime(); if(!(st>0)||!(en>st)) return toast('时间无效','error'); wsSend({type:'roomBook',roomId,startAt:st,endAt:en,title:$('#bkTitle').value,note:$('#bkNote').value}); closeModal(); }
+function submitBook(roomId){
+  const st=new Date($('#bkStart').value).getTime(), en=new Date($('#bkEnd').value).getTime();
+  if(!(st>0)||!(en>st)) return toast('时间无效','error');
+  const repeat=$('#bkRepeat').value;
+  const count=parseInt($('#bkCount').value,10)||1;
+  wsSend({type:'roomBook',roomId,startAt:st,endAt:en,title:$('#bkTitle').value,note:$('#bkNote').value,repeat,repeatCount:count});
+  closeModal();
+}
 function cancelReservation(id){ wsSend({type:'reservationCancel',reservationId:id}); }
+function cancelSeries(seriesId){ if(confirm('确认取消该周期预约的全部待开始场次？')) wsSend({type:'reservationCancelSeries',seriesId}); }
 /* 智能选房：按时段+人数找空闲会议室 */
 function openSuggest(){
   const now=Date.now(), start=now+10*60000, end=start+60*60000, d=(ms)=>{ const x=new Date(ms), off=x.getTimezoneOffset(); return new Date(ms-off).toISOString().slice(0,16); };

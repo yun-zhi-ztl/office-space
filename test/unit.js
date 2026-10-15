@@ -156,6 +156,22 @@ rsvSpace.roomReservations.set('r1', { id: 'r1', roomId: 'rm1', ownerAccount: 'al
 rooms.handleRooms({}, ownerUser, rsvSpace, { type: 'roomEnd', reservationId: 'r1' });
 assertEq(ownerUser.stats.meetingDuration, 50, 'roomEnd 累计会议时长 50 分钟');
 
+// ---------- 周期预约展开 ----------
+console.log('\n📋 13. 周期预约展开');
+const t0 = Date.now() + 3600000;
+const span = 30 * 60000;
+const daily = api.expandRecurring(t0, t0 + span, 'daily', 3);
+assertEq(daily.length, 3, '每天展开 3 场');
+assertEq(daily[1].startAt - daily[0].startAt, 86400000, '每天间隔 24 小时');
+assertEq(daily[2].endAt - daily[2].startAt, span, '周期场次时长保持');
+const weekly = api.expandRecurring(t0, t0 + span, 'weekly', 2);
+assertEq(weekly.length, 2, '每周展开 2 场');
+assertEq(weekly[1].startAt - weekly[0].startAt, 7 * 86400000, '每周间隔 7 天');
+const once = api.expandRecurring(t0, t0 + span, null, 5);
+assertEq(once.length, 1, '不重复只展开 1 场');
+assertEq(api.expandRecurring(t0, t0 + span, 'weekly', 999).length, 52, '每周次数上限 52');
+assertEq(api.expandRecurring(t0, t0 + span, 'daily', 0).length, 1, '次数下限为 1');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

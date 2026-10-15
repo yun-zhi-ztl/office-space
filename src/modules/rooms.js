@@ -1,7 +1,7 @@
 'use strict';
 // 会议室模块：roomCreate / roomRemove / roomBook / reservationCancel / roomStart / roomEnd
 module.exports = function roomsModule(api) {
-  const { roomReservationsPublic, roomPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly, getUserByAccount, sendToUser, saveProfile, broadcastLeaderboard } = api;
+  const { roomReservationsPublic, roomPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly, getUserByAccount, sendToUser, saveProfile, broadcastLeaderboard, expandRecurring } = api;
 
   function roomsBroadcast(space) {
     const reservations = roomReservationsPublic(space);
@@ -38,11 +38,18 @@ module.exports = function roomsModule(api) {
       if (!(startAt > 0) || !(endAt > startAt)) return sendTo(ws, serError('请选择有效的时间段'));
       if (startAt < Date.now()) return sendTo(ws, serError('预约开始时间不能早于当前时间'));
       if (endAt - startAt < 5 * 60000) return sendTo(ws, serError('至少预约 5 分钟'));
-      const clash = [...space.roomReservations.values()].some((r) => r.roomId === room.id && (r.status === 'pending' || r.status === 'active') && startAt < r.endAt && endAt > r.startAt);
+      const repeat = (msg.repeat === 'daily' || msg.repeat === 'weekly') ? msg.repeat : null;
+      const title = (msg.title || '').trim().slice(0, 40) || '会议';
+      const note = (msg.note || '').trim().slice(0, 120);
+      const seriesId = repeat ? genId('ser', null) : null;
+      const slots = expandRecurring(startAt, endAt, repeat, msg.repeatCount);
+      const clash = slots.some((slot) => [...space.roomReservations.values()].some((r) => r.roomId === room.id && (r.status === 'pending' || r.status === 'active') && slot.startAt < r.endAt && slot.endAt > r.startAt));
       if (clash) return sendTo(ws, serError('该时段已被预约，请另选时间'));
-      const res = { id: genId('res', null), roomId: room.id, ownerAccount: user.account, ownerName: user.nickname, title: (msg.title || '').trim().slice(0, 40) || '会议', startAt, endAt, note: (msg.note || '').trim().slice(0, 120), status: 'pending' };
-      space.roomReservations.set(res.id, res);
-      saveEntity(space.id, 'room_reservation', res.id, res);
+      slots.forEach((slot, i) => {
+        const res = { id: genId('res', null), roomId: room.id, ownerAccount: user.account, ownerName: user.nickname, title, startAt: slot.startAt, endAt: slot.endAt, note, status: 'pending', repeat: repeat || null, seriesId: seriesId || null, seriesIndex: i };
+        space.roomReservations.set(res.id, res);
+        saveEntity(space.id, 'room_reservation', res.id, res);
+      });
       recordWeekly(user, 'meetings');
       roomsBroadcast(space);
     } else if (msg.type === 'reservationCancel') {
@@ -52,6 +59,14 @@ module.exports = function roomsModule(api) {
       if (res.status !== 'pending') return sendTo(ws, serError('该预约已不能取消'));
       res.status = 'cancelled';
       saveEntity(space.id, 'room_reservation', res.id, res);
+      roomsBroadcast(space);
+    } else if (msg.type === 'reservationCancelSeries') {
+      const series = [...space.roomReservations.values()].filter((r) => r.seriesId === msg.seriesId);
+      if (!series.length) return sendTo(ws, serError('该周期预约不存在'));
+      if (series[0].ownerAccount !== user.account) return sendTo(ws, serError('只能取消自己的周期预约'));
+      const pending = series.filter((r) => r.status === 'pending');
+      if (!pending.length) return sendTo(ws, serError('该周期预约已没有待开始的场次'));
+      for (const r of pending) { r.status = 'cancelled'; saveEntity(space.id, 'room_reservation', r.id, r); }
       roomsBroadcast(space);
     } else if (msg.type === 'roomStart' || msg.type === 'roomEnd') {
       const res = space.roomReservations.get(msg.reservationId);

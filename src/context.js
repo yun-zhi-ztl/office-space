@@ -314,11 +314,23 @@ function createContext() {
     }
   }
 
+  // ---------- 会议室周期辅助 ----------
+  function expandRecurring(startAt, endAt, repeat, count) {
+    if (repeat !== 'daily' && repeat !== 'weekly') return [{ startAt, endAt }];
+    const span = endAt - startAt;
+    const maxCount = repeat === 'daily' ? 90 : 52;
+    const n = Math.max(1, Math.min(parseInt(count, 10) || 1, maxCount));
+    const step = repeat === 'daily' ? 86400000 : 7 * 86400000;
+    const out = [];
+    for (let i = 0; i < n; i++) { const s = startAt + i * step; out.push({ startAt: s, endAt: s + span }); }
+    return out;
+  }
+
   // ---------- 序列化 ----------
   function roomPublic(r) { return { id: r.id, name: r.name, capacity: r.capacity, location: r.location, description: r.description }; }
   function reservationPublic(res, info) {
     const who = info.get(res.ownerAccount);
-    return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status };
+    return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status, repeat: res.repeat || null, seriesId: res.seriesId || null };
   }
   function toolsPublic(sp, info) {
     const now = Date.now();
@@ -524,7 +536,7 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, reservationPublic, toolsPublic, materialsPublic, repairsPublic, visitorsPublic, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier,
+    roomPublic, reservationPublic, toolsPublic, materialsPublic, repairsPublic, visitorsPublic, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring,
     // 广播
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, noticesBroadcast, visitorsBroadcast,
     // 坑位辅助
