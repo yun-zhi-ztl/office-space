@@ -514,7 +514,7 @@ assertEq(dig.resolvedMaterialsCount, 1, 'digest 统计今日已满足申领');
 // ---------- 会议室评分聚合 ----------
 console.log('\n📋 32. 会议室评分聚合');
 const spRoomRate = api.createSpace('s24', '评分空间', 1, 0);
-spRoomRate.rooms.push({ id: 'rm1', name: '会议室A', capacity: 8, location: '3F', description: '' });
+spRoomRate.rooms.push({ id: 'rm1', name: '会议室A', capacity: 8, location: '3F', description: '', tags: ['投影', '白板'] });
 const nowRate = 1000000000;
 spRoomRate.roomReservations.set('rr1', { id: 'rr1', roomId: 'rm1', ownerAccount: 'alice', ownerName: '甲', title: '评审', startAt: nowRate - 120000, endAt: nowRate - 60000, status: 'completed', rating: 5, ratingComment: '很好', ratedAt: nowRate - 50000 });
 spRoomRate.roomReservations.set('rr2', { id: 'rr2', roomId: 'rm1', ownerAccount: 'bob', ownerName: '乙', title: '周会', startAt: nowRate - 240000, endAt: nowRate - 180000, status: 'completed', rating: 3, ratingComment: '', ratedAt: nowRate - 170000 });
@@ -525,6 +525,7 @@ assertEq(roomRateSum.count, 2, '仅统计已评分的已完成会议');
 assertEq(roomRateSum.avg, 4, '会议室平均评分 4 分');
 assertEq(roomRateSum.ratings.length, 2, '评分明细返回 2 条');
 assertEq(api.roomPublic(spRoomRate, spRoomRate.rooms[0]).rating.avg, 4, 'roomPublic 暴露会议室平均评分');
+assertEq(api.roomPublic(spRoomRate, spRoomRate.rooms[0]).tags.length, 2, 'roomPublic 暴露会议室标签');
 const resRatePub = api.reservationPublic(spRoomRate.roomReservations.get('rr1'), new Map());
 assertEq(resRatePub.rating, 5, 'reservationPublic 暴露评分');
 assertEq(resRatePub.ratedAt, nowRate - 50000, 'reservationPublic 暴露评分时间');
@@ -767,17 +768,21 @@ assertEq(plSt.totalVotes, 3, 'pollStats 统计总投票');
 // ---------- 知识库序列化 + 统计 ----------
 console.log('\n📋 45. 知识库序列化 / 统计');
 const kbSp = api.createSpace('s47', '知识空间', 1, 0);
-kbSp.knowledge.set('kb1', { id: 'kb1', title: 'A4 纸在哪', content: '打印区右侧柜子', category: '操作指引', tags: ['打印'], authorAccount: 'alice', authorName: '甲', likes: ['alice', 'bob'], createdAt: 1, updatedAt: 2 });
-kbSp.knowledge.set('kb2', { id: 'kb2', title: '会议室规则', content: '用完关灯', category: '规章制度', tags: [], authorAccount: 'bob', authorName: '乙', likes: [], createdAt: 3, updatedAt: 4 });
+kbSp.knowledge.set('kb1', { id: 'kb1', title: 'A4 纸在哪', content: '打印区右侧柜子', category: '操作指引', tags: ['打印'], authorAccount: 'alice', authorName: '甲', likes: ['alice', 'bob'], comments: [{ id: 'cm1', account: 'bob', name: '乙', text: '谢谢', createdAt: 5 }], createdAt: 1, updatedAt: 2 });
+kbSp.knowledge.set('kb2', { id: 'kb2', title: '会议室规则', content: '用完关灯', category: '规章制度', tags: [], authorAccount: 'bob', authorName: '乙', likes: [], comments: [], createdAt: 3, updatedAt: 4 });
 const kbPub = api.knowledgePublic(kbSp, api.spaceUserInfo(kbSp.id), { account: 'alice' });
 assertEq(kbPub.length, 2, 'knowledgePublic 返回全部文章');
 assertEq(kbPub[0].title, 'A4 纸在哪', 'knowledgePublic 按点赞数排序');
 assertEq(kbPub[0].likeCount, 2, 'knowledgePublic 统计点赞数');
 assertEq(kbPub[0].liked, true, 'knowledgePublic 标记本人已赞');
 assertEq(kbPub[1].liked, false, 'knowledgePublic 未点赞为 false');
+assertEq(kbPub[0].commentCount, 1, 'knowledgePublic 统计评论数');
+assertEq(kbPub[0].comments[0].account, 'bob', 'knowledgePublic 暴露评论');
+assertEq(kbPub[0].comments[0].text, '谢谢', 'knowledgePublic 暴露评论内容');
 const kbSt = api.knowledgeStats(kbSp);
 assertEq(kbSt.total, 2, 'knowledgeStats 统计文章数');
 assertEq(kbSt.liked, 2, 'knowledgeStats 统计点赞总数');
+assertEq(kbSt.comments, 1, 'knowledgeStats 统计评论总数');
 
 // ---------- 扩展成就 ----------
 console.log('\n📋 46. 活动 / 投票 / 知识库成就');

@@ -1584,6 +1584,56 @@ async function runTests() {
     assert(typeof cal.calendar.perfectMonthCount === 'number', '日历返回全勤月数');
     wA.close(); wB.close();
   }
+
+  // ========== 测试39: 知识库评论 ==========
+  console.log('\n📋 测试39: 知识库评论');
+  {
+    const spK = (await httpJson('POST', '/api/spaces', { name: '评论办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aK = 'kbc_' + runKey, bK = 'kbcm_' + runKey;
+    await reg(aK, 'pw', '评论管理员'); await reg(bK, 'pw', '评论成员');
+    const wA = await createWSClient(); await loginTo(wA, spK.id, aK, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spK.id, bK, 'pw');
+    await sendMsg(wA, { type: 'knowledgeCreate', title: '报销流程', content: '每月 10 日前提交', category: '操作指引', tags: ['财务'] });
+    const kb0 = await waitFor(wA, 'knowledge', (k) => k.knowledge && k.knowledge.length === 1, 3000);
+    const kbId = kb0.knowledge[0].id;
+    // 成员发表评论
+    await sendMsg(wB, { type: 'knowledgeComment', id: kbId, text: '已提交，谢谢' });
+    const kb1 = await waitFor(wB, 'knowledge', (k) => k.knowledge && k.knowledge.some((x) => x.id === kbId && x.commentCount === 1), 3000);
+    assert(kb1 && kb1.knowledge.find((x) => x.id === kbId).commentCount === 1, '成员发表评论成功');
+    assert(kb1 && kb1.knowledge.find((x) => x.id === kbId).comments[0].account === bK, '评论记录归属正确');
+    // 空评论被拒
+    await sendMsg(wB, { type: 'knowledgeComment', id: kbId, text: '   ' });
+    const errEmpty = mk(wB, 'error').pop();
+    assert(errEmpty && errEmpty.message.includes('请输入评论内容'), '空评论被拒');
+    // 文章作者收到通知（broadcast 广播）
+    const kb2 = await waitFor(wA, 'knowledge', (k) => k.knowledge && k.knowledge.some((x) => x.id === kbId && x.commentCount === 1), 3000);
+    assert(kb2 && kb2.knowledge.find((x) => x.id === kbId).commentCount === 1, '作者端收到评论广播');
+    wA.close(); wB.close();
+  }
+
+  // ========== 测试40: 会议室标签 ==========
+  console.log('\n📋 测试40: 会议室标签');
+  {
+    const spT = (await httpJson('POST', '/api/spaces', { name: '标签办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aT = 'rmt_' + runKey, bT = 'rmtm_' + runKey;
+    await reg(aT, 'pw', '标签管理员'); await reg(bT, 'pw', '标签成员');
+    const wA = await createWSClient(); await loginTo(wA, spT.id, aT, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spT.id, bT, 'pw');
+    // 管理员创建带标签的会议室
+    await sendMsg(wA, { type: 'roomCreate', name: '标签会议室', capacity: 6, tags: ['投影', '白板'] });
+    const rooms0 = await waitFor(wA, 'rooms', (r) => r.rooms && r.rooms.length === 1, 3000);
+    const roomId = rooms0.rooms[0].id;
+    assert(rooms0 && rooms0.rooms[0].tags.length === 2, '管理员创建带标签会议室成功');
+    // 成员不能改标签
+    await sendMsg(wB, { type: 'roomTag', roomId, tags: ['小'] });
+    const errTag = mk(wB, 'error').pop();
+    assert(errTag && errTag.message.includes('仅管理员'), '成员改标签被拒');
+    // 管理员改标签
+    await sendMsg(wA, { type: 'roomTag', roomId, tags: ['投影', '白板', '远程'] });
+    const rooms1 = await waitFor(wA, 'rooms', (r) => r.rooms && r.rooms.some((x) => x.id === roomId && x.tags.length === 3), 3000);
+    assert(rooms1 && rooms1.rooms.find((x) => x.id === roomId).tags.length === 3, '管理员改标签成功');
+    wA.close(); wB.close();
+  }
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

@@ -612,7 +612,7 @@ function createContext() {
     const avg = count ? +(sum / count).toFixed(1) : 0;
     return { avg, count, ratings: list.slice(-8).reverse() };
   }
-  function roomPublic(space, r) { return { id: r.id, name: r.name, capacity: r.capacity, location: r.location, description: r.description, rating: roomRatingSummary(space, r.id) }; }
+  function roomPublic(space, r) { return { id: r.id, name: r.name, capacity: r.capacity, location: r.location, description: r.description, tags: r.tags || [], rating: roomRatingSummary(space, r.id) }; }
   function reservationPublic(res, info) {
     const who = info.get(res.ownerAccount);
     return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status, repeat: res.repeat || null, seriesId: res.seriesId || null, remindAt: res.remindAt || null, participants: res.participants || null, actualStartAt: res.actualStartAt || null, actualEndAt: res.actualEndAt || null, rating: res.rating || null, ratedAt: res.ratedAt || null, ratingComment: res.ratingComment || '' };
@@ -1005,17 +1005,19 @@ function createContext() {
     }).map((k) => {
       const author = info.get(k.authorAccount);
       const likes = k.likes || [];
+      const comments = (k.comments || []).map((c) => ({ id: c.id, account: c.account, name: c.name, text: c.text || '', createdAt: c.createdAt || 0 })).reverse().slice(0, 20);
       return {
         id: k.id, title: k.title, content: k.content || '', category: k.category, tags: k.tags || [],
         authorAccount: k.authorAccount, authorName: author ? author.display : k.authorName,
         likeCount: likes.length, liked: user ? likes.includes(user.account) : false,
+        commentCount: (k.comments || []).length, comments,
         createdAt: k.createdAt || 0, updatedAt: k.updatedAt || 0,
       };
     });
   }
   function knowledgeStats(space) {
     const ks = [...space.knowledge.values()];
-    return { total: ks.length, liked: ks.reduce((s, k) => s + (k.likes ? k.likes.length : 0), 0), authors: new Set(ks.map((k) => k.authorAccount)).size };
+    return { total: ks.length, liked: ks.reduce((s, k) => s + (k.likes ? k.likes.length : 0), 0), comments: ks.reduce((s, k) => s + (k.comments ? k.comments.length : 0), 0), authors: new Set(ks.map((k) => k.authorAccount)).size };
   }
 
   // ---------- 待办任务序列化 ----------

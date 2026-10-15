@@ -107,6 +107,7 @@ function dispatch(m){
     case 'knowledgeCreated': toast('📘 知识已发布','success'); render(); break;
     case 'knowledgeUpdated': toast('✔ 文章已更新','success'); render(); break;
     case 'knowledgeLiked': { const k=(S.DB.knowledge||[]).find(x=>x.id===m.id); if(k){ k.liked=m.liked; k.likeCount=Math.max(0,(k.likeCount||0)+(m.liked?1:-1)); } toast(m.liked?'👍 已点赞':'已取消点赞','success'); render(); break; }
+    case 'knowledgeCommented': { const k=(S.DB.knowledge||[]).find(x=>x.id===m.id); if(k){ k.commentCount=(k.commentCount||0)+1; } toast('💬 评论成功','success'); render(); break; }
     case 'taskCreated': toast('📝 任务已创建','success'); render(); break;
     case 'taskAssigned': toast('📌 任务已指派给你：'+(m.title||''),'info'); render(); break;
     case 'taskUpdated': toast('✔ 任务已更新','success'); render(); break;
@@ -447,18 +448,26 @@ function roomCard(r){
   const fav = (S.favorites||[]).includes(r.id);
   const rate = r.rating ? `<div class="meta">评分 ${'⭐'.repeat(Math.round(r.rating.avg))}${'☆'.repeat(5-Math.round(r.rating.avg))} ${r.rating.avg} (${r.rating.count})</div>` : '';
   return `<div class="card"><h3>${esc(r.name)} <button class="btn sm ${fav?'pri':''}" title="收藏" onclick="toggleFavorite('${r.id}')">${fav?'⭐':'☆'}</button> ${S.admin?`<span></span><button class="btn danger sm" onclick="removeRoom('${r.id}')">删</button>`:''}</h3>
-    <div class="meta">容量 ${r.capacity} 人${r.location?' · '+esc(r.location):''}${r.description?'<div>'+esc(r.description)+'</div>':''}</div>
+    <div class="meta">容量 ${r.capacity} 人${r.location?' · '+esc(r.location):''}${r.description?'<div>'+esc(r.description)+'</div>':''}${r.tags&&r.tags.length?'<div style="margin-top:4px">'+r.tags.map(t=>`<span class="badge grey">${esc(t)}</span>`).join('')+'</div>':''}</div>
     ${rate}
     <div class="meta">${upcoming.length?upcoming.map(u=>`· ${fmtTime(u.startAt)} → ${fmtTime(u.endAt)} <b>${esc(u.title)}</b>${u.ownerAccount===me?'（你）':''}`).join('<br>'):'今日暂无预约'}</div>
-    <div class="foot"><button class="btn pri sm" onclick="openBook('${r.id}')">预约</button></div></div>`;
+    <div class="foot"><button class="btn pri sm" onclick="openBook('${r.id}')">预约</button>${S.admin?`<button class="btn sm" onclick="openRoomTag('${r.id}')">标签</button>`:''}</div></div>`;
 }
+function openRoomTag(id){
+  const r=(S.DB.rooms||[]).find(x=>x.id===id); if(!r) return;
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>编辑标签 · ${esc(r.name)}</h2><div class="form">
+    <div class="fld"><label>标签（逗号分隔，最多 8 个）</label><input id="mrTags" value="${esc((r.tags||[]).join(','))}"></div>
+    <button class="btn pri" onclick="submitRoomTag('${id}')">保存</button></div>`);
+}
+function submitRoomTag(id){ wsSend({type:'roomTag',roomId:id,tags:$('#mrTags').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)}); closeModal(); }
 function openRoomCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>新增会议室</h2><div class="form">
   <div class="fld"><label>名称</label><input id="mrName" placeholder="如：3F 大会议室"></div>
   <div class="fld"><label>容纳人数</label><input id="mrCap" type="number" min="1" value="8"></div>
   <div class="fld"><label>位置</label><input id="mrLoc" placeholder="如：三层东侧"></div>
   <div class="fld"><label>备注</label><input id="mrDesc" placeholder="可选"></div>
+  <div class="fld"><label>标签（逗号分隔，最多 8 个）</label><input id="mrTags" placeholder="投影, 白板, 会议"></div>
   <button class="btn pri" onclick="submitRoomCreate()">创建</button></div>`); }
-function submitRoomCreate(){ wsSend({type:'roomCreate',name:$('#mrName').value,capacity:parseInt($('#mrCap').value,10),location:$('#mrLoc').value,description:$('#mrDesc').value}); closeModal(); }
+function submitRoomCreate(){ wsSend({type:'roomCreate',name:$('#mrName').value,capacity:parseInt($('#mrCap').value,10),location:$('#mrLoc').value,description:$('#mrDesc').value,tags:$('#mrTags')?$('#mrTags').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean):[]}); closeModal(); }
 function removeRoom(id){ if(confirm('确认删除该会议室？')) wsSend({type:'roomRemove',roomId:id}); }
 function toggleFavorite(id){ wsSend({type:'roomFavorite',roomId:id}); }
 function setRoomFavFilter(v){ S.favFilter=v; render(); }
@@ -1124,13 +1133,16 @@ function renderKnowledge(){
     <div class="cards">
       <div class="card"><h3>📘 文章总数</h3><div style="font-size:30px;font-weight:800">${st.total||0}</div><div class="meta">篇</div></div>
       <div class="card"><h3>👍 累计点赞</h3><div style="font-size:30px;font-weight:800">${st.liked||0}</div><div class="meta">次</div></div>
+      <div class="card"><h3>💬 评论</h3><div style="font-size:30px;font-weight:800">${st.comments||0}</div><div class="meta">条</div></div>
       <div class="card"><h3>✍️ 贡献者</h3><div style="font-size:30px;font-weight:800">${st.authors||0}</div><div class="meta">人</div></div>
     </div>
     <h3 style="margin:22px 0 10px">📚 文章列表</h3>
     <div class="list">${filtered.length?filtered.map(k=>`
-      <div class="row"><span><span class="who">${esc(k.title)} <span class="badge">${esc(k.category)}</span> ${k.tags.map(t=>`<span class="badge grey">${esc(t)}</span>`).join('')}</span>
+      <div class="row"><span><span class="who">${esc(k.title)} <span class="badge">${esc(k.category)}</span> ${k.tags.map(t=>`<span class="badge grey">${esc(t)}</span>`).join('')} ${k.commentCount?`<span class="badge ok">💬 ${k.commentCount}</span>`:''}</span>
         <div class="desc">${esc((k.content||'').slice(0,120))}${(k.content||'').length>120?'…':''}</div>
-        <div class="when">${esc(k.authorName||'')} · ${fmtTime(k.createdAt)} · 👍 ${k.likeCount}</div>
+        <div class="when">${esc(k.authorName||'')} · ${fmtTime(k.createdAt)} · 👍 ${k.likeCount} · 💬 ${k.commentCount||0}</div>
+        ${k.comments&&k.comments.length?`<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">${k.comments.map(c=>`<div style="font-size:12px;margin-bottom:4px"><b>${esc(c.name||'')}</b> <span style="color:var(--muted)">${fmtTime(c.createdAt)}</span><br>${esc(c.text||'')}</div>`).join('')}</div>`:''}
+        <div style="margin-top:6px"><input placeholder="发表评论…" maxlength="300" onkeydown="if(event.key==='Enter')knowledgeComment('${k.id}',this.value)"/></div>
       </span><span class="fs"><button class="btn sm ${k.liked?'green':''}" onclick="knowledgeLike('${k.id}')">${k.liked?'👍 已赞':'👍 点赞'}</button>${k.authorAccount===me||S.admin?`<button class="btn sm" onclick="openKnowledgeEdit('${k.id}')">编辑</button><button class="btn danger sm" onclick="knowledgeDelete('${k.id}')">删除</button>`:''}</span></div>`).join(''):(q?'<div class="empty">没有匹配的文章</div>':'<div class="empty">还没有知识文章</div>')}</div>
     ${(S.knowledgeOffset||0)<(S.knowledgeTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('knowledge')">加载更多（${S.knowledgeTotal-(S.knowledgeOffset||0)}）</button></div>`:''}`;
 }
@@ -1155,6 +1167,7 @@ function openKnowledgeEdit(id){
 function submitKnowledgeEdit(id){ wsSend({type:'knowledgeEdit',id,title:$('#kbTitle').value,content:$('#kbContent').value,category:$('#kbCat').value,tags:$('#kbTags').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)}); closeModal(); }
 function knowledgeDelete(id){ wsSend({type:'knowledgeDelete',id}); }
 function knowledgeLike(id){ wsSend({type:'knowledgeLike',id}); }
+function knowledgeComment(id, text){ wsSend({type:'knowledgeComment',id,text}); }
 
 /* ============ 待办任务 ============ */
 function taskBadge(t){

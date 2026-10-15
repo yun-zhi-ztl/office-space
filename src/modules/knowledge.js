@@ -1,6 +1,6 @@
 'use strict';
-// 知识库模块：knowledgeCreate / knowledgeEdit / knowledgeDelete / knowledgeLike
-// 办公规章制度 / 操作指引 / 设备说明 / 常见问题，支持点赞与检索。
+// 知识库模块：knowledgeCreate / knowledgeEdit / knowledgeDelete / knowledgeLike / knowledgeComment
+// 办公规章制度 / 操作指引 / 设备说明 / 常见问题，支持点赞、评论与检索。
 module.exports = function knowledgeModule(api) {
   const { KNOWLEDGE_CATEGORIES, knowledgeBroadcast, sendTo, serError, genId, saveEntity, deleteEntity, isAdmin, pushNotice, checkAchievements, saveProfile, getUserByAccount } = api;
 
@@ -20,7 +20,7 @@ module.exports = function knowledgeModule(api) {
       const rec = {
         id: genId('kb', null), title, content, category, tags,
         authorAccount: user.account, authorName: user.nickname,
-        likes: [], createdAt: Date.now(), updatedAt: Date.now(),
+        likes: [], comments: [], createdAt: Date.now(), updatedAt: Date.now(),
       };
       space.knowledge.set(rec.id, rec);
       user.stats.knowledgeCount = (user.stats.knowledgeCount || 0) + 1;
@@ -71,6 +71,20 @@ module.exports = function knowledgeModule(api) {
       saveEntity(space.id, 'knowledge', rec.id, rec);
       knowledgeBroadcast(space);
       sendTo(ws, { type: 'knowledgeLiked', id: rec.id, liked: !liked });
+    } else if (msg.type === 'knowledgeComment') {
+      const rec = space.knowledge.get(msg.id);
+      if (!rec) return sendTo(ws, serError('文章不存在'));
+      const text = (msg.text || '').trim().slice(0, 300);
+      if (!text) return sendTo(ws, serError('请输入评论内容'));
+      const comments = rec.comments || [];
+      if (comments.length >= 50) return sendTo(ws, serError('评论已达上限，请删除旧评论'));
+      const comment = { id: genId('cm', null), account: user.account, name: user.nickname, text, createdAt: Date.now() };
+      comments.push(comment);
+      rec.comments = comments;
+      rec.updatedAt = Date.now();
+      saveEntity(space.id, 'knowledge', rec.id, rec);
+      knowledgeBroadcast(space);
+      sendTo(ws, { type: 'knowledgeCommented', id: rec.id, comment });
     }
   }
 

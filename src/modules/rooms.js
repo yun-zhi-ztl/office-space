@@ -11,6 +11,12 @@ module.exports = function roomsModule(api) {
     roomStatsBroadcast(space);
   }
 
+  // 会议室标签规范化：最多 8 个，每个 ≤12 字符
+  function normalizeRoomTags(raw) {
+    const arr = Array.isArray(raw) ? raw : [];
+    return arr.map((t) => String(t == null ? '' : t).trim().slice(0, 12)).filter(Boolean).slice(0, 8);
+  }
+
   // 时段冲突检测：与现有 pending/active 预约是否重叠
   function slotClash(space, roomId, startAt, endAt) {
     return [...space.roomReservations.values()].some((r) => r.roomId === roomId && (r.status === 'pending' || r.status === 'active') && startAt < r.endAt && endAt > r.startAt);
@@ -43,8 +49,17 @@ module.exports = function roomsModule(api) {
       const capacity = parseInt(msg.capacity, 10);
       if (!name) return sendTo(ws, serError('请输入会议室名称'));
       if (!Number.isInteger(capacity) || capacity < 1) return sendTo(ws, serError('请输入有效容纳人数'));
-      const room = { id: genId('rm', null), name, capacity, location: (msg.location || '').trim().slice(0, 40), description: (msg.description || '').trim().slice(0, 100) };
+      const tags = normalizeRoomTags(msg.tags);
+      const room = { id: genId('rm', null), name, capacity, location: (msg.location || '').trim().slice(0, 40), description: (msg.description || '').trim().slice(0, 100), tags };
       space.rooms.push(room);
+      saveEntity(space.id, 'room', room.id, room);
+      roomsBroadcast(space);
+    } else if (msg.type === 'roomTag') {
+      if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可管理会议室标签'));
+      const room = space.rooms.find((r) => r.id === msg.roomId);
+      if (!room) return sendTo(ws, serError('会议室不存在'));
+      const tags = normalizeRoomTags(msg.tags);
+      room.tags = tags;
       saveEntity(space.id, 'room', room.id, room);
       roomsBroadcast(space);
     } else if (msg.type === 'roomRemove') {
