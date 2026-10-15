@@ -230,12 +230,21 @@ assertEq(rp[0].location, '走廊', 'repairsPublic 保留位置');
 console.log('\n📋 17. 借用记录序列化');
 const spBw = api.createSpace('s9', '借用空间', 1, 0);
 spBw.tools.push({ id: 't9', name: '测试手机', category: '测试手机', total: 2, available: 0, location: '机柜', description: '' });
-spBw.borrows.set('bw9', { id: 'bw9', toolId: 't9', borrowerAccount: 'alice', borrowerName: '甲', qty: 2, borrowedAt: Date.now() - 3 * 86400000, dueAt: Date.now() - 2 * 86400000, returnedAt: null, status: 'borrowed' });
+spBw.borrows.set('bw9', { id: 'bw9', toolId: 't9', borrowerAccount: 'alice', borrowerName: '甲', qty: 2, borrowedAt: Date.now() - 3 * 86400000, dueAt: Date.now() - 2 * 86400000, returnedAt: null, status: 'borrowed', extensions: 1 });
 const bwp = api.borrowsPublic(spBw, new Map());
 assertEq(bwp.length, 1, 'borrowsPublic 返回借用记录');
 assertEq(bwp[0].toolName, '测试手机', 'borrowsPublic 关联设备名称');
 assertEq(bwp[0].status, 'borrowed', 'borrowsPublic 保留状态');
 assertEq(bwp[0].overdue, true, 'borrowsPublic 标记逾期');
+assertEq(bwp[0].extensions, 1, 'borrowsPublic 暴露续借次数');
+
+// ---------- 工具在借明细序列化 ----------
+console.log('\n📋 17b. 工具在借明细序列化');
+const spBwT = api.createSpace('s10b', '在借明细空间', 1, 0);
+spBwT.tools.push({ id: 'tT', name: '测试机', category: '测试电脑', total: 1, available: 0, location: '', description: '' });
+spBwT.borrows.set('bwT', { id: 'bwT', toolId: 'tT', borrowerAccount: 'alice', borrowerName: '甲', qty: 1, borrowedAt: Date.now(), dueAt: Date.now() + 7 * 86400000, returnedAt: null, status: 'borrowed', extensions: 2 });
+const tp = api.toolsPublic(spBwT, new Map());
+assertEq(tp[0].activeBorrows[0].extensions, 2, 'toolsPublic 在借明细暴露续借次数');
 
 // ---------- 会议室候补序列化 ----------
 console.log('\n📋 18. 会议室候补序列化');

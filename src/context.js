@@ -462,7 +462,7 @@ function createContext() {
         id: t.id, name: t.name, category: t.category, total: t.total, available: t.available,
         location: t.location, description: t.description,
         borrowedCount: active.reduce((s, b) => s + b.qty, 0),
-        activeBorrows: active.map((b) => { const days = Math.floor((now - b.borrowedAt) / 86400000); return { id: b.id, qty: b.qty, borrowerAccount: b.borrowerAccount, borrowerName: info.get(b.borrowerAccount) ? info.get(b.borrowerAccount).display : b.borrowerName, borrowedAt: b.borrowedAt, dueAt: b.dueAt || null, days, overdue: borrowOverdue(b, now), reminded: !!b.lastRemindedAt, dueSoon: b.status === 'borrowed' && !!b.dueAt && now >= b.dueAt - BORROW_SOON_WINDOW_MS && now < b.dueAt }; }),
+        activeBorrows: active.map((b) => { const days = Math.floor((now - b.borrowedAt) / 86400000); return { id: b.id, qty: b.qty, borrowerAccount: b.borrowerAccount, borrowerName: info.get(b.borrowerAccount) ? info.get(b.borrowerAccount).display : b.borrowerName, borrowedAt: b.borrowedAt, dueAt: b.dueAt || null, days, extensions: b.extensions || 0, overdue: borrowOverdue(b, now), reminded: !!b.lastRemindedAt, dueSoon: b.status === 'borrowed' && !!b.dueAt && now >= b.dueAt - BORROW_SOON_WINDOW_MS && now < b.dueAt }; }),
       };
     });
   }
@@ -496,7 +496,7 @@ function createContext() {
         borrowerAccount: b.borrowerAccount,
         borrowerName: info.get(b.borrowerAccount) ? info.get(b.borrowerAccount).display : b.borrowerName,
         qty: b.qty, borrowedAt: b.borrowedAt, dueAt: b.dueAt || null, returnedAt: b.returnedAt || null,
-        status: b.status, overdue: borrowOverdue(b), soonReminded: !!b.soonRemindedAt,
+        status: b.status, overdue: borrowOverdue(b), soonReminded: !!b.soonRemindedAt, extensions: b.extensions || 0,
       };
     }).sort((a, b) => (b.borrowedAt - a.borrowedAt));
   }
