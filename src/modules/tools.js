@@ -1,7 +1,7 @@
 'use strict';
 // 工具借用模块：toolCreate / toolDelete / toolAdjust / toolBorrow / toolReturn
 module.exports = function toolsModule(api) {
-  const { spaceUserInfo, toolsPublic, broadcast, TOOL_CATEGORIES, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToUser } = api;
+  const { spaceUserInfo, toolsPublic, broadcast, TOOL_CATEGORIES, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToUser, sendToAccount, dueBorrowReminders } = api;
 
   function toolsBroadcast(space) {
     const info = spaceUserInfo(space.id);
@@ -51,7 +51,7 @@ module.exports = function toolsModule(api) {
       if (!Number.isInteger(qty) || qty < 1) return sendTo(ws, serError('请输入有效借用数量'));
       if (qty > tool.available) return sendTo(ws, serError('库存不足，当前可用 ' + tool.available));
       tool.available -= qty;
-      const borrow = { id: genId('bw', null), toolId: tool.id, borrowerAccount: user.account, borrowerName: user.nickname, qty, borrowedAt: Date.now(), dueAt: Date.now() + 7 * 86400000, returnedAt: null, status: 'borrowed' };
+      const borrow = { id: genId('bw', null), toolId: tool.id, borrowerAccount: user.account, borrowerName: user.nickname, qty, borrowedAt: Date.now(), dueAt: Date.now() + 7 * 86400000, returnedAt: null, status: 'borrowed', lastRemindedAt: null };
       space.borrows.set(borrow.id, borrow);
       user.stats.borrowCount = (user.stats.borrowCount || 0) + 1;
       recordWeekly(user, 'borrows');
@@ -89,6 +89,17 @@ module.exports = function toolsModule(api) {
       saveEntity(space.id, 'tool', tool.id, tool);
       saveEntity(space.id, 'borrow', borrow.id, borrow);
       toolsBroadcast(space);
+    } else if (msg.type === 'remindOverdue') {
+      const now = Date.now();
+      const reminders = dueBorrowReminders(space, now);
+      if (!reminders.length) return sendTo(ws, serError('暂无逾期未还的借用'));
+      for (const b of reminders) {
+        b.lastRemindedAt = now;
+        saveEntity(space.id, 'borrow', b.id, b);
+        sendToAccount(b.borrowerAccount, { type: 'overdueReminder', borrowId: b.id });
+      }
+      toolsBroadcast(space);
+      sendTo(ws, { type: 'remindOverdueSent', count: reminders.length });
     }
   }
 

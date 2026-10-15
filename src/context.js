@@ -18,6 +18,7 @@ function createContext() {
   const PERSIST_DEBOUNCE_MS = 500;
   const WS_PING_MS = 30000;
   const RESERVE_CONFIRM_WINDOW_MS = 5 * 60000;
+  const OVERDUE_REMIND_THROTTLE_MS = 24 * 3600 * 1000;
 
   // ---------- 内存状态 ----------
   const spaces = new Map();
@@ -308,6 +309,15 @@ function createContext() {
     const dueAt = b.dueAt || b.borrowedAt + 7 * 86400000;
     return nowMs >= dueAt;
   }
+  // 逾期但尚未在静默期内重复提醒的借用（按 lastRemindedAt 去重）
+  function dueBorrowReminders(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    return [...space.borrows.values()].filter((b) => {
+      if (!borrowOverdue(b, nowMs)) return false;
+      const last = b.lastRemindedAt || 0;
+      return nowMs - last >= OVERDUE_REMIND_THROTTLE_MS;
+    });
+  }
   function createSpace(id, name, squat, urinal) {
     const sp = {
       id, name, squatCount: squat == null ? 4 : squat, urinalCount: urinal == null ? 3 : urinal,
@@ -397,7 +407,7 @@ function createContext() {
         id: t.id, name: t.name, category: t.category, total: t.total, available: t.available,
         location: t.location, description: t.description,
         borrowedCount: active.reduce((s, b) => s + b.qty, 0),
-        activeBorrows: active.map((b) => { const days = Math.floor((now - b.borrowedAt) / 86400000); return { id: b.id, qty: b.qty, borrowerAccount: b.borrowerAccount, borrowerName: info.get(b.borrowerAccount) ? info.get(b.borrowerAccount).display : b.borrowerName, borrowedAt: b.borrowedAt, dueAt: b.dueAt || null, days, overdue: borrowOverdue(b, now) }; }),
+        activeBorrows: active.map((b) => { const days = Math.floor((now - b.borrowedAt) / 86400000); return { id: b.id, qty: b.qty, borrowerAccount: b.borrowerAccount, borrowerName: info.get(b.borrowerAccount) ? info.get(b.borrowerAccount).display : b.borrowerName, borrowedAt: b.borrowedAt, dueAt: b.dueAt || null, days, overdue: borrowOverdue(b, now), reminded: !!b.lastRemindedAt }; }),
       };
     });
   }
@@ -591,7 +601,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -603,7 +613,7 @@ function createContext() {
     // 持久化
     saveSpace, saveAccount, saveProfile, saveEntity, deleteEntity, saveStallRating, saveStatsToSpace,
     // 空间
-    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, createSpace, buildStalls, applyProfileToUser,
+    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, createSpace, buildStalls, applyProfileToUser,
     // 序列化
     roomPublic, reservationPublic, roomWaitlistPublic, toolsPublic, materialsPublic, repairsPublic, borrowsPublic, visitorsPublic, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
     // 广播

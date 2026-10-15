@@ -66,7 +66,9 @@ function dispatch(m){
     case 'suggestRooms': S.suggestions=m.suggestions||[]; renderSugg(); break;
     case 'statusSet': toast('✔ 状态已更新','success'); break;
     case 'remindSent': toast('✔ 已提醒 '+(m.count||0)+' 人','success'); break;
+    case 'remindOverdueSent': toast('✔ 已批量提醒 '+(m.count||0)+' 位逾期借用人','success'); render(); break;
     case 'borrowReminder': toast('🔔 '+(m.from||'有人')+'提醒你归还设备',"urge"); break;
+    case 'overdueReminder': toast('⏰ 你借的设备已逾期，请尽快归还','urge'); break;
     case 'stats': if(S.me && m.stats){ S.me.stats = m.stats; if(m.achievements) S.me.achievements = m.achievements; render(); } break;
     case 'urgeNotification': toast('📣 有人催促你了（'+m.count+' 人）','urge'); break;
     case 'reservation': toast('✔ 预约成功','success'); break;
@@ -294,6 +296,7 @@ function renderDash(){
 }
 function doAnnounce(){ const t=$('#annInput'); const v=(t?t.value:'').trim(); if(v){ wsSend({type:'announce',text:v}); if(t)t.value=''; } }
 function remindReturn(id){ wsSend({type:'remindReturn',borrowId:id}); }
+function remindOverdue(){ wsSend({type:'remindOverdue'}); }
 
 /* ============ 会议室 ============ */
 function roomResBadge(st){ return st==='pending'?'<span class="badge warn">待开始</span>':st==='active'?'<span class="badge info">进行中</span>':'<span class="badge grey">'+st+'</span>'; }
@@ -410,8 +413,10 @@ function bookSugg(roomId){ const st=new Date($('#sgStart').value).getTime(), en=
 /* ============ 工具借用 ============ */
 function renderTools(){
   const d=S.DB, me=S.me.account;
+  const overdueCount=(d.tools||[]).reduce((a,t)=>a+(t.activeBorrows||[]).filter(b=>b.overdue).length,0);
   $('#main').innerHTML = `<div class="topbar"><div><h1>工具借用</h1><div class="sub">测试电脑 / 测试机器 / 测试手机等在库设备的借还</div></div>
     ${S.admin?'<button class="btn pri" onclick="openToolCreate()">＋ 新增设备</button>':''}
+    ${overdueCount?`<button class="btn danger" onclick="remindOverdue()">⏰ 批量催还 ${overdueCount} 人</button>`:''}
     <button class="btn" onclick="exportModuleCsv('borrows',BW_COLS)">导出 CSV</button></div>
     <div class="cards">${d.tools.map(t=>`<div class="card"><h3>${esc(t.name)} <span class="badge ${t.available>0?'ok':'bad'}">${t.available}/${t.total}</span></h3>
       <div class="meta">${t.category}${t.location?' · '+esc(t.location):''}</div>
@@ -420,7 +425,7 @@ function renderTools(){
         ${t.available>0?`<button class="btn pri sm" onclick="openBorrow('${t.id}','${esc(t.name)}',${t.available})">借用</button>`:'<span class="hint">已全部借出</span>'}
         ${S.admin?`<button class="btn danger sm" onclick="removeTool('${t.id}')">删</button><button class="btn sm" onclick="openAdjust('${t.id}','${esc(t.name)}',${t.total},${t.borrowedCount})">改库存</button>`:''}
       </div>
-      ${t.activeBorrows&&t.activeBorrows.length?`<div class="meta">在借：${t.activeBorrows.map(b=>{ const can=b.borrowerAccount===me||S.admin; return `${esc(b.borrowerName)}×${b.qty}${b.dueAt?' · 应还 '+fmtTime(b.dueAt):''}${b.days>=0?' · '+b.days+'天':''}${b.overdue?'<span class="badge bad">逾期</span>':''}${b.borrowerAccount===me?` <button class="btn green sm" onclick="returnTool('${b.id}')">归还</button>`:''}${can?` <button class="btn sm" onclick="openExtend('${b.id}','${esc(b.borrowerName)}')">续借</button>`:''}${b.borrowerAccount!==me&&b.overdue?` <button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒</button>`:''}`; }).join('，')}</div>`:''}
+      ${t.activeBorrows&&t.activeBorrows.length?`<div class="meta">在借：${t.activeBorrows.map(b=>{ const can=b.borrowerAccount===me||S.admin; return `${esc(b.borrowerName)}×${b.qty}${b.dueAt?' · 应还 '+fmtTime(b.dueAt):''}${b.days>=0?' · '+b.days+'天':''}${b.overdue?'<span class="badge bad">逾期</span>':''}${b.reminded?'<span class="badge grey">已提醒</span>':''}${b.borrowerAccount===me?` <button class="btn green sm" onclick="returnTool('${b.id}')">归还</button>`:''}${can?` <button class="btn sm" onclick="openExtend('${b.id}','${esc(b.borrowerName)}')">续借</button>`:''}${b.borrowerAccount!==me&&b.overdue?` <button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒</button>`:''}`; }).join('，')}</div>`:''}
     </div>`).join('')||'<div class="empty">还没有设备，管理员可新增</div>'}
     </div>`;
 }

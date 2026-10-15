@@ -235,6 +235,17 @@ spC.visitors.set('vc1', { id: 'vc1', hostAccount: 'alice', hostName: '甲', visi
 const vcp = api.visitorsPublic(spC, new Map());
 assertEq(vcp[0].code, 'ABC123', 'visitorsPublic 保留签到码');
 
+// ---------- 借用逾期自动提醒 ----------
+console.log('\n📋 20. 借用逾期自动提醒');
+const spRem = api.createSpace('s12', '提醒空间', 1, 0);
+const nowR = 1000000000;
+spRem.borrows.set('r1', { id: 'r1', toolId: 't1', borrowerAccount: 'alice', qty: 1, borrowedAt: nowR - 10 * 86400000, dueAt: nowR - 2 * 86400000, returnedAt: null, status: 'borrowed', lastRemindedAt: null });
+spRem.borrows.set('r2', { id: 'r2', toolId: 't1', borrowerAccount: 'bob', qty: 1, borrowedAt: nowR - 10 * 86400000, dueAt: nowR - 2 * 86400000, returnedAt: null, status: 'borrowed', lastRemindedAt: nowR - 1000 });
+spRem.borrows.set('r3', { id: 'r3', toolId: 't1', borrowerAccount: 'carol', qty: 1, borrowedAt: nowR - 10 * 86400000, dueAt: nowR + 86400000, returnedAt: null, status: 'borrowed', lastRemindedAt: null });
+spRem.borrows.set('r4', { id: 'r4', toolId: 't1', borrowerAccount: 'dave', qty: 1, borrowedAt: nowR - 10 * 86400000, dueAt: nowR - 2 * 86400000, returnedAt: nowR - 86400000, status: 'returned', lastRemindedAt: null });
+const rem = api.dueBorrowReminders(spRem, nowR);
+assertEq(rem.map((b) => b.id), ['r1'], '仅返回逾期且未在静默期内的借用');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

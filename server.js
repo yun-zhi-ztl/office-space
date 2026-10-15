@@ -101,7 +101,7 @@ wss.on('connection', (ws) => {
     switch (msg.type) {
       case 'roomCreate': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'reservationCancelSeries': case 'roomWaitlist': case 'roomWaitlistCancel': case 'roomStart': case 'roomEnd':
         rooms.handleRooms(ws, user, space, msg); break;
-      case 'toolCreate': case 'toolDelete': case 'toolAdjust': case 'toolBorrow': case 'toolReturn': case 'toolExtend':
+      case 'toolCreate': case 'toolDelete': case 'toolAdjust': case 'toolBorrow': case 'toolReturn': case 'toolExtend': case 'remindOverdue':
         tools.handleTools(ws, user, space, msg); break;
       case 'materialRequest': case 'materialCancel': case 'materialFulfill': case 'materialAssign':
         materials.handleMaterials(ws, user, space, msg); break;
@@ -229,6 +229,16 @@ setInterval(() => {
       }
     }
     if (waitlistChanged) rooms.roomsBroadcast(sp);
+    // 借用逾期自动提醒：逾期且超过静默期（默认 24h）才再次提醒，避免刷屏
+    const reminders = api.dueBorrowReminders(sp, now);
+    if (reminders.length) {
+      for (const b of reminders) {
+        b.lastRemindedAt = now;
+        api.saveEntity(sp.id, 'borrow', b.id, b);
+        api.sendToAccount(b.borrowerAccount, { type: 'overdueReminder', borrowId: b.id });
+      }
+      tools.toolsBroadcast(sp);
+    }
   }
 }, 15000);
 

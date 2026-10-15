@@ -236,6 +236,17 @@ async function runTests() {
   assert(errReturned.length > 0 && errReturned[errReturned.length - 1].message.includes('已归还'), '已归还的借用无法续借');
   wM2.close();
 
+  // ========== 测试4c: 逾期批量催还 ==========
+  console.log('\n📋 测试4c: 逾期批量催还（序列化 + 无逾期时被拒）');
+  await sendMsg(w2, { type: 'toolBorrow', toolId, qty: 1 });
+  let toolsC = last(w2, 'tools');
+  const bwC = toolsC.tools.find(t => t.id === toolId).activeBorrows[0];
+  assert(bwC && bwC.reminded === false, '在借明细含 reminded=false 字段');
+  await sendMsg(w1, { type: 'remindOverdue' });
+  const errOverdue = mk(w1, 'error').pop();
+  assert(errOverdue && errOverdue.message.includes('暂无逾期'), '无逾期时批量催还被拒');
+  await sendMsg(w2, { type: 'toolReturn', borrowId: bwC.id });
+
   // ========== 测试5: 物资申领 ==========
   console.log('\n📋 测试5: 物资申领（提交/处理/自处理拒绝）');
   await sendMsg(w2, { type: 'materialRequest', name: '5号电池', qty: 4, unit: '节', reason: '遥控器没电' });
