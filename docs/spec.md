@@ -34,7 +34,7 @@
 
 ### 会议室（conference rooms）
 - `room`: `{ id, name, capacity, location, description }`
-- `room_reservation`: `{ id, roomId, ownerAccount, title, startAt, endAt, note, status, repeat?, seriesId?, seriesIndex? }`
+- `room_reservation`: `{ id, roomId, ownerAccount, title, startAt, endAt, note, status, repeat?, seriesId?, seriesIndex?, participants? }`
   - 状态：`pending`(已约) / `active`(进行中) / `completed` / `cancelled` / `expired`
   - 约束：同一房间在 `[startAt, endAt)` 内不得与他人预约重叠（冲突检测）。
   - 周期预约：`repeat` 为 `daily` / `weekly`（或省略表示单次），`repeatCount` 限制场次（每天 ≤ 90、每周 ≤ 52）；
@@ -193,6 +193,7 @@
 | 工具续借 | 借用可延长归还期限（默认 7 天，可续借 1-30 天），列表展示应还日期与逾期状态 | `toolExtend` |
 | 访客登记 | 登记访客姓名、事由、预计到访，负责人/管理员推进到访与离开，实时同步 | `visitorCreate` / `visitorArrived` / `visitorLeft` / `visitorCancel` / `visitorRemove` |
 | 访客签到码 | 登记访客时自动生成 6 位签到码，访客到访时报码由空间成员核销为已到访，并向接待人推送通知 | `visitorCheckin` / `visitorCheckinNotification` |
+| 访客到访/离开通知 | 管理员或接待人推进访客到访 / 离开时，向登记接待人单发通知，闭环反馈 | 服务端下发 `visitorArrived` / `visitorLeft` |
 | 个人资料 | 成员可改展示名/头像，并凭旧密码修改登录密码 | `profileUpdate` / `passwordChange` |
 | 空间设置 | 管理员可修改空间名、配置蹲坑 / 尿槽数量 | `spaceRename` / `stallConfig` |
 | 紧急模式 | 个人一键标记「紧急」，在线列表显示 🆘，方便他人避让 | `toggleEmergency` |
@@ -202,11 +203,12 @@
 | 会议室候补 | 时段冲突时一键加入候补，他人取消后按先来先服务自动晋升为真实预约并通知 | `roomWaitlist` / `roomWaitlistCancel` / `roomWaitlistPromoted` |
 | 会议室开始前提醒 | 预约创建时自动计算「开始前 10 分钟」提醒时间，定时器到点后向预约人单发提醒，只提醒一次避免刷屏 | 服务端下发 `roomReminder` |
 | 借用到期前提醒 | 借用临近到期（默认到期前 24 小时内）时单发提醒借用人按时归还，列表展示「即将到期」标记，只提醒一次 | 服务端下发 `borrowDueSoon` |
+| 会议室人数校验 | 预约时填写参会人数，超过会议室容量直接拒绝，防止超员开会 | `roomBook`(participants) |
 | 借用记录导出 | 工具借用页一键导出全部借用记录 CSV（自动拉取分页） | 复用 `fetchPage`(`borrows`) |
 
 ### 客户端→服务端新增消息
 `setStatus`、`announce`、`spaceRename`、`spacePause`、`suggestRoom`、`remindReturn`、`toolExtend`、`roomBook`(周期 `repeat`/`repeatCount`)、`reservationCancelSeries`、`roomWaitlist`、`roomWaitlistCancel`、`materialAssign`、`repairAssign`、`repairUpdate`(优先级)、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`visitorCheckin`、`profileUpdate`、`passwordChange`、`toggleEmergency`、`fetchPage`(`borrows` 等分页模块)；服务端相应广播/单发
-`users`(含 `status`、`emergencyMode`) 、`notices`、`suggestRooms`、`borrowReminder`、`roomReminder`、`borrowDueSoon`、`materialAssigned`、`materialFulfilled`、`repairAssigned`、`repairInProgress`、`repairResolved`、`digest`、`visitors`、`spaceRenamed`、`spacePaused`、`roomWaitlistPromoted`、`rooms`(含 `waitlist`)、`visitorCheckinNotification`。
+`users`(含 `status`、`emergencyMode`) 、`notices`、`suggestRooms`、`borrowReminder`、`roomReminder`、`borrowDueSoon`、`materialAssigned`、`materialFulfilled`、`repairAssigned`、`repairInProgress`、`repairResolved`、`digest`、`visitors`、`spaceRenamed`、`spacePaused`、`roomWaitlistPromoted`、`rooms`(含 `waitlist`)、`visitorCheckinNotification`、`visitorArrived`、`visitorLeft`。
 
 ## 9. 代码架构（多模块拆分）
 
@@ -222,7 +224,7 @@ src/modules/     rooms / tools / materials / repairs / visitors / profile / stal
 
 - 各领域模块是纯函数工厂 `module.exports = (api)=>({...})`，由 `server.js` 注入共享上下文 `api`，无全局状态、便于单测。
 - 定时器、心跳、优雅停机属于进程级关注点，保留在入口。
-- 该拆分不改变任何对外协议与行为，e2e（138 项）在内存与 PostgreSQL 双模式下均通过。
+- 该拆分不改变任何对外协议与行为，e2e（142 项）在内存与 PostgreSQL 双模式下均通过。
 
 ## 10. 健康检查、自测与 CI（本版本新增）
 
@@ -233,6 +235,6 @@ src/modules/     rooms / tools / materials / repairs / visitors / profile / stal
   - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁与进度、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化、每日看点、我的待办、空间活跃趋势、用户广播、会议室时长累计、周期预约展开、借用逾期判定、会议室占用率统计、报修优先级序列化、借用记录序列化、会议室候补序列化、访客签到码序列化、借用逾期提醒、会议室开始前提醒、借用到期前提醒，104 项）
   - `npm run test:restore`：前端「自动恢复会话」回归测试（`test/restore.js`，vm stub 加载内联脚本，无需服务）
   - `npm run smoke`：快速冒烟（`test/smoke.js`）——健康检查、首页与大屏可达、WS 连接、登录、收到广播
-  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，138 项）
+  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，142 项）
 - **CI**：`.github/workflows/ci.yml` 在 push 到 `main` 或 pull_request 时自动：`npm ci` → `npm run lint` → `docker compose config` 校验 → `docker build` 构建校验 → 内存模式启动服务 → `npm run smoke` → `npm test`。用不可达的 PG 参数强制内存模式，无需外部数据库。
 - **环境变量**：见 `.env.example`（`PORT`、`PGHOST`、`PGPORT`、`PGUSER`、`PGPASSWORD`、`PGDATABASE`）；`.env` 已加入 `.gitignore`。

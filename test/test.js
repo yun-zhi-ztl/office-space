@@ -124,6 +124,15 @@ async function runTests() {
   rooms = last(w2, 'rooms');
   const cancelled = rooms.reservations.find(r => r.id === resId);
   assert(cancelled && cancelled.status === 'cancelled', 'member 取消自己的预约成功');
+  // 参会人数超容量被拒
+  await sendMsg(w2, { type: 'roomBook', roomId, startAt: t0 + 50 * 60000, endAt: t0 + 80 * 60000, participants: 99 });
+  const errCap = mk(w2, 'error');
+  assert(errCap.length > 0 && errCap[errCap.length - 1].message.includes('人数超过会议室容量'), '参会人数超容量被拒');
+  await sendMsg(w2, { type: 'roomBook', roomId, startAt: t0 + 50 * 60000, endAt: t0 + 80 * 60000, participants: 3 });
+  rooms = last(w2, 'rooms');
+  const okRes = rooms.reservations.find(r => r.startAt === t0 + 50 * 60000);
+  assert(okRes && okRes.participants === 3, '预约携带参会人数 participants');
+  await sendMsg(w2, { type: 'reservationCancel', reservationId: okRes.id });
   // RBAC：member 不能创建会议室
   await sendMsg(w2, { type: 'roomCreate', name: '小间', capacity: 4 });
   const errsRBAC = mk(w2, 'error');
@@ -498,6 +507,24 @@ async function runTests() {
     vs = last(wV1, 'visitors');
     assert(!vs.visitors.some((v) => v.id === vsBId), '管理员删除任意访客成功');
     wV1.close(); wV2.close();
+  }
+
+  // ========== 测试12c: 访客到访/离开通知接待人 ==========
+  console.log('\n📋 测试12c: 访客到访/离开通知接待人');
+  {
+    const spVN = (await httpJson('POST', '/api/spaces', { name: '访客通知办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aN = 'vnotif_' + runKey, bN = 'vhostn_' + runKey;
+    await reg(aN, 'pw', '操作员'); await reg(bN, 'pw', '接待员');
+    const wA = await createWSClient(); await loginTo(wA, spVN.id, aN, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spVN.id, bN, 'pw');
+    await sendMsg(wB, { type: 'visitorCreate', visitorName: '客户赵', purpose: '交流' });
+    const vsN = last(wB, 'visitors');
+    const vsNId = vsN.visitors[0].id;
+    await sendMsg(wA, { type: 'visitorArrived', visitorId: vsNId });
+    assert(mk(wB, 'visitorArrived').length >= 1, '访客到访通知接待人');
+    await sendMsg(wA, { type: 'visitorLeft', visitorId: vsNId });
+    assert(mk(wB, 'visitorLeft').length >= 1, '访客离开通知接待人');
+    wA.close(); wB.close();
   }
 
   // ========== 测试12b: 访客签到码核销 ==========

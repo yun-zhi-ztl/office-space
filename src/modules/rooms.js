@@ -70,12 +70,14 @@ module.exports = function roomsModule(api) {
       const repeat = (msg.repeat === 'daily' || msg.repeat === 'weekly') ? msg.repeat : null;
       const title = (msg.title || '').trim().slice(0, 40) || '会议';
       const note = (msg.note || '').trim().slice(0, 120);
+      const participants = Math.max(1, parseInt(msg.participants, 10) || 1);
+      if (participants > room.capacity) return sendTo(ws, serError(`人数超过会议室容量（最多 ${room.capacity} 人）`));
       const seriesId = repeat ? genId('ser', null) : null;
       const slots = expandRecurring(startAt, endAt, repeat, msg.repeatCount);
       const clash = slots.some((slot) => [...space.roomReservations.values()].some((r) => r.roomId === room.id && (r.status === 'pending' || r.status === 'active') && slot.startAt < r.endAt && slot.endAt > r.startAt));
       if (clash) return sendTo(ws, { type: 'error', message: '该时段已被预约，可加入候补或另选时间', code: 'roomConflict' });
       slots.forEach((slot, i) => {
-        const res = { id: genId('res', null), roomId: room.id, ownerAccount: user.account, ownerName: user.nickname, title, startAt: slot.startAt, endAt: slot.endAt, note, status: 'pending', repeat: repeat || null, seriesId: seriesId || null, seriesIndex: i, remindAt: Math.max(Date.now(), slot.startAt - ROOM_REMIND_WINDOW_MS), reminded: false };
+        const res = { id: genId('res', null), roomId: room.id, ownerAccount: user.account, ownerName: user.nickname, title, startAt: slot.startAt, endAt: slot.endAt, note, participants, status: 'pending', repeat: repeat || null, seriesId: seriesId || null, seriesIndex: i, remindAt: Math.max(Date.now(), slot.startAt - ROOM_REMIND_WINDOW_MS), reminded: false };
         space.roomReservations.set(res.id, res);
         saveEntity(space.id, 'room_reservation', res.id, res);
       });

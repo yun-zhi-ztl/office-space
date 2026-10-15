@@ -55,6 +55,7 @@ module.exports = function visitorsModule(api) {
       visitor.status = 'arrived';
       visitor.arrivedAt = Date.now();
       saveEntity(space.id, 'visitor', visitor.id, visitor);
+      if (visitor.hostAccount !== user.account) sendToAccount(visitor.hostAccount, { type: 'visitorArrived', visitorId: visitor.id, visitorName: visitor.visitorName });
       visitorsBroadcast(space);
     } else if (msg.type === 'visitorLeft') {
       const visitor = space.visitors.get(msg.visitorId);
@@ -64,6 +65,7 @@ module.exports = function visitorsModule(api) {
       visitor.status = 'left';
       visitor.leftAt = Date.now();
       saveEntity(space.id, 'visitor', visitor.id, visitor);
+      if (visitor.hostAccount !== user.account) sendToAccount(visitor.hostAccount, { type: 'visitorLeft', visitorId: visitor.id, visitorName: visitor.visitorName });
       visitorsBroadcast(space);
     } else if (msg.type === 'visitorCancel') {
       const visitor = space.visitors.get(msg.visitorId);

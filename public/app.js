@@ -86,6 +86,8 @@ function dispatch(m){
     case 'roomWaitlistPromoted': toast('🎉 候补已晋升：预约已自动创建（'+fmtTime(m.startAt)+'）','success'); render(); break;
     case 'visitorCreated': toast('✔ 访客已登记，签到码：'+m.code,'success'); render(); break;
     case 'visitorCheckinNotification': toast('🔔 '+m.visitorName+' 已凭签到码到访','success'); render(); break;
+    case 'visitorArrived': toast('🔔 '+m.visitorName+' 已到访','success'); render(); break;
+    case 'visitorLeft': toast('🔔 '+m.visitorName+' 已离开','info'); render(); break;
     case 'visitorCheckedIn': toast('✔ '+m.visitorName+' 核销签到成功','success'); render(); break;
     case 'profileUpdated': if(S.me){ S.me.nickname=m.nickname; S.me.avatar=m.avatar; } toast('✔ 个人资料已更新','success'); render(); break;
     case 'passwordChanged': toast('✔ 密码已修改','success'); break;
@@ -375,6 +377,7 @@ function openBook(roomId){
   const now=Date.now(), start=now+10*60000, end=start+60*60000;
   openModal(`<span class="close" onclick="closeModal()">×</span><h2>预约会议室</h2><div class="form">
     <div class="fld"><label>会议标题</label><input id="bkTitle" value="会议"></div>
+    <div class="fld"><label>参会人数</label><input id="bkPart" type="number" min="1" value="1"></div>
     <div class="fld"><label>开始时间</label><input id="bkStart" type="datetime-local"></div>
     <div class="fld"><label>结束时间</label><input id="bkEnd" type="datetime-local"></div>
     <div class="fld"><label>重复</label><select id="bkRepeat" onchange="document.getElementById('bkCountWrap').style.display=this.value?'block':'none'"><option value="">不重复</option><option value="daily">每天</option><option value="weekly">每周</option></select></div>
@@ -390,8 +393,9 @@ function submitBook(roomId){
   if(!(st>0)||!(en>st)) return toast('时间无效','error');
   const repeat=$('#bkRepeat').value;
   const count=parseInt($('#bkCount').value,10)||1;
-  S.lastRoomBook={roomId,startAt:st,endAt:en,title:$('#bkTitle').value,note:$('#bkNote').value};
-  wsSend({type:'roomBook',roomId,startAt:st,endAt:en,title:$('#bkTitle').value,note:$('#bkNote').value,repeat,repeatCount:count});
+  const participants=Math.max(1, parseInt($('#bkPart').value,10)||1);
+  S.lastRoomBook={roomId,startAt:st,endAt:en,title:$('#bkTitle').value,note:$('#bkNote').value,participants};
+  wsSend({type:'roomBook',roomId,startAt:st,endAt:en,title:$('#bkTitle').value,note:$('#bkNote').value,participants,repeat,repeatCount:count});
   closeModal();
 }
 function cancelReservation(id){ wsSend({type:'reservationCancel',reservationId:id}); }
