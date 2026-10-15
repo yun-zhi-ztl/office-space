@@ -145,6 +145,8 @@ async function runTests() {
   tools = last(w2, 'tools');
   const returned1 = tools.tools.find(t => t.id === toolId);
   assert(returned1 && returned1.available === 2 && returned1.borrowedCount === 0, '归还后库存恢复');
+  const stB = last(w2, 'stats');
+  assert(stB && typeof stB.stats.borrowDuration === 'number' && stB.stats.borrowDuration >= 0, '归还后统计含 borrowDuration');
 
   // ========== 测试5: 物资申领 ==========
   console.log('\n📋 测试5: 物资申领（提交/处理/自处理拒绝）');

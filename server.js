@@ -210,6 +210,8 @@ setInterval(() => {
       } else if (res.status === 'active' && now >= res.endAt) {
         // 预约时段自然结束：自动置为已完成，避免「进行中」悬挂；同时持久化，防止重启后状态回退
         res.status = 'completed'; roomsChanged = true; api.saveEntity(sp.id, 'room_reservation', res.id, res);
+        const owner = api.getUserByAccount(res.ownerAccount);
+        if (owner) { owner.stats.meetingDuration += Math.max(0, Math.round((res.endAt - res.startAt) / 60000)); api.saveProfile(owner); }
       }
     }
     if (roomsChanged) rooms.roomsBroadcast(sp);

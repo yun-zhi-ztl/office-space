@@ -1,7 +1,7 @@
 'use strict';
 // 工具借用模块：toolCreate / toolDelete / toolAdjust / toolBorrow / toolReturn
 module.exports = function toolsModule(api) {
-  const { spaceUserInfo, toolsPublic, broadcast, TOOL_CATEGORIES, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, saveProfile, recordWeekly, broadcastLeaderboard } = api;
+  const { spaceUserInfo, toolsPublic, broadcast, TOOL_CATEGORIES, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToUser } = api;
 
   function toolsBroadcast(space) {
     const info = spaceUserInfo(space.id);
@@ -69,6 +69,12 @@ module.exports = function toolsModule(api) {
       borrow.status = 'returned';
       borrow.returnedAt = Date.now();
       tool.available = Math.min(tool.total, tool.available + borrow.qty);
+      const borrower = getUserByAccount(borrow.borrowerAccount);
+      if (borrower) {
+        borrower.stats.borrowDuration += Math.max(0, Math.round((borrow.returnedAt - borrow.borrowedAt) / 60000));
+        saveProfile(borrower);
+        sendToUser(borrower.id, { type: 'stats', stats: borrower.stats, achievements: borrower.achievements });
+      }
       saveEntity(space.id, 'tool', tool.id, tool);
       saveEntity(space.id, 'borrow', borrow.id, borrow);
       toolsBroadcast(space);

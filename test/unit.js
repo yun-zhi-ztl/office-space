@@ -2,6 +2,7 @@
 // 单元测试：直接对 createContext 暴露的纯函数做断言，无需启动服务、不依赖数据库。
 // 覆盖 ID 生成、周统计、坑位段位、成就解锁、口令哈希等核心逻辑。
 const { createContext } = require('../src/context');
+const roomsModule = require('../src/modules/rooms');
 
 let passed = 0;
 let failed = 0;
@@ -35,6 +36,8 @@ const weekKey = api.weekKey(new Date('2026-10-14T12:00:00+08:00').getTime());
 assert(/^\d{4}-\d{2}-\d{2}$/.test(weekKey), 'weekKey 返回 YYYY-MM-DD');
 const stats = api.newStats();
 assertEq(stats.totalVisits, 0, 'newStats 初始 totalVisits=0');
+assertEq(stats.borrowDuration, 0, 'newStats 初始 borrowDuration=0');
+assertEq(stats.meetingDuration, 0, 'newStats 初始 meetingDuration=0');
 const weekUser = { stats };
 api.recordWeekly(weekUser, 'visits');
 api.recordWeekly(weekUser, 'borrows');
@@ -106,6 +109,13 @@ dv.visitors.set('pv', { id: 'pv', hostAccount: 'bob', hostName: '乙', visitorNa
 const digest = api.buildDigest(dv, du);
 assertEq(digest.pendingVisitorsCount, 1, 'digest 统计待接待访客');
 assertEq(digest.pendingVisitors[0].visitorName, '李四', 'digest 含访客姓名');
+assertEq(digest.todayMeetingMinutes, 0, 'digest 初始今日会议时长为 0');
+assertEq(digest.todayBorrowMinutes, 0, 'digest 初始今日借用时长为 0');
+dv.borrows.set('bw', { id: 'bw', toolId: 't1', borrowerAccount: 'alice', qty: 1, borrowedAt: Date.now() - 10 * 60000, returnedAt: Date.now() - 5 * 60000, status: 'returned' });
+dv.roomReservations.set('rm', { id: 'rm', roomId: 'r1', ownerAccount: 'bob', startAt: Date.now() - 30 * 60000, endAt: Date.now() - 10 * 60000, status: 'completed' });
+const digest2 = api.buildDigest(dv, du);
+assertEq(digest2.todayBorrowMinutes, 5, 'digest 统计今日归还借用时长');
+assertEq(digest2.todayMeetingMinutes, 20, 'digest 统计今日会议时长');
 
 // ---------- 用户广播 ----------
 console.log('\n📋 11. 用户广播');
@@ -117,7 +127,34 @@ spB.clients.add(fakeWs);
 api.broadcastUsers(spB);
 const lastUser = sent.filter((m) => m.type === 'users').pop();
 assert(lastUser && lastUser.users.some((u) => u.account === 'alice' && u.emergencyMode === true), '用户广播含紧急模式字段');
+assert(api.getUserByAccount('alice') && api.getUserByAccount('alice').emergencyMode === true, 'getUserByAccount 按账号查找用户');
 api.users.delete('bu1'); spB.clients.delete(fakeWs);
+
+// ---------- 会议室时长累计 ----------
+console.log('\n📋 12. 会议室时长累计');
+const ownerUser = { id: 'ru1', account: 'alice', nickname: '甲', stats: { meetingDuration: 0 }, achievements: [] };
+const fakeApi = {
+  roomReservationsPublic: () => [],
+  roomPublic: (r) => r,
+  broadcast: () => {},
+  LIST_PAGE: 30,
+  isAdmin: () => false,
+  sendTo: () => {},
+  serError: (m) => ({ type: 'error', message: m }),
+  genId: () => 'x',
+  saveEntity: () => {},
+  deleteEntity: () => {},
+  recordWeekly: () => {},
+  getUserByAccount: (a) => (a === 'alice' ? ownerUser : null),
+  sendToUser: () => {},
+  saveProfile: () => {},
+  broadcastLeaderboard: () => {},
+};
+const rooms = roomsModule(fakeApi);
+const rsvSpace = { id: 's6', roomReservations: new Map(), rooms: [] };
+rsvSpace.roomReservations.set('r1', { id: 'r1', roomId: 'rm1', ownerAccount: 'alice', startAt: Date.now() - 60 * 60000, endAt: Date.now() - 10 * 60000, status: 'active' });
+rooms.handleRooms({}, ownerUser, rsvSpace, { type: 'roomEnd', reservationId: 'r1' });
+assertEq(ownerUser.stats.meetingDuration, 50, 'roomEnd 累计会议时长 50 分钟');
 
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);

@@ -1,7 +1,7 @@
 'use strict';
 // 会议室模块：roomCreate / roomRemove / roomBook / reservationCancel / roomStart / roomEnd
 module.exports = function roomsModule(api) {
-  const { roomReservationsPublic, roomPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly } = api;
+  const { roomReservationsPublic, roomPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly, getUserByAccount, sendToUser, saveProfile, broadcastLeaderboard } = api;
 
   function roomsBroadcast(space) {
     const reservations = roomReservationsPublic(space);
@@ -58,9 +58,18 @@ module.exports = function roomsModule(api) {
       if (!res) return sendTo(ws, serError('预约不存在'));
       if (res.ownerAccount !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('只能操作自己的预约'));
       if (msg.type === 'roomStart' && res.status === 'pending' && res.startAt <= Date.now()) res.status = 'active';
-      if (msg.type === 'roomEnd' && res.status === 'active') res.status = 'completed';
+      if (msg.type === 'roomEnd' && res.status === 'active') {
+        res.status = 'completed';
+        const owner = getUserByAccount(res.ownerAccount);
+        if (owner) {
+          owner.stats.meetingDuration += Math.max(0, Math.round((res.endAt - res.startAt) / 60000));
+          saveProfile(owner);
+          sendToUser(owner.id, { type: 'stats', stats: owner.stats, achievements: owner.achievements });
+        }
+      }
       saveEntity(space.id, 'room_reservation', res.id, res);
       roomsBroadcast(space);
+      broadcastLeaderboard(space);
     }
   }
 

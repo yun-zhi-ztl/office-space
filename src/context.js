@@ -56,6 +56,11 @@ function createContext() {
     for (const [, u] of users) if (u.currentSpace === spaceId) out.push(u);
     return out;
   }
+  function getUserByAccount(account) {
+    if (!account) return null;
+    for (const [, u] of users) if (u.account === account) return u;
+    return null;
+  }
   function isAdmin(space, account) { return !!space.admins.has(account); }
   function serError(message) { return { type: 'error', message }; }
   function lk(s) { return String(s == null ? '' : s).toLowerCase(); }
@@ -277,7 +282,7 @@ function createContext() {
   // ---------- 空间 ----------
   function weekKey(ts) { const d = new Date(ts || Date.now()); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
   function newWeekly() { return { key: weekKey(), visits: 0, borrows: 0, requests: 0, repairs: 0, meetings: 0 }; }
-  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, requestCount: 0, repairCount: 0, meetingCount: 0, weekly: newWeekly() }; }
+  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, weekly: newWeekly() }; }
   function recordWeekly(user, field) { if (!user.stats.weekly || user.stats.weekly.key !== weekKey()) user.stats.weekly = newWeekly(); user.stats.weekly[field] = (user.stats.weekly[field] || 0) + 1; }
   function weeklyScore(stats) { const w = stats.weekly; if (!w || w.key !== weekKey()) return 0; return (w.visits || 0) + (w.borrows || 0) + (w.requests || 0) + (w.repairs || 0) + (w.meetings || 0); }
   function createSpace(id, name, squat, urinal) {
@@ -489,14 +494,16 @@ function createContext() {
   function buildDigest(space, user) {
     const day0 = new Date(); day0.setHours(0, 0, 0, 0);
     const today0 = day0.getTime(), todayEnd = today0 + 86400000;
-    const todayMeetings = roomReservationsPublic(space).filter((r) => r.startAt >= today0 && r.startAt < todayEnd && (r.status === 'pending' || r.status === 'active'));
+    const todayMeetings = roomReservationsPublic(space).filter((r) => r.startAt >= today0 && r.startAt < todayEnd && r.status !== 'cancelled' && r.status !== 'expired');
     const overdue = [...space.borrows.values()].filter((b) => b.status === 'borrowed' && (Date.now() - b.borrowedAt) >= 7 * 86400000);
     const myBorrows = [...space.borrows.values()].filter((b) => b.borrowerAccount === user.account && b.status === 'borrowed');
     const pendingMaterials = [...space.materialRequests.values()].filter((r) => r.status === 'pending');
     const openRepairs = [...space.repairs.values()].filter((r) => r.status === 'reported' || r.status === 'in_progress');
     const pendingVisitors = [...space.visitors.values()].filter((v) => v.status === 'pending' || v.status === 'arrived');
+    const todayMeetingMinutes = todayMeetings.reduce((s, r) => s + Math.max(0, Math.round((Math.min(r.endAt, todayEnd) - r.startAt) / 60000)), 0);
+    const todayBorrowMinutes = [...space.borrows.values()].filter((b) => b.returnedAt && b.returnedAt >= today0 && b.returnedAt < todayEnd).reduce((s, b) => s + Math.max(0, Math.round((b.returnedAt - b.borrowedAt) / 60000)), 0);
     const mvp = leaderboardPublic(space).rankings.find((r) => r.mvp) || null;
-    return { todayMeetingCount: todayMeetings.length, todayMeetings: todayMeetings.slice(0, 5), overdueCount: overdue.length, myBorrows: myBorrows.length, pendingMaterialsCount: pendingMaterials.length, openRepairsCount: openRepairs.length, pendingVisitorsCount: pendingVisitors.length, pendingVisitors: pendingVisitors.slice(0, 5).map((v) => ({ visitorName: v.visitorName, hostName: v.hostName, status: v.status })), mvp };
+    return { todayMeetingCount: todayMeetings.length, todayMeetings: todayMeetings.slice(0, 5), todayMeetingMinutes, todayBorrowMinutes, overdueCount: overdue.length, myBorrows: myBorrows.length, pendingMaterialsCount: pendingMaterials.length, openRepairsCount: openRepairs.length, pendingVisitorsCount: pendingVisitors.length, pendingVisitors: pendingVisitors.slice(0, 5).map((v) => ({ visitorName: v.visitorName, hostName: v.hostName, status: v.status })), mvp };
   }
 
   return {
@@ -509,7 +516,7 @@ function createContext() {
     set pgEnabled(v) { usePg = v; },
     initDb, flushWrites, scheduleFlush,
     // 工具
-    genId, genSpaceId, sendTo, broadcastTo, sendToUser, getUsersIn, isAdmin, serError, lk, spaceUserInfo,
+    genId, genSpaceId, sendTo, broadcastTo, sendToUser, getUsersIn, getUserByAccount, isAdmin, serError, lk, spaceUserInfo,
     // 认证
     hashPassword, verifyPassword, issueToken, accountByLogin,
     // 持久化
