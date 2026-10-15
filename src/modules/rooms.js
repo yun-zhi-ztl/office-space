@@ -105,6 +105,32 @@ module.exports = function roomsModule(api) {
       if (!pending.length) return sendTo(ws, serError('该周期预约已没有待开始的场次'));
       for (const r of pending) { r.status = 'cancelled'; saveEntity(space.id, 'room_reservation', r.id, r); promoteWaitlist(space); }
       roomsBroadcast(space);
+    } else if (msg.type === 'reservationReschedule') {
+      const res = space.roomReservations.get(msg.reservationId);
+      if (!res) return sendTo(ws, serError('预约不存在'));
+      if (res.ownerAccount !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('只能改期自己的预约'));
+      if (res.status !== 'pending') return sendTo(ws, serError('该预约已不能改期'));
+      const room = space.rooms.find((r) => r.id === res.roomId);
+      if (!room) return sendTo(ws, serError('会议室不存在'));
+      const startAt = Math.floor(+msg.startAt || 0);
+      const endAt = Math.floor(+msg.endAt || 0);
+      if (!(startAt > 0) || !(endAt > startAt)) return sendTo(ws, serError('请选择有效的时间段'));
+      if (startAt < Date.now()) return sendTo(ws, serError('改期开始时间不能早于当前时间'));
+      if (endAt - startAt < 5 * 60000) return sendTo(ws, serError('至少预约 5 分钟'));
+      const clash = [...space.roomReservations.values()].some((r) => r.id !== res.id && r.roomId === room.id && (r.status === 'pending' || r.status === 'active') && startAt < r.endAt && endAt > r.startAt);
+      if (clash) {
+        const free = space.rooms.filter((r) => r.id !== room.id && !slotClash(space, r.id, startAt, endAt));
+        const suggest = free.slice(0, 5).map(roomPublic);
+        return sendTo(ws, { type: 'error', message: '该时段已被预约，可另选时间' + (suggest.length ? '；空闲：' + suggest.map((r) => r.name).join('、') : ''), code: 'roomConflict', suggestions: suggest });
+      }
+      res.startAt = startAt;
+      res.endAt = endAt;
+      res.remindAt = Math.max(Date.now(), startAt - ROOM_REMIND_WINDOW_MS);
+      res.reminded = false;
+      saveEntity(space.id, 'room_reservation', res.id, res);
+      sendToAccount(res.ownerAccount, { type: 'reservationRescheduled', reservationId: res.id, roomId: res.roomId, startAt: res.startAt, endAt: res.endAt });
+      roomsBroadcast(space);
+      broadcastLeaderboard(space);
     } else if (msg.type === 'roomWaitlist') {
       if (space.paused) return sendTo(ws, serError('空间已暂停，暂不可预约'));
       const room = space.rooms.find((r) => r.id === msg.roomId);
@@ -137,13 +163,19 @@ module.exports = function roomsModule(api) {
       const res = space.roomReservations.get(msg.reservationId);
       if (!res) return sendTo(ws, serError('预约不存在'));
       if (res.ownerAccount !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('只能操作自己的预约'));
-      if (msg.type === 'roomStart' && res.status === 'pending' && res.startAt <= Date.now()) res.status = 'active';
+      if (msg.type === 'roomStart' && res.status === 'pending' && res.startAt <= Date.now()) {
+        res.status = 'active';
+        res.actualStartAt = Date.now();
+      }
       if (msg.type === 'roomEnd' && res.status === 'active') {
         res.status = 'completed';
+        res.actualEndAt = Date.now();
         const owner = getUserByAccount(res.ownerAccount);
         if (owner) {
           owner.stats.meetingCount = (owner.stats.meetingCount || 0) + 1;
           owner.stats.meetingDuration += Math.max(0, Math.round((res.endAt - res.startAt) / 60000));
+          const actualMin = res.actualStartAt ? Math.max(0, Math.round((res.actualEndAt - res.actualStartAt) / 60000)) : 0;
+          owner.stats.meetingActualDuration = (owner.stats.meetingActualDuration || 0) + actualMin;
           saveProfile(owner);
           sendToUser(owner.id, { type: 'stats', stats: owner.stats, achievements: owner.achievements });
         }

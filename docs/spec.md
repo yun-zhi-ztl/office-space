@@ -34,12 +34,14 @@
 
 ### 会议室（conference rooms）
 - `room`: `{ id, name, capacity, location, description }`
-- `room_reservation`: `{ id, roomId, ownerAccount, title, startAt, endAt, note, status, repeat?, seriesId?, seriesIndex?, participants? }`
+- `room_reservation`: `{ id, roomId, ownerAccount, title, startAt, endAt, note, status, repeat?, seriesId?, seriesIndex?, participants?, actualStartAt?, actualEndAt? }`
   - 状态：`pending`(已约) / `active`(进行中) / `completed` / `cancelled` / `expired`
   - 约束：同一房间在 `[startAt, endAt)` 内不得与他人预约重叠（冲突检测）。
   - 周期预约：`repeat` 为 `daily` / `weekly`（或省略表示单次），`repeatCount` 限制场次（每天 ≤ 90、每周 ≤ 52）；
     创建时按天 / 周展开为多条独立预约，共用 `seriesId`，可整体取消待开始场次。
   - 占用率统计：按「今日会议场次 / 今日会议分钟数 / 待开始场次」计算，占用率以工作时段（09:00–21:00）总容量分钟为分母，随 `rooms` 广播以 `roomStats` 类型下发。
+  - 实际到场时长：预约开始（手动 `roomStart` 或定时器自动开始）时记录 `actualStartAt`，结束（手动 `roomEnd` 或定时器自动结束）时记录 `actualEndAt`；两者差值即实际到场时长，累计计入 `stats.meetingActualDuration`，`roomStats` 按「今日到场分钟数」展示，序列化时对外暴露 `actualStartAt` / `actualEndAt`。
+  - 改期：待开始（`pending`）预约可调整时段（`reservationReschedule`），校验所有权（本人或管理员）、时段合法性（≥5 分钟且开始时间在当前之后）与冲突（排除自身）；成功后更新时段并广播。
   - 候补队列：时段冲突时用户可「加入候补」；当对应时段因他人取消 / 撤销被释放时，按先来先服务把候补第一位晋升为真实预约，
     并给晋升人推送 `roomWaitlistPromoted` 通知。候补必须对应当前被占用的时段，空闲时段应直接预约；同一用户对同一房间同一时段只保留一条候补。
 
@@ -99,6 +101,7 @@
 | `roomCreate` / `roomRemove` | 新增 / 删除会议室 | admin |
 | `roomBook` | 预约会议室（含冲突检测），可带 `repeat`=`daily`/`weekly` + `repeatCount` 创建周期预约 | member |
 | `reservationCancel` | 取消自己的单次预约 | owner |
+| `reservationReschedule` | 改期自己的（或管理员代改）待开始预约 | owner / admin |
 | `reservationCancelSeries` | 取消自己的周期预约全部待开始场次 | owner |
 | `roomWaitlist` / `roomWaitlistCancel` | 时段冲突时加入候补 / 取消自己的候补 | member / owner |
 | `toolCreate` / `toolDelete` / `toolAdjust` | 增删设备 / 调整库存 | admin |
@@ -219,10 +222,12 @@
 | 会议室人数校验 | 预约时填写参会人数，超过会议室容量直接拒绝，防止超员开会 | `roomBook`(participants) |
 | 会议室冲突建议 | 预约时段冲突时，错误响应自动附带其它空闲会议室建议，方便直接改订 | `roomConflict`(suggestions) |
 | 借用记录导出 | 工具借用页一键导出全部借用记录 CSV（自动拉取分页） | 复用 `fetchPage`(`borrows`) |
+| 会议室改期 | 待开始预约可调整时段，校验所有权、时段合法性与冲突（排除自身），成功后更新并广播 | `reservationReschedule` / `reservationRescheduled` |
+| 会议室实际到场时长 | 开始/结束时记录实际到场起止时间，累计个人到场时长并纳入会议室统计 | `roomStart` / `roomEnd`（复用 `stats` + `roomStats` + `leaderboard`） |
 
 ### 客户端→服务端新增消息
-`setStatus`、`announce`、`spaceRename`、`spacePause`、`spaceAdminSet`、`spaceKick`、`suggestRoom`、`remindReturn`、`toolExtend`、`roomBook`(周期 `repeat`/`repeatCount`)、`reservationCancelSeries`、`roomWaitlist`、`roomWaitlistCancel`、`materialAssign`、`repairAssign`、`repairUpdate`(优先级)、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`visitorCheckin`、`profileUpdate`、`passwordChange`、`toggleEmergency`、`fetchPage`(`borrows` 等分页模块)；服务端相应广播/单发
-`users`(含 `status`、`emergencyMode`、`role`) 、`notices`、`suggestRooms`、`borrowReminder`、`roomReminder`、`borrowDueSoon`、`materialAssigned`、`materialFulfilled`、`materialSla`、`repairAssigned`、`repairInProgress`、`repairResolved`、`repairSla`、`adminSet`、`spaceKicked`、`digest`、`visitors`、`spaceRenamed`、`spacePaused`、`roomWaitlistPromoted`、`rooms`(含 `waitlist`)、`visitorCheckinNotification`、`visitorArrived`、`visitorLeft`、`visitorReminder`。
+`setStatus`、`announce`、`spaceRename`、`spacePause`、`spaceAdminSet`、`spaceKick`、`suggestRoom`、`remindReturn`、`toolExtend`、`roomBook`(周期 `repeat`/`repeatCount`)、`reservationCancelSeries`、`reservationReschedule`、`roomWaitlist`、`roomWaitlistCancel`、`materialAssign`、`repairAssign`、`repairUpdate`(优先级)、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`visitorCheckin`、`profileUpdate`、`passwordChange`、`toggleEmergency`、`fetchPage`(`borrows` 等分页模块)；服务端相应广播/单发
+`users`(含 `status`、`emergencyMode`、`role`) 、`notices`、`suggestRooms`、`borrowReminder`、`roomReminder`、`borrowDueSoon`、`materialAssigned`、`materialFulfilled`、`materialSla`、`repairAssigned`、`repairInProgress`、`repairResolved`、`repairSla`、`adminSet`、`spaceKicked`、`digest`、`visitors`、`spaceRenamed`、`spacePaused`、`roomWaitlistPromoted`、`reservationRescheduled`、`rooms`(含 `waitlist`)、`visitorCheckinNotification`、`visitorArrived`、`visitorLeft`、`visitorReminder`。
 
 ## 9. 代码架构（多模块拆分）
 
@@ -238,7 +243,7 @@ src/modules/     rooms / tools / materials / repairs / visitors / profile / stal
 
 - 各领域模块是纯函数工厂 `module.exports = (api)=>({...})`，由 `server.js` 注入共享上下文 `api`，无全局状态、便于单测。
 - 定时器、心跳、优雅停机属于进程级关注点，保留在入口。
-- 该拆分不改变任何对外协议与行为，e2e（179 项）在内存与 PostgreSQL 双模式下均通过。
+- 该拆分不改变任何对外协议与行为，e2e（195 项）在内存与 PostgreSQL 双模式下均通过。
 
 ## 10. 健康检查、自测与 CI（本版本新增）
 
@@ -246,9 +251,9 @@ src/modules/     rooms / tools / materials / repairs / visitors / profile / stal
 - **npm 脚本**：
   - `npm start`：启动服务
   - `npm run lint`：对 `server.js` / `public` / `src/` / `test/` 全部 JS 执行 `node --check` 语法检查（`scripts/lint.js`）
-  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁与进度、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化、每日看点、我的待办、空间活跃趋势、用户广播、会议室时长累计、周期预约展开、借用逾期判定、会议室占用率统计、报修优先级序列化、借用记录序列化、工具在借明细序列化、工具排队序列化、会议室候补序列化、访客签到码序列化、借用逾期提醒、会议室开始前提醒、借用到期前提醒、访客预计到访提醒、报修 SLA 超时提醒、申领 SLA 超时提醒、报修重复检测、管理员成员管理、通知统一入口、报修处理时长统计、成员移除，147 项）
+  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁与进度、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化、每日看点、我的待办、空间活跃趋势、用户广播、会议室时长累计 / 实际到场时长、周期预约展开、借用逾期判定、会议室占用率统计、报修优先级序列化、借用记录序列化、工具在借明细序列化、工具排队序列化、会议室候补序列化、访客签到码序列化、借用逾期提醒、会议室开始前提醒、借用到期前提醒、访客预计到访提醒、报修 SLA 超时提醒、申领 SLA 超时提醒、报修重复检测、管理员成员管理、通知统一入口、报修处理时长统计、成员移除，151 项）
   - `npm run test:restore`：前端「自动恢复会话」回归测试（`test/restore.js`，vm stub 加载内联脚本，无需服务）
   - `npm run smoke`：快速冒烟（`test/smoke.js`）——健康检查、首页与大屏可达、WS 连接、登录、收到广播
-  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，179 项）
+  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，195 项）
 - **CI**：`.github/workflows/ci.yml` 在 push 到 `main` 或 pull_request 时自动：`npm ci` → `npm run lint` → `docker compose config` 校验 → `docker build` 构建校验 → 内存模式启动服务 → `npm run smoke` → `npm test`。用不可达的 PG 参数强制内存模式，无需外部数据库。
 - **环境变量**：见 `.env.example`（`PORT`、`PGHOST`、`PGPORT`、`PGUSER`、`PGPASSWORD`、`PGDATABASE`）；`.env` 已加入 `.gitignore`。

@@ -307,7 +307,7 @@ function createContext() {
   // ---------- 空间 ----------
   function weekKey(ts) { const d = new Date(ts || Date.now()); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
   function newWeekly() { return { key: weekKey(), visits: 0, borrows: 0, requests: 0, repairs: 0, meetings: 0 }; }
-  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, helperCount: 0, weekly: newWeekly() }; }
+  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, meetingActualDuration: 0, helperCount: 0, weekly: newWeekly() }; }
   function recordWeekly(user, field) { if (!user.stats.weekly || user.stats.weekly.key !== weekKey()) user.stats.weekly = newWeekly(); user.stats.weekly[field] = (user.stats.weekly[field] || 0) + 1; }
   function weeklyScore(stats) { const w = stats.weekly; if (!w || w.key !== weekKey()) return 0; return (w.visits || 0) + (w.borrows || 0) + (w.requests || 0) + (w.repairs || 0) + (w.meetings || 0); }
   function borrowOverdue(b, now) {
@@ -440,18 +440,23 @@ function createContext() {
       const today = res.filter((x) => x.startAt >= dStart && x.startAt < dEnd);
       const upcoming = res.filter((x) => x.startAt >= nowMs && x.status === 'pending');
       const todayMinutes = today.reduce((s, x) => s + Math.max(0, Math.round((Math.min(x.endAt, dEnd) - x.startAt) / 60000)), 0);
-      return { roomId: r.id, name: r.name, capacity: r.capacity, todayCount: today.length, todayMinutes, upcomingCount: upcoming.length };
+      const actualMinutes = today.reduce((s, x) => {
+        if (!x.actualStartAt || !x.actualEndAt) return s;
+        return s + Math.max(0, Math.round((x.actualEndAt - x.actualStartAt) / 60000));
+      }, 0);
+      return { roomId: r.id, name: r.name, capacity: r.capacity, todayCount: today.length, todayMinutes, actualMinutes, upcomingCount: upcoming.length };
     });
     const totalToday = rooms.reduce((s, r) => s + r.todayMinutes, 0);
+    const totalActual = rooms.reduce((s, r) => s + r.actualMinutes, 0);
     const capacity = space.rooms.length * (workEnd - workStart) / 60000;
-    return { rooms, totalTodayMinutes: totalToday, capacityMinutes: capacity, utilizationPct: capacity ? Math.round(totalToday / capacity * 100) : 0, workStart: workStart.getTime(), workEnd: workEnd.getTime() };
+    return { rooms, totalTodayMinutes: totalToday, totalActualMinutes: totalActual, capacityMinutes: capacity, utilizationPct: capacity ? Math.round(totalToday / capacity * 100) : 0, workStart: workStart.getTime(), workEnd: workEnd.getTime() };
   }
 
   // ---------- 序列化 ----------
   function roomPublic(r) { return { id: r.id, name: r.name, capacity: r.capacity, location: r.location, description: r.description }; }
   function reservationPublic(res, info) {
     const who = info.get(res.ownerAccount);
-    return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status, repeat: res.repeat || null, seriesId: res.seriesId || null, remindAt: res.remindAt || null, participants: res.participants || null };
+    return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status, repeat: res.repeat || null, seriesId: res.seriesId || null, remindAt: res.remindAt || null, participants: res.participants || null, actualStartAt: res.actualStartAt || null, actualEndAt: res.actualEndAt || null };
   }
   function roomWaitlistPublic(space, info) {
     if (!info) info = spaceUserInfo(space.id);

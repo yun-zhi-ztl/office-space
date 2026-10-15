@@ -86,6 +86,7 @@ function dispatch(m){
     case 'reservation': toast('✔ 预约成功','success'); break;
     case 'cancelSuccess': toast('✔ 已取消','success'); break;
     case 'roomWaitlistPromoted': toast('🎉 候补已晋升：预约已自动创建（'+fmtTime(m.startAt)+'）','success'); render(); break;
+    case 'reservationRescheduled': toast('✔ 改期成功：'+fmtTime(m.startAt)+' → '+fmtTime(m.endAt),'success'); render(); break;
     case 'toolWaitlistJoined': toast('✔ 已加入排队，轮到你时会自动借用','success'); render(); break;
     case 'toolWaitlistPromoted': toast('🎉 排队已晋升：'+(m.toolName||'设备')+' 已为你自动借用','success'); render(); break;
     case 'visitorCreated': toast('✔ 访客已登记，签到码：'+m.code,'success'); render(); break;
@@ -296,8 +297,8 @@ function renderDash(){
   $('#main').innerHTML = `<div class="topbar"><div><h1>概览 <span class="view-tag">${esc(S.space?S.space.name:'')}</span></h1><div class="sub">空间内的公共资源使用概览</div></div></div>
     ${mvp?`<div class="row" style="border-color:var(--yellow)"><span><span class="who">👑 本周之星</span> <b>${esc(mvp.username)}</b> · 本周活跃 ${mvp.weekly} 次</span><span class="badge ok">MVP</span></div>`:''}
     <div class="cards">${cards.map(c=>`<div class="card"><h3>${c[2]} ${c[0]}</h3><div style="font-size:30px;font-weight:800">${c[1]}</div></div>`).join('')}</div>
-    ${(S.roomStats&&S.roomStats.rooms&&S.roomStats.rooms.length)?`<h3 style="margin:22px 0 10px">📊 会议室今日占用 <span class="badge info">${S.roomStats.utilizationPct}%（9:00-21:00）</span></h3>
-    <div class="list">${S.roomStats.rooms.map(r=>{ const cap=S.roomStats.capacityMinutes/S.roomStats.rooms.length||1; return `<div class="row"><span><span class="who">${esc(r.name)}</span> <span class="when">今日 ${r.todayCount} 场 · ${Math.round(r.todayMinutes/60)}h${r.todayMinutes%60?''+r.todayMinutes%60+'m':''} · 待开始 ${r.upcomingCount}</span></span><span class="fs"><span class="bar"><i style="width:${Math.min(100,Math.round(r.todayMinutes/cap*100))}%"></i></span></span></div>`; }).join('')}</div>`:''}
+    ${(S.roomStats&&S.roomStats.rooms&&S.roomStats.rooms.length)?`<h3 style="margin:22px 0 10px">📊 会议室今日占用 <span class="badge info">${S.roomStats.utilizationPct}%（9:00-21:00）</span> <span class="badge ok">⏱️ 共到场 ${Math.round((S.roomStats.totalActualMinutes||0)/60)}h</span></h3>
+    <div class="list">${S.roomStats.rooms.map(r=>{ const cap=S.roomStats.capacityMinutes/S.roomStats.rooms.length||1; return `<div class="row"><span><span class="who">${esc(r.name)}</span> <span class="when">今日 ${r.todayCount} 场 · ${Math.round(r.todayMinutes/60)}h${r.todayMinutes%60?''+r.todayMinutes%60+'m':''} · 待开始 ${r.upcomingCount} · ⏱️ 到场 ${Math.round(r.actualMinutes/60)}h${r.actualMinutes%60?''+r.actualMinutes%60+'m':''}</span></span><span class="fs"><span class="bar"><i style="width:${Math.min(100,Math.round(r.todayMinutes/cap*100))}%"></i></span></span></div>`; }).join('')}</div>`:''}
     ${dig?`<h3 style="margin:22px 0 10px">📌 每日看点</h3><div class="list">
       <div class="row"><span>今日会议 ${dig.todayMeetingCount} 场</span>${dig.todayMeetingCount?`<span class="when">${dig.todayMeetings.map(r=>`${esc(r.title)}(${esc(r.ownerName)})`).join('、')}</span>`:''}</div>
       ${dig.overdueCount?`<div class="row"><span>⚠️ 有 <b>${dig.overdueCount}</b> 笔借用逾期未还</span></div>`:''}
@@ -349,7 +350,7 @@ function roomReservationListHtml(d, me){
   return roomReservationGroups(list).map(g=>{
     if(g.single){
       const r=g.single; const rm=d.rooms.find(x=>x.id===r.roomId);
-      return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(r.title)} <span class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}</span></span><span class="fs">${roomResBadge(r.status)}${r.ownerAccount===me&&r.status==='pending'?`<button class="btn danger sm" onclick="cancelReservation('${r.id}')">取消</button>`:''}</span></div>`;
+      return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(r.title)} <span class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}</span>${r.actualStartAt&&r.actualEndAt?` <span class="hint">⏱️ 到场 ${Math.max(0,Math.round((r.actualEndAt-r.actualStartAt)/60000))} 分钟</span>`:''}</span><span class="fs">${roomResBadge(r.status)}${(r.ownerAccount===me||S.admin)&&r.status==='pending'?`<button class="btn sm" onclick="openReschedule('${r.id}')">改期</button>${r.ownerAccount===me?`<button class="btn danger sm" onclick="cancelReservation('${r.id}')">取消</button>`:''}`:''}</span></div>`;
     }
     const first=g.items[0]; const rm=d.rooms.find(x=>x.id===first.roomId);
     const pat=repeatLabel(g.repeat, first);
@@ -412,6 +413,28 @@ function submitBook(roomId){
 }
 function cancelReservation(id){ wsSend({type:'reservationCancel',reservationId:id}); }
 function cancelSeries(seriesId){ if(confirm('确认取消该周期预约的全部待开始场次？')) wsSend({type:'reservationCancelSeries',seriesId}); }
+/* 会议室改期：待开始的预约可调整时段（冲突自动检测） */
+function openReschedule(id){
+  const r=(S.DB.reservations||[]).find(x=>x.id===id); if(!r) return;
+  const room=(S.DB.rooms||[]).find(x=>x.id===r.roomId);
+  const d=(ms)=>{ const x=new Date(ms), off=x.getTimezoneOffset(); return new Date(ms-off).toISOString().slice(0,16); };
+  S.lastReschedule={id};
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>改期 · ${esc(room?room.name:'会议室')}</h2><div class="form">
+    <div class="fld"><label>会议标题</label><input id="rsTitle" value="${esc(r.title||'')}" disabled></div>
+    <div class="fld"><label>开始时间</label><input id="rsStart" type="datetime-local"></div>
+    <div class="fld"><label>结束时间</label><input id="rsEnd" type="datetime-local"></div>
+    <button class="btn pri" onclick="submitReschedule()">确认改期</button>
+    <div class="hint">改期时段需在开始时间之后，且与该会议室现有预约不冲突</div></div>`);
+  const start=Date.now()+10*60000, end=start+60*60000;
+  $('#rsStart').value=d(start); $('#rsEnd').value=d(end);
+}
+function submitReschedule(){
+  const a=S.lastReschedule||{};
+  const st=new Date($('#rsStart').value).getTime(), en=new Date($('#rsEnd').value).getTime();
+  if(!(st>0)||!(en>st)) return toast('时间无效','error');
+  wsSend({type:'reservationReschedule',reservationId:a.id,startAt:st,endAt:en});
+  closeModal();
+}
 /* 会议室候补：时段冲突时加入队列，他人取消后自动晋升 */
 function openWaitlistModal(attempt){
   const room=(S.DB.rooms||[]).find(r=>r.id===attempt.roomId);

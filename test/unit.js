@@ -39,6 +39,7 @@ const stats = api.newStats();
 assertEq(stats.totalVisits, 0, 'newStats 初始 totalVisits=0');
 assertEq(stats.borrowDuration, 0, 'newStats 初始 borrowDuration=0');
 assertEq(stats.meetingDuration, 0, 'newStats 初始 meetingDuration=0');
+assertEq(stats.meetingActualDuration, 0, 'newStats 初始 meetingActualDuration=0');
 assertEq(stats.helperCount, 0, 'newStats 初始 helperCount=0');
 const weekUser = { stats };
 api.recordWeekly(weekUser, 'visits');
@@ -161,7 +162,7 @@ api.users.delete('bu1'); spB.clients.delete(fakeWs);
 
 // ---------- 会议室时长累计 ----------
 console.log('\n📋 12. 会议室时长累计');
-const ownerUser = { id: 'ru1', account: 'alice', nickname: '甲', stats: { meetingDuration: 0 }, achievements: [] };
+const ownerUser = { id: 'ru1', account: 'alice', nickname: '甲', stats: { meetingDuration: 0, meetingActualDuration: 0 }, achievements: [] };
 const fakeApi = {
   roomReservationsPublic: () => [],
   roomWaitlistPublic: () => [],
@@ -183,9 +184,10 @@ const fakeApi = {
 };
 const rooms = roomsModule(fakeApi);
 const rsvSpace = { id: 's6', roomReservations: new Map(), rooms: [] };
-rsvSpace.roomReservations.set('r1', { id: 'r1', roomId: 'rm1', ownerAccount: 'alice', startAt: Date.now() - 60 * 60000, endAt: Date.now() - 10 * 60000, status: 'active' });
+rsvSpace.roomReservations.set('r1', { id: 'r1', roomId: 'rm1', ownerAccount: 'alice', startAt: Date.now() - 60 * 60000, endAt: Date.now() - 10 * 60000, status: 'active', actualStartAt: Date.now() - 30 * 60000 });
 rooms.handleRooms({}, ownerUser, rsvSpace, { type: 'roomEnd', reservationId: 'r1' });
 assertEq(ownerUser.stats.meetingDuration, 50, 'roomEnd 累计会议时长 50 分钟');
+assertEq(ownerUser.stats.meetingActualDuration, 30, 'roomEnd 累计实际到场时长 30 分钟');
 
 // ---------- 周期预约展开 ----------
 console.log('\n📋 13. 周期预约展开');
@@ -216,11 +218,13 @@ const us = api.createSpace('s7', '占用空间', 1, 0);
 us.rooms.push({ id: 'r7', name: '小间', capacity: 4 });
 const now7 = new Date(); now7.setHours(12, 0, 0, 0);
 const now7ms = now7.getTime();
-us.roomReservations.set('u7', { id: 'u7', roomId: 'r7', ownerAccount: 'alice', startAt: now7ms, endAt: now7ms + 60 * 60000, status: 'active' });
+us.roomReservations.set('u7', { id: 'u7', roomId: 'r7', ownerAccount: 'alice', startAt: now7ms, endAt: now7ms + 60 * 60000, status: 'completed', actualStartAt: now7ms + 10 * 60000, actualEndAt: now7ms + 40 * 60000 });
 us.roomReservations.set('u8', { id: 'u8', roomId: 'r7', ownerAccount: 'bob', startAt: now7ms + 86400000, endAt: now7ms + 86400000 + 30 * 60000, status: 'pending' });
 const usage = api.roomUsageStats(us, now7ms);
 assertEq(usage.rooms[0].todayCount, 1, '今日场次统计为 1');
 assertEq(usage.rooms[0].todayMinutes, 60, '今日时长统计 60 分钟');
+assertEq(usage.rooms[0].actualMinutes, 30, '实际到场时长统计 30 分钟');
+assertEq(usage.totalActualMinutes, 30, '总实际到场时长统计 30 分钟');
 assertEq(usage.rooms[0].upcomingCount, 1, '待开始场次统计为 1');
 assert(usage.utilizationPct >= 0 && usage.utilizationPct <= 100, '占用率在 0-100 区间');
 

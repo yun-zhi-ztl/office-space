@@ -198,6 +198,90 @@ async function runTests() {
     assert(rw.waitlist.length === 0 && rw.waitlistTotal === 0, '本人取消候补后队列清空');
   }
 
+  // ========== 测试3d: 会议室改期 ==========
+  console.log('\n📋 测试3d: 会议室改期（成功/冲突/越权/时长/状态）');
+  {
+    const spR = (await httpJson('POST', '/api/spaces', { name: '改期办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aR = 'rsch_' + runKey, bR = 'rschm_' + runKey;
+    await reg(aR, 'pw', '改期管理员'); await reg(bR, 'pw', '改期成员');
+    const wRa = await createWSClient(); await loginTo(wRa, spR.id, aR, 'pw');
+    const wRb = await createWSClient(); await loginTo(wRb, spR.id, bR, 'pw');
+    await sendMsg(wRa, { type: 'roomCreate', name: '改期会议室', capacity: 6 });
+    const ridR = last(wRa, 'rooms').rooms[0].id;
+    const tR = Date.now() + 60 * 60000;
+    await sendMsg(wRb, { type: 'roomBook', roomId: ridR, startAt: tR, endAt: tR + 30 * 60000, title: '改期会' });
+    const resR = last(wRb, 'rooms').reservations[0];
+    assert(resR && resR.status === 'pending', '预约待改期的会议成功');
+    const resRid = resR.id;
+    // 成功改期
+    const tNew = Date.now() + 120 * 60000;
+    await sendMsg(wRb, { type: 'reservationReschedule', reservationId: resRid, startAt: tNew, endAt: tNew + 30 * 60000 });
+    const rescheduled = (last(wRb, 'rooms').reservations || []).find(r => r.id === resRid);
+    assert(rescheduled && rescheduled.startAt === tNew && rescheduled.endAt === tNew + 30 * 60000, '改期成功更新时段');
+    assert(mk(wRb, 'reservationRescheduled').length >= 1, '改期成功返回 reservationRescheduled 通知');
+    // 冲突拒绝：另一场占用后改期到重叠时段
+    const tC = Date.now() + 24 * 3600000;
+    await sendMsg(wRb, { type: 'roomBook', roomId: ridR, startAt: tC, endAt: tC + 30 * 60000, title: '占位会' });
+    assert(last(wRb, 'rooms').reservations.some(r => r.title === '占位会' && r.status === 'pending'), '占位会议预约成功');
+    await sendMsg(wRb, { type: 'reservationReschedule', reservationId: resRid, startAt: tC + 5 * 60000, endAt: tC + 25 * 60000 });
+    const errConf = mk(wRb, 'error').pop();
+    assert(errConf && errConf.message.includes('已被预约'), '改期到冲突时段被拒');
+    // 过去时间拒绝
+    await sendMsg(wRb, { type: 'reservationReschedule', reservationId: resRid, startAt: Date.now() - 60000, endAt: Date.now() + 30 * 60000 });
+    const errPast = mk(wRb, 'error').pop();
+    assert(errPast && errPast.message.includes('不能早于'), '改期到过去时间被拒');
+    // 时长过短拒绝
+    await sendMsg(wRb, { type: 'reservationReschedule', reservationId: resRid, startAt: tNew, endAt: tNew + 60000 });
+    const errShort = mk(wRb, 'error').pop();
+    assert(errShort && errShort.message.includes('至少预约 5 分钟'), '改期时长过短被拒');
+    // 管理员可改期他人预约
+    await sendMsg(wRa, { type: 'reservationReschedule', reservationId: resRid, startAt: tNew + 60 * 60000, endAt: tNew + 90 * 60000 });
+    const rescheduledAdmin = (last(wRa, 'rooms').reservations || []).find(r => r.id === resRid);
+    assert(rescheduledAdmin && rescheduledAdmin.startAt === tNew + 60 * 60000, '管理员改期他人预约成功');
+    // 非本人且非管理员被拒
+    const cR = 'rschc_' + runKey;
+    await reg(cR, 'pw', '第三方');
+    const wRc = await createWSClient(); await loginTo(wRc, spR.id, cR, 'pw');
+    await sendMsg(wRc, { type: 'reservationReschedule', reservationId: resRid, startAt: tNew + 120 * 60000, endAt: tNew + 150 * 60000 });
+    const errRBAC = mk(wRc, 'error').pop();
+    assert(errRBAC && errRBAC.message.includes('只能改期自己'), '非本人非管理员改期被拒');
+    wRc.close();
+    // 已取消不能改期
+    await sendMsg(wRb, { type: 'reservationCancel', reservationId: resRid });
+    await sendMsg(wRb, { type: 'reservationReschedule', reservationId: resRid, startAt: tNew + 120 * 60000, endAt: tNew + 150 * 60000 });
+    const errDone = mk(wRb, 'error').pop();
+    assert(errDone && errDone.message.includes('已不能改期'), '已取消的预约不能改期');
+    wRa.close(); wRb.close();
+  }
+
+  // ========== 测试3e: 会议室实际到场时长 ==========
+  console.log('\n📋 测试3e: 会议室实际到场时长（开始/结束/统计）');
+  {
+    const spA = (await httpJson('POST', '/api/spaces', { name: '到场办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aA = 'att_' + runKey;
+    await reg(aA, 'pw', '到场用户');
+    const wA = await createWSClient(); await loginTo(wA, spA.id, aA, 'pw');
+    await sendMsg(wA, { type: 'roomCreate', name: '到场会议室', capacity: 6 });
+    const ridA = last(wA, 'rooms').rooms[0].id;
+    const tStart = Date.now() + 5 * 1000;
+    await sendMsg(wA, { type: 'roomBook', roomId: ridA, startAt: tStart, endAt: tStart + 30 * 60000, title: '到场会' });
+    let rA = last(wA, 'rooms').reservations[0];
+    assert(rA && rA.actualStartAt === null && rA.actualEndAt === null, '新预约暂无实际到场时间');
+    await new Promise((r) => setTimeout(r, 6000)); // 等待开始时间过去
+    await sendMsg(wA, { type: 'roomStart', reservationId: rA.id });
+    let started = (last(wA, 'rooms').reservations || []).find(r => r.id === rA.id);
+    assert(started && started.status === 'active' && started.actualStartAt, '开始会议后记录实际开始时间');
+    await sendMsg(wA, { type: 'roomEnd', reservationId: rA.id });
+    let ended = (last(wA, 'rooms').reservations || []).find(r => r.id === rA.id);
+    assert(ended && ended.status === 'completed' && ended.actualEndAt, '结束会议后记录实际结束时间并置为已完成');
+    assert(ended && ended.actualEndAt >= ended.actualStartAt, '实际结束时间晚于实际开始时间');
+    const stA = last(wA, 'stats');
+    assert(stA && typeof stA.stats.meetingActualDuration === 'number' && stA.stats.meetingActualDuration >= 0, '会议实际时长计入 meetingActualDuration');
+    const rsA = last(wA, 'roomStats');
+    assert(rsA && rsA.totalActualMinutes >= 0 && rsA.rooms.some(r => r.actualMinutes >= 0), 'roomStats 携带实际到场分钟数');
+    wA.close();
+  }
+
   // ========== 测试4: 工具借用 ==========
   console.log('\n📋 测试4: 工具借用（创建/借用/不足/归还）');
   await sendMsg(w1, { type: 'toolCreate', name: '测试机', category: '测试电脑', total: 2, location: '3F 机柜' });

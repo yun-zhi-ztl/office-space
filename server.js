@@ -102,7 +102,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }
 
     switch (msg.type) {
-      case 'roomCreate': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'reservationCancelSeries': case 'roomWaitlist': case 'roomWaitlistCancel': case 'roomStart': case 'roomEnd':
+      case 'roomCreate': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'reservationCancelSeries': case 'reservationReschedule': case 'roomWaitlist': case 'roomWaitlistCancel': case 'roomStart': case 'roomEnd':
         rooms.handleRooms(ws, user, space, msg); break;
       case 'toolCreate': case 'toolDelete': case 'toolAdjust': case 'toolBorrow': case 'toolReturn': case 'toolExtend': case 'toolWaitlist': case 'remindOverdue':
         tools.handleTools(ws, user, space, msg); break;
@@ -214,12 +214,22 @@ setInterval(() => {
     for (const res of [...sp.roomReservations.values()]) {
       if (res.status === 'pending') {
         if (now >= res.endAt) { res.status = 'expired'; roomsChanged = true; api.saveEntity(sp.id, 'room_reservation', res.id, res); }
-        else if (now >= res.startAt) { res.status = 'active'; roomsChanged = true; api.saveEntity(sp.id, 'room_reservation', res.id, res); }
+        else if (now >= res.startAt) {
+          res.status = 'active';
+          if (!res.actualStartAt) res.actualStartAt = now;
+          roomsChanged = true; api.saveEntity(sp.id, 'room_reservation', res.id, res);
+        }
       } else if (res.status === 'active' && now >= res.endAt) {
         // 预约时段自然结束：自动置为已完成，避免「进行中」悬挂；同时持久化，防止重启后状态回退
-        res.status = 'completed'; roomsChanged = true; api.saveEntity(sp.id, 'room_reservation', res.id, res);
+        res.status = 'completed';
+        if (!res.actualEndAt) res.actualEndAt = now;
+        roomsChanged = true; api.saveEntity(sp.id, 'room_reservation', res.id, res);
         const owner = api.getUserByAccount(res.ownerAccount);
-        if (owner) { owner.stats.meetingDuration += Math.max(0, Math.round((res.endAt - res.startAt) / 60000)); api.saveProfile(owner); }
+        if (owner) {
+          owner.stats.meetingDuration += Math.max(0, Math.round((res.endAt - res.startAt) / 60000));
+          if (res.actualStartAt) owner.stats.meetingActualDuration = (owner.stats.meetingActualDuration || 0) + Math.max(0, Math.round((res.actualEndAt - res.actualStartAt) / 60000));
+          api.saveProfile(owner);
+        }
       }
     }
     if (roomsChanged) rooms.roomsBroadcast(sp);
