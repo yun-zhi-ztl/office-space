@@ -2,7 +2,7 @@
 // 会议室模块：roomCreate / roomRemove / roomBook / roomWaitlist / roomWaitlistCancel
 //               / reservationCancel / reservationCancelSeries / roomStart / roomEnd
 module.exports = function roomsModule(api) {
-  const { roomReservationsPublic, roomPublic, roomWaitlistPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly, getUserByAccount, sendToUser, sendToAccount, saveProfile, broadcastLeaderboard, expandRecurring, roomStatsBroadcast, ROOM_REMIND_WINDOW_MS } = api;
+  const { roomReservationsPublic, roomPublic, roomWaitlistPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly, getUserByAccount, sendToUser, sendToAccount, saveProfile, broadcastLeaderboard, expandRecurring, roomStatsBroadcast, checkAchievements, ROOM_REMIND_WINDOW_MS } = api;
 
   function roomsBroadcast(space) {
     const reservations = roomReservationsPublic(space);
@@ -195,6 +195,10 @@ module.exports = function roomsModule(api) {
       res.rating = score;
       res.ratedAt = Date.now();
       res.ratingComment = comment;
+      user.stats.roomRatesGiven = (user.stats.roomRatesGiven || 0) + 1;
+      checkAchievements(user);
+      saveProfile(user);
+      sendToUser(user.id, { type: 'stats', stats: user.stats, achievements: user.achievements });
       saveEntity(space.id, 'room_reservation', res.id, res);
       roomsBroadcast(space);
       sendTo(ws, { type: 'roomRated', reservationId: res.id, roomId: res.roomId, score });
@@ -205,7 +209,10 @@ module.exports = function roomsModule(api) {
       const idx = user.stats.favoriteRooms.indexOf(room.id);
       const add = idx < 0;
       if (add) user.stats.favoriteRooms.push(room.id); else user.stats.favoriteRooms.splice(idx, 1);
+      user.stats.favoriteCount = user.stats.favoriteRooms.length;
+      checkAchievements(user);
       saveProfile(user);
+      sendToUser(user.id, { type: 'stats', stats: user.stats, achievements: user.achievements });
       sendTo(ws, { type: 'roomFavorites', favorites: user.stats.favoriteRooms || [] });
       roomsBroadcast(space);
     }

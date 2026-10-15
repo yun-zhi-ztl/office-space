@@ -1,11 +1,28 @@
 'use strict';
 // 工具借用模块：toolCreate / toolDelete / toolAdjust / toolBorrow / toolReturn
 module.exports = function toolsModule(api) {
-  const { spaceUserInfo, toolsPublic, toolWaitlistPublic, broadcast, TOOL_CATEGORIES, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToUser, sendToAccount, checkAchievements, dueBorrowReminders, pushNotice } = api;
+  const { spaceUserInfo, toolsPublic, toolWaitlistPublic, broadcast, TOOL_CATEGORIES, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToUser, sendToAccount, checkAchievements, dueBorrowReminders, pushNotice, isToolLowStock } = api;
 
   function toolsBroadcast(space) {
     const info = spaceUserInfo(space.id);
     broadcast(space.id, 'tools', { tools: toolsPublic(space, info), waitlist: toolWaitlistPublic(space, info) });
+  }
+
+  // 库存告急通知：可用数跌破阈值时首次通知管理员并写入公告，避免反复刷屏
+  function notifyLowStock(space, tool) {
+    if (!tool || !isToolLowStock(tool)) return;
+    if (tool.lowNotifiedAt) return;
+    tool.lowNotifiedAt = Date.now();
+    const min = tool.minAvailable || 1;
+    saveEntity(space.id, 'tool', tool.id, tool);
+    pushNotice(space, `⚠️ 设备库存告急：${tool.name} 可用 ${tool.available}/${tool.total}（阈值 ${min}）`, 'system', '系统');
+    for (const acc of space.admins) sendToAccount(acc, { type: 'toolLowStock', toolId: tool.id, toolName: tool.name, available: tool.available, minAvailable: min });
+  }
+  // 库存变化后同步告急状态：跌破阈值则通知，恢复后清除通知标记以便下次再跌破时重新提醒
+  function syncLowStock(space, tool) {
+    if (!tool) return;
+    if (isToolLowStock(tool)) notifyLowStock(space, tool);
+    else if (tool.lowNotifiedAt) { tool.lowNotifiedAt = null; saveEntity(space.id, 'tool', tool.id, tool); }
   }
 
   // 借用归还/库存调整后，按排队顺序晋升「在借已归还」的第一位
@@ -45,10 +62,13 @@ module.exports = function toolsModule(api) {
       const total = parseInt(msg.total, 10);
       if (!name) return sendTo(ws, serError('请输入设备名称'));
       if (!Number.isInteger(total) || total < 1) return sendTo(ws, serError('请输入有效库存数量'));
+      const minAvailable = msg.minAvailable === undefined || msg.minAvailable === '' ? 1 : parseInt(msg.minAvailable, 10);
+      if (!Number.isInteger(minAvailable) || minAvailable < 0 || minAvailable > total) return sendTo(ws, serError('库存阈值需为 0 到总库存之间'));
       const category = TOOL_CATEGORIES.includes(msg.category) ? msg.category : '其它';
-      const tool = { id: genId('tl', null), name, category, total, available: total, location: (msg.location || '').trim().slice(0, 40), description: (msg.description || '').trim().slice(0, 100) };
+      const tool = { id: genId('tl', null), name, category, total, available: total, minAvailable, location: (msg.location || '').trim().slice(0, 40), description: (msg.description || '').trim().slice(0, 100) };
       space.tools.push(tool);
       saveEntity(space.id, 'tool', tool.id, tool);
+      syncLowStock(space, tool);
       toolsBroadcast(space);
     } else if (msg.type === 'toolDelete') {
       if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可删除设备'));
@@ -67,11 +87,15 @@ module.exports = function toolsModule(api) {
       if (!tool) return sendTo(ws, serError('设备不存在'));
       const total = parseInt(msg.total, 10);
       if (!Number.isInteger(total) || total < 1) return sendTo(ws, serError('请输入有效库存数量'));
+      const minAvailable = msg.minAvailable !== undefined && msg.minAvailable !== '' ? parseInt(msg.minAvailable, 10) : tool.minAvailable;
+      if (!Number.isInteger(minAvailable) || minAvailable < 0 || minAvailable > total) return sendTo(ws, serError('库存阈值需为 0 到总库存之间'));
       const diff = total - tool.total;
       if (tool.available + diff < 0) return sendTo(ws, serError('无法将库存调低到少于当前在借数量'));
       tool.total = total;
       tool.available += diff;
+      tool.minAvailable = minAvailable;
       promoteToolWaitlist(space);
+      syncLowStock(space, tool);
       saveEntity(space.id, 'tool', tool.id, tool);
       toolsBroadcast(space);
     } else if (msg.type === 'toolWaitlist') {
@@ -104,6 +128,7 @@ module.exports = function toolsModule(api) {
         if (dueAt > now + 90 * 86400000) return sendTo(ws, serError('自定义归还时间不能超过 90 天'));
       }
       tool.available -= qty;
+      syncLowStock(space, tool);
       const borrow = { id: genId('bw', null), toolId: tool.id, borrowerAccount: user.account, borrowerName: user.nickname, qty, borrowedAt: now, dueAt, returnedAt: null, status: 'borrowed', lastRemindedAt: null, soonRemindedAt: null, extensions: 0, condition: 'intact' };
       space.borrows.set(borrow.id, borrow);
       user.stats.borrowCount = (user.stats.borrowCount || 0) + 1;
@@ -142,6 +167,7 @@ module.exports = function toolsModule(api) {
       } else {
         tool.available = Math.min(tool.total, tool.available + borrow.qty);
       }
+      syncLowStock(space, tool);
       promoteToolWaitlist(space);
       const condLabel = condition === 'intact' ? '完好' : condition === 'damaged' ? '损坏' : '丢失';
       pushNotice(space, `已归还设备：${tool.name} ×${borrow.qty}（${condLabel}）`, user.account, user.nickname);

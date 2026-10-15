@@ -24,6 +24,7 @@ const S = {
   roomStats:null,
   lastRoomBook:null,
   favorites:[],
+  weeklyReport:null,
   admin:false, sockOpen:false,
 };
 const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
@@ -68,12 +69,14 @@ function dispatch(m){
     case 'spaceTrend': S.DB.trend=m.trend||[]; break;
     case 'notices': S.DB.notices=m.notices||[]; break;
     case 'digest': S.digest=m.digest; break;
+    case 'weeklyReport': S.weeklyReport=m.report||null; if(m.report){ toast('📅 本周空间周报：会议 '+(m.report.meetings||0)+' · 借用 '+(m.report.borrows||0)+' · 申领 '+(m.report.requests||0)+' · 报修 '+(m.report.repairs||0)+'（已解决 '+(m.report.resolvedRepairs||0)+'）','success'); } render(); break;
     case 'suggestRooms': S.suggestions=m.suggestions||[]; renderSugg(); break;
     case 'statusSet': toast('✔ 状态已更新','success'); break;
     case 'remindSent': toast('✔ 已提醒 '+(m.count||0)+' 人','success'); break;
     case 'remindOverdueSent': toast('✔ 已批量提醒 '+(m.count||0)+' 位逾期借用人','success'); render(); break;
     case 'borrowReminder': toast('🔔 '+(m.from||'有人')+'提醒你归还设备',"urge"); break;
     case 'overdueReminder': toast('⏰ 你借的设备已逾期，请尽快归还','urge'); break;
+    case 'toolLowStock': toast('⚠️ 设备库存告急：'+(m.toolName||'')+' 可用 '+m.available+'（阈值 '+m.minAvailable+'）','warn'); render(); break;
     case 'borrowDueSoon': toast('🔔 你借的设备即将到期，请按时归还','warn'); render(); break;
     case 'roomReminder': { const rm=(S.DB.rooms||[]).find(r=>r.id===m.roomId); toast('🔔 '+(rm?rm.name:'会议室')+' 即将开始：'+fmtTime(m.startAt),'success'); break; }
     case 'materialAssigned': toast('📌 物资申领已指派给你：'+(m.name||''),'info'); render(); break;
@@ -320,6 +323,13 @@ function renderDash(){
     <div class="list">${(d.notices||[]).map(n=>`<div class="row"><span><span class="who">${esc(n.from)}</span> <span class="when">${fmtTime(n.ts)}</span><div>${esc(n.text)}</div><div class="fs" style="margin-top:6px">${noticeReactions(n).map(r=>`<button class="btn sm ${r.me?'pri':''}" onclick="reactNotice('${n.id}','${r.e}')">${r.e} ${r.count}</button>`).join(' ')}</div></span>${S.admin?`<button class="btn danger sm" onclick="removeNotice('${n.id}')">删除</button>`:''}</div>`).join('')||'<div class="empty">还没有公告</div>'}
     </div>
     ${overdue.length?`<h3 style="margin:22px 0 10px">⏰ 逾期借用 · 占用王</h3><div class="list">${overdue.map(b=>`<div class="row"><span>${esc(b.borrowerName)} ×${b.qty} · 已借 ${b.days} 天</span><button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒归还</button></div>`).join('')}</div>`:''}
+    ${S.weeklyReport?`<h3 style="margin:22px 0 10px">📅 本周空间周报 <span class="badge info">${fmtTime(S.weeklyReport.weekStart)}</span></h3><div class="list">
+      <div class="row"><span>会议 ${S.weeklyReport.meetings} 场 / ${Math.round(S.weeklyReport.meetingMinutes/60)}h</span></div>
+      <div class="row"><span>借用 ${S.weeklyReport.borrows} · 申领 ${S.weeklyReport.requests}（已满足 ${S.weeklyReport.fulfilledMaterials}） · 报修 ${S.weeklyReport.repairs}（已解决 ${S.weeklyReport.resolvedRepairs}） · 访客 ${S.weeklyReport.visitors}</span></div>
+      ${S.weeklyReport.openRepairsCount?`<div class="row"><span>⏳ 未办结报修 ${S.weeklyReport.openRepairsCount}</span></div>`:''}
+      ${S.weeklyReport.pendingMaterialsCount?`<div class="row"><span>⏳ 待处理申领 ${S.weeklyReport.pendingMaterialsCount}</span></div>`:''}
+      ${(S.weeklyReport.lowStockTools||[]).length?`<div class="row"><span>⚠️ 库存告急：${S.weeklyReport.lowStockTools.map(t=>`${esc(t.name)} ${t.available}/${t.minAvailable}`).join('、')}</span></div>`:''}
+    </div>`:''}
     ${S.me&&S.me.achievements&&S.me.achievements.length?`<h3 style="margin:22px 0 10px">🏅 我的徽章（${S.me.achievements.length} 枚）</h3><div class="fs">${S.me.achievements.map(a=>`<span class="badge ok">${ACH[a]||a}</span>`).join('')}</div>`:''}
     <h3 style="margin:22px 0 10px">🏅 活跃榜（本空间）</h3>
     <div class="list">${ (d.leaderboard||[]).length?d.leaderboard.slice(0,8).map((r,i)=>`<div class="row"><span>${r.mvp?'👑':i+1+'.'} <span class="who">${esc(r.username)}</span> ${r.weekly?`<span class="badge info">本周${r.weekly}</span>`:''} <span class="when">${esc(r.avatar||'' )} 使用${r.stats.totalVisits||0}次 · 借用${r.stats.borrowCount||0}次(${Math.round((r.stats.borrowDuration||0)/60)}h) · 会议${Math.round((r.stats.meetingDuration||0)/60)}h · 申领${r.stats.requestCount||0} · 报修${r.stats.repairCount||0}</span></span></div>`).join(''):'<div class="empty">暂无活动数据</div>'}
@@ -502,11 +512,12 @@ function renderTools(){
     ${overdueCount?`<button class="btn danger" onclick="remindOverdue()">⏰ 批量催还 ${overdueCount} 人</button>`:''}
     <button class="btn" onclick="exportModuleCsv('borrows',BW_COLS)">导出 CSV</button></div>
     <div class="cards">${d.tools.map(t=>`<div class="card"><h3>${esc(t.name)} <span class="badge ${t.available>0?'ok':'bad'}">${t.available}/${t.total}</span></h3>
-      <div class="meta">${t.category}${t.location?' · '+esc(t.location):''}${wlByTool[t.id]&&wlByTool[t.id].length?` · 排队 ${wlByTool[t.id].length} 人`:''}${wlByTool[t.id]&&wlByTool[t.id].find(w=>w.account===me)?' · 你已排队':''}</div>
+      <div class="meta">${t.category}${t.location?' · '+esc(t.location):''}${t.minAvailable&&t.minAvailable>1?' · 阈值 '+t.minAvailable:''}${wlByTool[t.id]&&wlByTool[t.id].length?` · 排队 ${wlByTool[t.id].length} 人`:''}${wlByTool[t.id]&&wlByTool[t.id].find(w=>w.account===me)?' · 你已排队':''}</div>
+      <div class="meta">${t.lowStock?'<span class="badge bad">库存告急</span>':''}</div>
       <div class="bar"><i style="width:${t.total?Math.round(t.available/t.total*100):0}%"></i></div>
       <div class="foot fs">
         ${t.available>0?`<button class="btn pri sm" onclick="openBorrow('${t.id}','${esc(t.name)}',${t.available})">借用</button>`:`<button class="btn sm" onclick="openToolWaitlist('${t.id}','${esc(t.name)}',${t.total})">加入排队</button>`}
-        ${S.admin?`<button class="btn danger sm" onclick="removeTool('${t.id}')">删</button><button class="btn sm" onclick="openAdjust('${t.id}','${esc(t.name)}',${t.total},${t.borrowedCount})">改库存</button>`:''}
+        ${S.admin?`<button class="btn danger sm" onclick="removeTool('${t.id}')">删</button><button class="btn sm" onclick="openAdjust('${t.id}','${esc(t.name)}',${t.total},${t.borrowedCount},${t.minAvailable||1})">改库存</button>`:''}
       </div>
       ${t.activeBorrows&&t.activeBorrows.length?`<div class="meta">在借：${t.activeBorrows.map(b=>{ const can=b.borrowerAccount===me||S.admin; return `${esc(b.borrowerName)}×${b.qty}${b.dueAt?' · 应还 '+fmtTime(b.dueAt):''}${b.days>=0?' · '+b.days+'天':''}${b.overdue?'<span class="badge bad">逾期</span>':''}${b.reminded?'<span class="badge grey">已提醒</span>':''}${b.dueSoon?'<span class="badge warn">即将到期</span>':''}${b.borrowerAccount===me?` <button class="btn green sm" onclick="openReturn('${b.id}')">归还</button>`:''}${can?(b.extensions>=2?'<span class="hint">续借已用完</span>':`<button class="btn sm" onclick="openExtend('${b.id}','${esc(b.borrowerName)}')">续借 (${2-(b.extensions||0)}次)</button>`):''}${b.borrowerAccount!==me&&b.overdue?` <button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒</button>`:''}`; }).join('，')}</div>`:''}
     </div>`).join('')||'<div class="empty">还没有设备，管理员可新增</div>'}
@@ -516,15 +527,17 @@ function openToolCreate(){ openModal(`<span class="close" onclick="closeModal()"
   <div class="fld"><label>名称</label><input id="tlName" placeholder="如：测试手机 Pro"></div>
   <div class="fld"><label>类别</label><select id="tlCat"><option>测试电脑</option><option>测试机器</option><option>测试手机</option><option>其它</option></select></div>
   <div class="fld"><label>库存数量</label><input id="tlTotal" type="number" min="1" value="1"></div>
+  <div class="fld"><label>库存告急阈值（0-库存）</label><input id="tlMin" type="number" min="0" value="1"></div>
   <div class="fld"><label>位置</label><input id="tlLoc" placeholder="可选"></div>
   <div class="fld"><label>备注</label><input id="tlDesc" placeholder="可选"></div>
   <button class="btn pri" onclick="submitToolCreate()">创建</button></div>`); }
-function submitToolCreate(){ wsSend({type:'toolCreate',name:$('#tlName').value,category:$('#tlCat').value,total:parseInt($('#tlTotal').value,10),location:$('#tlLoc').value,description:$('#tlDesc').value}); closeModal(); }
+function submitToolCreate(){ wsSend({type:'toolCreate',name:$('#tlName').value,category:$('#tlCat').value,total:parseInt($('#tlTotal').value,10),minAvailable:parseInt($('#tlMin').value,10),location:$('#tlLoc').value,description:$('#tlDesc').value}); closeModal(); }
 function removeTool(id){ if(confirm('删除该设备？')) wsSend({type:'toolDelete',toolId:id}); }
-function openAdjust(id,name,total,borrowed){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>调整库存 · ${esc(name)}</h2><div class="form">
+function openAdjust(id,name,total,borrowed,min){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>调整库存 · ${esc(name)}</h2><div class="form">
   <div class="fld"><label>在借 ${borrowed} · 当前总库存 ${total}</label><input id="adTotal" type="number" min="1" value="${total}"></div>
+  <div class="fld"><label>库存告急阈值（0-库存）</label><input id="adMin" type="number" min="0" value="${min||1}"></div>
   <button class="btn pri" onclick="submitAdjust('${id}')">保存</button></div>`); }
-function submitAdjust(id){ wsSend({type:'toolAdjust',toolId:id,total:parseInt($('#adTotal').value,10)}); closeModal(); }
+function submitAdjust(id){ wsSend({type:'toolAdjust',toolId:id,total:parseInt($('#adTotal').value,10),minAvailable:parseInt($('#adMin').value,10)}); closeModal(); }
 function openBorrow(id,name,avail){
   const d=(ms)=>{ const x=new Date(ms), off=x.getTimezoneOffset(); return new Date(ms-off).toISOString().slice(0,16); };
   openModal(`<span class="close" onclick="closeModal()">×</span><h2>借用 · ${esc(name)}</h2><div class="form">

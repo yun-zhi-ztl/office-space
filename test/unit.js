@@ -79,7 +79,7 @@ const p3 = api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id =
 assert(p3.unlocked === true, '累计 10 次解锁蹲坑之王');
 assertEq(p3.pct, 100, '蹲坑之王达成后进度 100');
 const pub = api.achievementDefsPublic(user);
-assertEq(pub.length, 11, '成就公开列表含 11 项');
+assertEq(pub.length, 13, '成就公开列表含 13 项');
 assert(pub.every((a) => a.id && a.name && a.desc && a.icon), '公开成就含 id/name/desc/icon');
 user.stats.borrowCount = 3;
 assert(api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'borrower')).unlocked === true, '借用 3 次解锁借阅达人');
@@ -551,6 +551,52 @@ console.log('\n📋 34. 收藏会议室');
 const favStats = api.newStats();
 assert(Array.isArray(favStats.favoriteRooms), 'newStats 初始化 favoriteRooms 数组');
 assertEq(favStats.favoriteRooms.length, 0, '默认无收藏会议室');
+
+// ---------- 低库存预警 ----------
+console.log('\n📋 35. 低库存预警');
+assert(api.isToolLowStock({ available: 1, total: 3, minAvailable: 1 }), '可用数等于阈值判定为低库存');
+assert(!api.isToolLowStock({ available: 2, total: 3, minAvailable: 1 }), '可用数高于阈值不判定为低库存');
+assert(api.isToolLowStock({ available: 0, total: 1 }), '默认阈值 1 时可用 0 判定为低库存');
+const spLow = api.createSpace('s26', '低库存空间', 1, 0);
+spLow.tools.push({ id: 'low1', name: '测试机', category: '测试机器', total: 3, available: 2, minAvailable: 1, location: '', description: '' });
+spLow.tools.push({ id: 'low2', name: '测试机2', category: '测试机器', total: 3, available: 0, minAvailable: 2, location: '', description: '' });
+const lowPub = api.toolsPublic(spLow, new Map());
+assertEq(lowPub.find((t) => t.id === 'low1').lowStock, false, '高于阈值的 lowStock=false');
+assertEq(lowPub.find((t) => t.id === 'low2').lowStock, true, '跌破阈值的 lowStock=true');
+assertEq(lowPub.find((t) => t.id === 'low2').minAvailable, 2, 'toolsPublic 暴露 minAvailable');
+
+// ---------- 空间周报 ----------
+console.log('\n📋 36. 空间周报');
+const spWeek = api.createSpace('s27', '周报空间', 1, 0);
+const nowW = 1000000000;
+spWeek.roomReservations.set('w1', { id: 'w1', roomId: 'rm1', ownerAccount: 'alice', ownerName: '甲', startAt: nowW - 60000, endAt: nowW, status: 'completed', title: '会' });
+spWeek.borrows.set('wb', { id: 'wb', toolId: 't1', borrowerAccount: 'alice', qty: 1, borrowedAt: nowW, returnedAt: null, status: 'borrowed' });
+spWeek.materialRequests.set('wm', { id: 'wm', name: '电池', qty: 2, unit: '节', reason: '', status: 'fulfilled', requesterAccount: 'alice', requesterName: '甲', createdAt: nowW, handledAt: nowW, slaRemindedAt: null });
+spWeek.repairs.set('wp', { id: 'wp', category: '灯光', location: '走廊', reporterAccount: 'alice', reporterName: '甲', priority: 'normal', description: '', status: 'reported', createdAt: nowW, updatedAt: nowW, slaRemindedAt: null, escalatedAt: null });
+spWeek.visitors.set('wv', { id: 'wv', hostAccount: 'alice', hostName: '甲', visitorName: '王', purpose: '', status: 'pending', createdAt: nowW, code: '' });
+spWeek.tools.push({ id: 'lowtool', name: '测试手机', category: '测试手机', total: 1, available: 0, minAvailable: 1, location: '', description: '' });
+const report = api.buildWeeklyReport(spWeek, nowW);
+assertEq(report.meetings, 1, '周报统计会议数');
+assertEq(report.borrows, 1, '周报统计借用数');
+assertEq(report.requests, 1, '周报统计申领数');
+assertEq(report.repairs, 1, '周报统计报修数');
+assertEq(report.visitors, 1, '周报统计访客数');
+assertEq(report.fulfilledMaterials, 1, '周报统计已满足申领');
+assertEq(report.lowStockTools.length, 1, '周报统计低库存设备');
+assertEq(api.buildWeeklyReport(spWeek, nowW).meetingMinutes, 1, '周报统计会议分钟数');
+
+// ---------- 成就扩展 ----------
+console.log('\n📋 37. 成就扩展（会议室向导 / 收藏家）');
+const achUser = { stats: api.newStats(), achievements: [] };
+achUser.stats.roomRatesGiven = 3;
+api.checkAchievements(achUser);
+assert(achUser.achievements.includes('roomGuide'), '评分 3 次解锁会议室向导');
+achUser.stats.favoriteCount = 3;
+api.checkAchievements(achUser);
+assert(achUser.achievements.includes('collector'), '收藏 3 个会议室解锁收藏家');
+const achGuide = api.achievementDefsPublic(achUser).find((a) => a.id === 'roomGuide');
+assertEq(achGuide.unlocked, true, '会议室向导已解锁');
+assertEq(achGuide.target, 3, '会议室向导目标值 3');
 
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);

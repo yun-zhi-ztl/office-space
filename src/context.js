@@ -309,7 +309,7 @@ function createContext() {
   // ---------- 空间 ----------
   function weekKey(ts) { const d = new Date(ts || Date.now()); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
   function newWeekly() { return { key: weekKey(), visits: 0, borrows: 0, requests: 0, repairs: 0, meetings: 0 }; }
-  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, meetingActualDuration: 0, helperCount: 0, favoriteRooms: [], weekly: newWeekly() }; }
+  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, meetingActualDuration: 0, helperCount: 0, favoriteRooms: [], roomRatesGiven: 0, favoriteCount: 0, weekly: newWeekly() }; }
   function recordWeekly(user, field) { if (!user.stats.weekly || user.stats.weekly.key !== weekKey()) user.stats.weekly = newWeekly(); user.stats.weekly[field] = (user.stats.weekly[field] || 0) + 1; }
   function weeklyScore(stats) { const w = stats.weekly; if (!w || w.key !== weekKey()) return 0; return (w.visits || 0) + (w.borrows || 0) + (w.requests || 0) + (w.repairs || 0) + (w.meetings || 0); }
   function borrowOverdue(b, now) {
@@ -317,6 +317,12 @@ function createContext() {
     const nowMs = now == null ? Date.now() : now;
     const dueAt = b.dueAt || b.borrowedAt + 7 * 86400000;
     return nowMs >= dueAt;
+  }
+  // 低库存预警：可用数 ≤ 阈值（默认 1）即视为库存告急
+  function isToolLowStock(tool) {
+    if (!tool) return false;
+    const min = Number.isInteger(tool.minAvailable) ? tool.minAvailable : 1;
+    return tool.available <= min;
   }
   // 逾期但尚未在静默期内重复提醒的借用（按 lastRemindedAt 去重）
   function dueBorrowReminders(space, now) {
@@ -407,6 +413,7 @@ function createContext() {
       rooms: [], roomReservations: new Map(), roomWaitlist: new Map(), reservations: new Map(),
       tools: [], borrows: new Map(), toolWaitlist: new Map(), materialRequests: new Map(), materialTemplates: new Map(), repairs: new Map(), visitors: new Map(), urges: new Map(),
     };
+    sp.weeklyReportDate = null;
     sp.stalls = buildStalls(squat == null ? 4 : squat, urinal == null ? 3 : urinal);
     spaces.set(id, sp);
     return sp;
@@ -505,7 +512,7 @@ function createContext() {
     return sp.tools.map((t) => {
       const active = activeByTool.get(t.id) || [];
       return {
-        id: t.id, name: t.name, category: t.category, total: t.total, available: t.available,
+        id: t.id, name: t.name, category: t.category, total: t.total, available: t.available, minAvailable: t.minAvailable || 1, lowStock: isToolLowStock(t),
         location: t.location, description: t.description,
         borrowedCount: active.reduce((s, b) => s + b.qty, 0),
         activeBorrows: active.map((b) => { const days = Math.floor((now - b.borrowedAt) / 86400000); return { id: b.id, qty: b.qty, borrowerAccount: b.borrowerAccount, borrowerName: info.get(b.borrowerAccount) ? info.get(b.borrowerAccount).display : b.borrowerName, borrowedAt: b.borrowedAt, dueAt: b.dueAt || null, days, extensions: b.extensions || 0, overdue: borrowOverdue(b, now), reminded: !!b.lastRemindedAt, dueSoon: b.status === 'borrowed' && !!b.dueAt && now >= b.dueAt - BORROW_SOON_WINDOW_MS && now < b.dueAt }; }),
@@ -716,6 +723,8 @@ function createContext() {
     { id: 'reporter', name: '热心市民', desc: '累计上报报修超过3次', icon: '🛠️', check: (u) => (u.stats.repairCount || 0) >= 3 },
     { id: 'meeter', name: '会议达人', desc: '累计会议时长超过60分钟', icon: '🗓️', check: (u) => (u.stats.meetingDuration || 0) >= 60 },
     { id: 'logistician', name: '后勤达人', desc: '处理申领或解决报修累计5次', icon: '🛎️', check: (u) => (u.stats.helperCount || 0) >= 5 },
+    { id: 'roomGuide', name: '会议室向导', desc: '给会议室评分3次', icon: '📝', check: (u) => (u.stats.roomRatesGiven || 0) >= 3 },
+    { id: 'collector', name: '收藏家', desc: '收藏3个会议室', icon: '⭐', check: (u) => (u.stats.favoriteCount || 0) >= 3 },
   ];
   function checkAchievements(user) {
     let changed = false;
@@ -737,6 +746,8 @@ function createContext() {
     reporter: { field: 'repairCount', target: 3 },
     meeter: { field: 'meetingDuration', target: 60 },
     logistician: { field: 'helperCount', target: 5 },
+    roomGuide: { field: 'roomRatesGiven', target: 3 },
+    collector: { field: 'favoriteCount', target: 3 },
   };
   function achievementProgress(user, def) {
     const t = ACH_TARGETS[def.id] || { field: 'totalVisits', target: 1 };
@@ -818,6 +829,37 @@ function createContext() {
     return buckets.map((b) => ({ date: b.date, meetings: b.meetings, borrows: b.borrows, requests: b.requests, repairs: b.repairs, visitors: b.visitors }));
   }
 
+  // ---------- 空间周报 ----------
+  // 汇总本周（周一至今）活动量：会议 / 借用 / 申领 / 报修 / 访客 / 已解决工单，供周报推送
+  function buildWeeklyReport(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const week0 = new Date(nowMs); week0.setDate(week0.getDate() - ((week0.getDay() + 6) % 7)); week0.setHours(0, 0, 0, 0);
+    const weekStart = week0.getTime(), weekEnd = nowMs;
+    const inWeek = (ts) => ts >= weekStart && ts <= weekEnd;
+    const meetings = [...space.roomReservations.values()].filter((r) => r.status !== 'cancelled' && r.status !== 'expired' && inWeek(r.startAt));
+    const borrows = [...space.borrows.values()].filter((b) => inWeek(b.borrowedAt));
+    const requests = [...space.materialRequests.values()].filter((m) => inWeek(m.createdAt));
+    const repairs = [...space.repairs.values()].filter((r) => inWeek(r.createdAt));
+    const visitors = [...space.visitors.values()].filter((v) => inWeek(v.createdAt));
+    const resolvedRepairs = [...space.repairs.values()].filter((r) => r.status === 'resolved' && r.handledAt && inWeek(r.handledAt));
+    const fulfilledMaterials = [...space.materialRequests.values()].filter((m) => m.status === 'fulfilled' && m.handledAt && inWeek(m.handledAt));
+    const lowStock = space.tools.filter((t) => isToolLowStock(t)).map((t) => ({ id: t.id, name: t.name, available: t.available, minAvailable: t.minAvailable || 1 }));
+    const openRepairs = [...space.repairs.values()].filter((r) => r.status === 'reported' || r.status === 'in_progress');
+    const pendingMaterials = [...space.materialRequests.values()].filter((m) => m.status === 'pending');
+    const meetingMinutes = meetings.reduce((s, r) => s + Math.max(0, Math.round((Math.min(r.endAt, weekEnd) - r.startAt) / 60000)), 0);
+    return {
+      weekStart, weekEnd,
+      meetings: meetings.length, meetingMinutes,
+      borrows: borrows.length,
+      requests: requests.length, fulfilledMaterials: fulfilledMaterials.length,
+      repairs: repairs.length, resolvedRepairs: resolvedRepairs.length,
+      visitors: visitors.length,
+      openRepairsCount: openRepairs.length,
+      pendingMaterialsCount: pendingMaterials.length,
+      lowStockTools: lowStock,
+    };
+  }
+
   return {
     // 状态
     spaces, users, accounts, tokens, profiles,
@@ -828,7 +870,7 @@ function createContext() {
     set pgEnabled(v) { usePg = v; },
     initDb, flushWrites, scheduleFlush,
     // 工具
-    genId, genSpaceId, genCheckinCode, sendTo, broadcastTo, sendToUser, sendToAccount, getUsersIn, getUserByAccount, isAdmin, serError, lk, spaceUserInfo,
+    genId, genSpaceId, genCheckinCode, sendTo, broadcastTo, sendToUser, sendToAccount, getUsersIn, getUserByAccount, isAdmin, serError, lk, spaceUserInfo, isToolLowStock,
     // 认证
     hashPassword, verifyPassword, issueToken, accountByLogin,
     // 持久化
@@ -843,7 +885,7 @@ function createContext() {
     activeStallCount, checkAchievements, notifyUrge, ACHIEVEMENT_DEFS,
     achievementProgress, achievementDefsPublic,
     // 每日看点
-    buildDigest,
+    buildDigest, buildWeeklyReport,
     // 我的待办
     buildMyReminders,
     // 空间活跃趋势

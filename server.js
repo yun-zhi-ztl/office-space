@@ -320,6 +320,17 @@ setInterval(() => {
       }
       repairs.repairsBroadcast(sp);
     }
+    // 空间周报：每周一 09:00 汇总本周活动并广播给全员，当天只发一次
+    const nowMon = new Date(now); nowMon.setHours(0, 0, 0, 0);
+    const dow = (nowMon.getDay() + 6) % 7;
+    nowMon.setDate(nowMon.getDate() - dow);
+    const monday9 = nowMon.getTime() + 9 * 3600 * 1000;
+    if (now >= monday9 && sp.weeklyReportDate !== api.weekKey(monday9)) {
+      sp.weeklyReportDate = api.weekKey(monday9);
+      const report = api.buildWeeklyReport(sp, now);
+      api.broadcast(sp.id, 'weeklyReport', { report });
+      api.pushNotice(sp, `📅 本周空间周报：会议 ${report.meetings} · 借用 ${report.borrows} · 申领 ${report.requests} · 报修 ${report.repairs}（已解决 ${report.resolvedRepairs}）`, 'system', '系统');
+    }
   }
 }, 15000);
 

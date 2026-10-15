@@ -51,13 +51,15 @@
   - 状态：`waiting`（候补中）/ `promoted`（已晋升，即转为真实预约）/ `cancelled`（已取消）/ `expired`（已过期）。
 
 ### 工具借用（tools）
-- `tool`: `{ id, name, category, total, available, location, description }`
+- `tool`: `{ id, name, category, total, available, minAvailable, location, description }`
   - `category`: 测试电脑 / 测试机器 / 测试手机 / 其它
+  - `minAvailable`: 库存告急阈值（默认 1），`available <= minAvailable` 视为库存告急（`toolsPublic` 输出 `lowStock`）
 - `tool_borrow`: `{ id, toolId, borrowerAccount, borrowerName, qty, borrowedAt, dueAt?, returnedAt?, status, extensions? }`
   - 状态：`borrowed` / `returned`
   - 借出时 `available -= qty`，归还时 `available += qty`；`available < qty` 不可借。
   - 默认归还期限为借出后 7 天（`dueAt`），借用人可「续借」延长 1-30 天；`extensions` 记录已续借次数，最多 2 次，逾期由 `dueAt` 判定。
   - 自定义归还期限：借用时可带 `dueAt`（至少晚于当前时间 30 分钟、最长 90 天），用于特殊设备临时借用。
+   - 库存告急：借用 / 归还 / 调整库存后同步计算 `lowStock`；可用数跌破 `minAvailable` 时首次向管理员下发 `toolLowStock` 并写入公告，恢复后清除通知标记，以便下次再次跌破时重新提醒。
 - `tool_waitlist`: `{ id, toolId, account, name, qty, status, createdAt, promotedAt?, borrowId? }`
   - 状态：`waiting`（排队中）/ `promoted`（已晋升为借用）。
   - 库存不足（`qty > available`）时可加入排队；归还或调整库存释放库存后，按先来先服务把第一位晋升为真实借用，并向该成员推送 `toolWaitlistPromoted` 通知，同一人对同一设备只保留一条排队。
@@ -113,7 +115,7 @@
 | `roomWaitlist` / `roomWaitlistCancel` | 时段冲突时加入候补 / 取消自己的候补 | member / owner |
 | `roomRate` | 给已结束的会议给会议室评分（1-5 分 + 可选评价） | owner / admin |
 | `roomFavorite` | 收藏 / 取消收藏会议室 | member |
-| `toolCreate` / `toolDelete` / `toolAdjust` | 增删设备 / 调整库存 | admin |
+| `toolCreate` / `toolDelete` / `toolAdjust` | 增删设备 / 调整库存（`toolAdjust` 可带 `minAvailable` 修改库存告急阈值） | admin |
 | `toolBorrow` / `toolReturn` / `toolExtend` / `toolWaitlist` | 借用（可带 `dueAt` 自定义归还时间） / 归还 / 续借设备 / 库存不足时排队 | member |
 | `materialRequest` / `materialCancel` | 提交 / 取消申领（提交可带 `templateId` 使用模板） | member / owner |
 | `materialTemplateCreate` / `materialTemplateDelete` | 管理员维护常用物资模板 | admin |
@@ -133,7 +135,7 @@
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，
 以及 `rooms`（含 `rooms` / `reservations` / `waitlist` / `waitlistTotal`）、`tools`、`materials`（含 `requests` / `templates`）、`repairs`、`visitors`、`stalls`、`users`、`leaderboard`（含 `account`、`role`、`display`），
-另有 `roomStats`、`spacePaused`、`roomWaitlistPromoted`、`roomRated`、`roomFavorites`、`repairEscalated` 等即时广播；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows`）。
+另有 `roomStats`、`spacePaused`、`roomWaitlistPromoted`、`roomRated`、`roomFavorites`、`repairEscalated`、`toolLowStock`、`weeklyReport` 等即时广播；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows`）。
 
 ## 5. 前端
 
@@ -252,10 +254,14 @@
 | 借用记录导出 | 工具借用页一键导出全部借用记录 CSV（自动拉取分页） | 复用 `fetchPage`(`borrows`) |
 | 会议室改期 | 待开始预约可调整时段，校验所有权、时段合法性与冲突（排除自身），成功后更新并广播 | `reservationReschedule` / `reservationRescheduled` |
 | 会议室实际到场时长 | 开始/结束时记录实际到场起止时间，累计个人到场时长并纳入会议室统计 | `roomStart` / `roomEnd`（复用 `stats` + `roomStats` + `leaderboard`） |
+| 低库存预警 | 设备可设置库存告急阈值，借用 / 归还 / 调整库存后自动判定 `lowStock`；首次跌破阈值时向管理员下发 `toolLowStock` 并写入公告，恢复后重置提醒标记 | `toolCreate` / `toolAdjust`(`minAvailable`)、服务端下发 `toolLowStock` |
+| 空间周报 | 每周一 09:00 自动汇总本周活动量（会议数 / 会议分钟数、借用、申领（含已满足）、报修（含已解决）、访客、待处理报修 / 申领、库存告急设备），广播全员并写入公告，当天只发一次 | 服务端下发 `weeklyReport` + 公告 |
+| 会议室向导成就 | 给会议室评分累计 3 次解锁「会议室向导」徽章 | 复用 `stats.roomRatesGiven` + `achievements` |
+| 收藏家成就 | 收藏会议室累计 3 个解锁「收藏家」徽章 | 复用 `stats.favoriteCount` + `achievements` |
 
 ### 客户端→服务端新增消息
-`setStatus`、`announce`、`spaceRename`、`spacePause`、`spaceAdminSet`、`spaceKick`、`suggestRoom`、`remindReturn`、`toolExtend`、`toolBorrow`(`dueAt` 自定义归还时间)、`roomBook`(周期 `repeat`/`repeatCount`)、`reservationCancelSeries`、`reservationReschedule`、`roomRate`、`roomFavorite`、`roomWaitlist`、`roomWaitlistCancel`、`materialAssign`、`repairAssign`、`repairUpdate`(优先级)、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`visitorCheckin`、`profileUpdate`、`passwordChange`、`toggleEmergency`、`fetchPage`(`borrows` 等分页模块)；服务端相应广播/单发
-`users`(含 `status`、`emergencyMode`、`role`) 、`notices`、`suggestRooms`、`borrowReminder`、`roomReminder`、`borrowDueSoon`、`materialAssigned`、`materialFulfilled`、`materialSla`、`repairAssigned`、`repairInProgress`、`repairResolved`、`repairSla`、`repairEscalated`、`adminSet`、`spaceKicked`、`digest`、`visitors`、`spaceRenamed`、`spacePaused`、`roomWaitlistPromoted`、`reservationRescheduled`、`rooms`(含 `waitlist`)、`roomRated`、`roomFavorites`、`visitorCheckinNotification`、`visitorArrived`、`visitorLeft`、`visitorReminder`。
+`setStatus`、`announce`、`spaceRename`、`spacePause`、`spaceAdminSet`、`spaceKick`、`suggestRoom`、`remindReturn`、`toolExtend`、`toolBorrow`(`dueAt` 自定义归还时间)、`toolCreate` / `toolAdjust`(`minAvailable` 库存告急阈值)、`roomBook`(周期 `repeat`/`repeatCount`)、`reservationCancelSeries`、`reservationReschedule`、`roomRate`、`roomFavorite`、`roomWaitlist`、`roomWaitlistCancel`、`materialAssign`、`repairAssign`、`repairUpdate`(优先级)、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`visitorCheckin`、`profileUpdate`、`passwordChange`、`toggleEmergency`、`fetchPage`(`borrows` 等分页模块)；服务端相应广播/单发
+`users`(含 `status`、`emergencyMode`、`role`) 、`notices`、`suggestRooms`、`borrowReminder`、`roomReminder`、`borrowDueSoon`、`materialAssigned`、`materialFulfilled`、`materialSla`、`repairAssigned`、`repairInProgress`、`repairResolved`、`repairSla`、`repairEscalated`、`adminSet`、`spaceKicked`、`digest`、`visitors`、`spaceRenamed`、`spacePaused`、`roomWaitlistPromoted`、`reservationRescheduled`、`rooms`(含 `waitlist`)、`roomRated`、`roomFavorites`、`visitorCheckinNotification`、`visitorArrived`、`visitorLeft`、`visitorReminder`、`toolLowStock`、`weeklyReport`。
 
 ## 9. 代码架构（多模块拆分）
 
@@ -263,7 +269,7 @@
 
 ```
 server.js        入口：Express + WS 分发 + 定时器 + 心跳 + 优雅停机 + 启动
-src/context.js   共享上下文：状态 + 常量 + 基础工具 + 持久化(写合并) + 认证 + 序列化 + 广播 + 坑位成就 + 每日看点
+src/context.js   共享上下文：状态 + 常量 + 基础工具 + 持久化(写合并) + 认证 + 序列化 + 广播 + 坑位成就 + 每日看点 + 空间周报
 src/http.js      HTTP 路由：/api/spaces、/api/register
 src/session.js   会话：进入/切换空间、登录（含 digest）
 src/modules/     rooms / tools / materials / repairs / visitors / profile / stalls / extras（各领域处理函数）
@@ -271,7 +277,7 @@ src/modules/     rooms / tools / materials / repairs / visitors / profile / stal
 
 - 各领域模块是纯函数工厂 `module.exports = (api)=>({...})`，由 `server.js` 注入共享上下文 `api`，无全局状态、便于单测。
 - 定时器、心跳、优雅停机属于进程级关注点，保留在入口。
-- 该拆分不改变任何对外协议与行为，e2e（216 项）在内存与 PostgreSQL 双模式下均通过。
+- 该拆分不改变任何对外协议与行为，e2e（235 项）在内存与 PostgreSQL 双模式下均通过。
 
 ## 10. 健康检查、自测与 CI（本版本新增）
 
@@ -279,9 +285,9 @@ src/modules/     rooms / tools / materials / repairs / visitors / profile / stal
 - **npm 脚本**：
   - `npm start`：启动服务
   - `npm run lint`：对 `server.js` / `public` / `src/` / `test/` 全部 JS 执行 `node --check` 语法检查（`scripts/lint.js`）
-  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁与进度、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化、每日看点、我的待办、空间活跃趋势、用户广播、会议室时长累计 / 实际到场时长、周期预约展开、借用逾期判定、会议室占用率统计、报修优先级序列化、借用记录序列化、工具在借明细序列化、工具排队序列化、会议室候补序列化、访客签到码序列化、借用逾期提醒、会议室开始前提醒、借用到期前提醒、访客预计到访提醒、报修 SLA 超时提醒、申领 SLA 超时提醒、报修重复检测、管理员成员管理、通知统一入口、报修处理时长统计、成员移除，152 项）
+  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁与进度、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化、每日看点、我的待办、空间活跃趋势、用户广播、会议室时长累计 / 实际到场时长、周期预约展开、借用逾期判定、会议室占用率统计、报修优先级序列化、借用记录序列化、工具在借明细序列化、工具排队序列化、会议室候补序列化、访客签到码序列化、借用逾期提醒、会议室开始前提醒、借用到期前提醒、访客预计到访提醒、报修 SLA 超时提醒、申领 SLA 超时提醒、报修重复检测、管理员成员管理、通知统一入口、报修处理时长统计、成员移除，182 项）
   - `npm run test:restore`：前端「自动恢复会话」回归测试（`test/restore.js`，vm stub 加载内联脚本，无需服务）
   - `npm run smoke`：快速冒烟（`test/smoke.js`）——健康检查、首页与大屏可达、WS 连接、登录、收到广播
-  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，216 项）
+  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，235 项）
 - **CI**：`.github/workflows/ci.yml` 在 push 到 `main` 或 pull_request 时自动：`npm ci` → `npm run lint` → `docker compose config` 校验 → `docker build` 构建校验 → 内存模式启动服务 → `npm run smoke` → `npm test`。用不可达的 PG 参数强制内存模式，无需外部数据库。
 - **环境变量**：见 `.env.example`（`PORT`、`PGHOST`、`PGPORT`、`PGUSER`、`PGPASSWORD`、`PGDATABASE`）；`.env` 已加入 `.gitignore`。

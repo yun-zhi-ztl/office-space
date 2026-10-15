@@ -955,7 +955,7 @@ async function runTests() {
     await sendMsg(wA, { type: 'getAchievements' });
     const ach = last(wA, 'achievements');
     assert(ach && Array.isArray(ach.achievements), '成就墙返回 achievements 数组');
-    assert(ach.achievements.length === 11, '成就墙含 11 个成就');
+    assert(ach.achievements.length === 13, '成就墙含 13 个成就');
     assert(ach.achievements.every((a) => a.id && a.name && a.desc && a.icon), '每项成就含 id/name/desc/icon');
     assert(ach.achievements.every((a) => a.current != null && a.target != null && a.pct != null && typeof a.unlocked === 'boolean'), '每项成就含进度字段');
     assert(ach.achievements.find((a) => a.id === 'punctual').target === 3, '守时达人目标值为 3');
@@ -1137,6 +1137,45 @@ async function runTests() {
     const repNormal = repList2 && repList2.repairs.find((r) => r.priority === 'normal');
     assert(repNormal && repNormal.escalated === false, '普通优先级报修不进入升级队列');
     wE.close();
+  }
+
+  // ========== 测试26: 低库存预警 ==========
+  console.log('\n📋 测试26: 低库存预警');
+  {
+    const spL = (await httpJson('POST', '/api/spaces', { name: '低库存办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aL = 'low_' + runKey;
+    await reg(aL, 'pw', '低库存管理员');
+    const wL = await createWSClient(); await loginTo(wL, spL.id, aL, 'pw');
+    await sendMsg(wL, { type: 'toolCreate', name: '测试机X', category: '测试电脑', total: 1, minAvailable: 1 });
+    const toolsL = last(wL, 'tools');
+    const toolL = toolsL && toolsL.tools[0];
+    assert(toolL && toolL.lowStock === true, '低库存设备返回 lowStock=true');
+    assert(toolL && toolL.minAvailable === 1, '低库存设备返回 minAvailable 阈值');
+    const lowMsg = mk(wL, 'toolLowStock');
+    assert(lowMsg.length >= 1 && lowMsg[lowMsg.length - 1].toolName === '测试机X', '创建即触发管理员库存告急通知');
+    wL.close();
+  }
+
+  // ========== 测试27: 库存阈值校验 ==========
+  console.log('\n📋 测试27: 库存阈值校验');
+  {
+    const spM = (await httpJson('POST', '/api/spaces', { name: '阈值校验办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aM = 'min_' + runKey;
+    await reg(aM, 'pw', '阈值管理员');
+    const wM = await createWSClient(); await loginTo(wM, spM.id, aM, 'pw');
+    await sendMsg(wM, { type: 'toolCreate', name: '测试机Y', category: '测试电脑', total: 2 });
+    const toolsM = last(wM, 'tools');
+    const toolM = toolsM && toolsM.tools[0];
+    assert(toolM && toolM.minAvailable === 1, '未指定阈值时默认 1');
+    // 创建时阈值超过总库存应被拒
+    await sendMsg(wM, { type: 'toolCreate', name: '测试机Z', category: '测试电脑', total: 1, minAvailable: 2 });
+    const errCreate = mk(wM, 'error');
+    assert(errCreate.length > 0 && errCreate[errCreate.length - 1].message.includes('库存阈值需为 0 到总库存之间'), '创建阈值超过总库存被拒');
+    // 调整时阈值超过总库存应被拒
+    await sendMsg(wM, { type: 'toolAdjust', toolId: toolM.id, total: 2, minAvailable: 3 });
+    const errAdjust = mk(wM, 'error');
+    assert(errAdjust.length > 0 && errAdjust[errAdjust.length - 1].message.includes('库存阈值需为 0 到总库存之间'), '调整阈值超过总库存被拒');
+    wM.close();
   }
 
   // ========== 总结 ==========
