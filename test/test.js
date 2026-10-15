@@ -526,6 +526,49 @@ async function runTests() {
   const errRepAssign = mk(w4, 'error');
   assert(errRepAssign.length > 0 && errRepAssign[errRepAssign.length - 1].message.includes('仅上报人或管理员'), '非上报人指派被拒');
 
+  // ========== 测试6d: 报修工单编号 ==========
+  console.log('\n📋 测试6d: 报修工单编号');
+  await sendMsg(w2, { type: 'repairCreate', category: '灯光', location: '2F 工位', description: '插座无电' });
+  let rep6d = last(w2, 'repairs');
+  const rep6dItem = rep6d.repairs[0];
+  assert(rep6dItem && rep6dItem.code && /^RP-\d{8}-[A-Z0-9]+$/.test(rep6dItem.code), '报修生成 RP-日期-编号 工单号');
+  const rep6dId = rep6dItem.id;
+
+  // ========== 测试5c: 物资常用模板 ==========
+  console.log('\n📋 测试5c: 物资常用模板（管理员维护 + 快捷申领）');
+  await sendMsg(w1, { type: 'materialTemplateCreate', name: '5号电池', defaultQty: 4, defaultUnit: '节', defaultReason: '遥控器备用' });
+  let mats5c = last(w1, 'materials');
+  assert(mats5c && mats5c.templates && mats5c.templates.length === 1 && mats5c.templates[0].name === '5号电池', '管理员创建常用模板成功');
+  const tplId = mats5c.templates[0].id;
+  // 成员用模板快捷申领
+  await sendMsg(w2, { type: 'materialRequest', templateId: tplId });
+  mats5c = last(w2, 'materials');
+  const tplReq = mats5c.requests.find(r => r.name === '5号电池');
+  assert(tplReq && tplReq.qty === 4 && tplReq.unit === '节' && tplReq.reason === '遥控器备用', '模板快捷申领自动填充名称/数量/单位/说明');
+  // 非管理员删除模板被拒
+  await sendMsg(w2, { type: 'materialTemplateDelete', templateId: tplId });
+  const errTplRBAC = mk(w2, 'error').pop();
+  assert(errTplRBAC && errTplRBAC.message.includes('仅管理员'), '非管理员删除模板被拒');
+  await sendMsg(w1, { type: 'materialTemplateDelete', templateId: tplId });
+  mats5c = last(w1, 'materials');
+  assert(mats5c && mats5c.templates.length === 0, '管理员删除模板成功');
+
+  // ========== 测试11d: 公告回应 ==========
+  console.log('\n📋 测试11d: 公告回应（点赞/取消）');
+  await sendMsg(w1, { type: 'announce', text: '今晚 22:00 停空调检修' });
+  const annNotice = last(w1, 'notices').notices[0];
+  assert(annNotice && annNotice.reactions && Array.isArray(annNotice.reactions), '公告包含 reactions 数组');
+  await sendMsg(w2, { type: 'noticeReact', noticeId: annNotice.id, reaction: '👍' });
+  const reacted = last(w2, 'notices').notices.find(n => n.id === annNotice.id);
+  assert(reacted && reacted.reactions.some(r => r.account === MEMBER && r.reaction === '👍'), '成员对公告点赞成功');
+  await sendMsg(w2, { type: 'noticeReact', noticeId: annNotice.id, reaction: '👍' });
+  const unreacted = last(w2, 'notices').notices.find(n => n.id === annNotice.id);
+  assert(unreacted && !unreacted.reactions.some(r => r.account === MEMBER && r.reaction === '👍'), '再次点击取消自己的点赞');
+  // 无效回应被拒
+  await sendMsg(w2, { type: 'noticeReact', noticeId: annNotice.id, reaction: '👍👍' });
+  const errReaction = mk(w2, 'error').pop();
+  assert(errReaction && errReaction.message.includes('无效的回应表情'), '无效回应表情被拒');
+
   // ========== 测试7: 坑位看板 ==========
   console.log('\n📋 测试7: 坑位看板（预约/提前确认被拒/评分校验）');
   const stall0 = last(w1, 'stalls');

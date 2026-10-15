@@ -18,8 +18,13 @@ module.exports = function repairsModule(api) {
       const priority = REPAIR_PRIORITIES.includes(msg.priority) ? msg.priority : 'normal';
       if (!location || !description) return sendTo(ws, serError('请填写故障位置与描述'));
       const dup = findDuplicateRepair(space, category, location);
-      if (dup) return sendTo(ws, { type: 'error', code: 'duplicateRepair', repairId: dup.id, category: dup.category, location: dup.location, message: `该位置已有相同类型的未处理报修（#${dup.id}），请先处理或取消后再提交` });
-      const rep = { id: genId('rp', null), reporterAccount: user.account, reporterName: user.nickname, category, location, description, priority, status: 'reported', createdAt: Date.now(), updatedAt: Date.now(), slaRemindedAt: null };
+      if (dup) return sendTo(ws, { type: 'error', code: 'duplicateRepair', repairId: dup.id, repairCode: dup.code, category: dup.category, location: dup.location, message: `该位置已有相同类型的未处理报修（${dup.code}），请先处理或取消后再提交` });
+      const now = Date.now();
+      const d = new Date(now);
+      const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+      const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
+      const code = `RP-${ymd}-${suffix}`;
+      const rep = { id: genId('rp', null), code, reporterAccount: user.account, reporterName: user.nickname, category, location, description, priority, status: 'reported', createdAt: now, updatedAt: now, slaRemindedAt: null };
       space.repairs.set(rep.id, rep);
       user.stats.repairCount = (user.stats.repairCount || 0) + 1;
       recordWeekly(user, 'repairs');

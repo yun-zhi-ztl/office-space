@@ -182,6 +182,7 @@ function createContext() {
       else if (r.kind === 'tool') sp.tools.push(data);
       else if (r.kind === 'borrow') sp.borrows.set(data.id, data);
       else if (r.kind === 'material') sp.materialRequests.set(data.id, data);
+      else if (r.kind === 'material_template') sp.materialTemplates.set(data.id, data);
       else if (r.kind === 'repair') sp.repairs.set(data.id, data);
       else if (r.kind === 'visitor') sp.visitors.set(data.id, data);
       else if (r.kind === 'notice') { sp.notices.push(data); sp.notices.sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
@@ -392,7 +393,7 @@ function createContext() {
       admins: new Set(), clients: new Set(), notices: [],
       paused: false, pausedReason: '',
       rooms: [], roomReservations: new Map(), roomWaitlist: new Map(), reservations: new Map(),
-      tools: [], borrows: new Map(), toolWaitlist: new Map(), materialRequests: new Map(), repairs: new Map(), visitors: new Map(), urges: new Map(),
+      tools: [], borrows: new Map(), toolWaitlist: new Map(), materialRequests: new Map(), materialTemplates: new Map(), repairs: new Map(), visitors: new Map(), urges: new Map(),
     };
     sp.stalls = buildStalls(squat == null ? 4 : squat, urinal == null ? 3 : urinal);
     spaces.set(id, sp);
@@ -495,6 +496,12 @@ function createContext() {
       };
     }).sort((a, b) => a.createdAt - b.createdAt);
   }
+  function materialTemplatePublic(t) {
+    return { id: t.id, name: t.name, defaultQty: t.defaultQty, defaultUnit: t.defaultUnit || '', defaultReason: t.defaultReason || '', createdAt: t.createdAt };
+  }
+  function materialsTemplatesPublic(sp) {
+    return [...sp.materialTemplates.values()].map(materialTemplatePublic).sort((a, b) => a.createdAt - b.createdAt);
+  }
   function materialsPublic(sp, info) {
     return [...sp.materialRequests.values()].map((m) => ({
       id: m.id, name: m.name, qty: m.qty, unit: m.unit, reason: m.reason, status: m.status,
@@ -509,7 +516,7 @@ function createContext() {
   }
   function repairsPublic(sp, info) {
     return [...sp.repairs.values()].map((r) => ({
-      id: r.id, category: r.category, priority: r.priority || 'normal', location: r.location, description: r.description, status: r.status,
+      id: r.id, code: r.code || '', category: r.category, priority: r.priority || 'normal', location: r.location, description: r.description, status: r.status,
       reporterAccount: r.reporterAccount,
       reporterName: info.get(r.reporterAccount) ? info.get(r.reporterAccount).display : r.reporterName,
       handlerAccount: r.handlerAccount || null,
@@ -624,7 +631,7 @@ function createContext() {
   function noticesBroadcast(sp) { broadcast(sp.id, 'notices', { notices: sp.notices }); }
   // 公告/通知统一入口：写入 + 持久化 + 广播；超过 50 条自动裁剪并删除旧公告
   function pushNotice(space, text, fromAccount, fromName) {
-    const notice = { id: genId('n', null), text, from: fromName || fromAccount || '系统', ts: Date.now() };
+    const notice = { id: genId('n', null), text, from: fromName || fromAccount || '系统', ts: Date.now(), reactions: [] };
     space.notices.unshift(notice);
     if (space.notices.length > 50) {
       const removed = space.notices.splice(50);
@@ -801,7 +808,7 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
+    roomPublic, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
     // 广播
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, noticesBroadcast, pushNotice, visitorsBroadcast,
     // 坑位辅助

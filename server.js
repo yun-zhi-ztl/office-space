@@ -106,7 +106,7 @@ wss.on('connection', (ws) => {
         rooms.handleRooms(ws, user, space, msg); break;
       case 'toolCreate': case 'toolDelete': case 'toolAdjust': case 'toolBorrow': case 'toolReturn': case 'toolExtend': case 'toolWaitlist': case 'remindOverdue':
         tools.handleTools(ws, user, space, msg); break;
-      case 'materialRequest': case 'materialCancel': case 'materialFulfill': case 'materialAssign':
+      case 'materialRequest': case 'materialCancel': case 'materialFulfill': case 'materialAssign': case 'materialTemplateCreate': case 'materialTemplateDelete':
         materials.handleMaterials(ws, user, space, msg); break;
       case 'repairCreate': case 'repairUpdate': case 'repairAssign':
         repairs.handleRepairs(ws, user, space, msg); break;
@@ -125,6 +125,8 @@ wss.on('connection', (ws) => {
       case 'suggestRoom': extras.suggestRoom(ws, user, space, msg); break;
       case 'remindReturn': extras.remindReturn(ws, user, space, msg); break;
       case 'removeNotice': extras.removeNotice(ws, user, space, msg); break;
+      case 'noticeReact': extras.noticeReact(ws, user, space, msg); break;
+      case 'noticeUnreact': extras.noticeUnreact(ws, user, space, msg); break;
       default:
         api.sendTo(ws, api.serError('未知操作'));
     }

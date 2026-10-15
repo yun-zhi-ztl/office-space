@@ -1,7 +1,7 @@
 'use strict';
 // 扩展功能：setStatus / announce / suggestRoom / remindReturn + 公告推送
 module.exports = function extrasModule(api) {
-  const { users, broadcastUsers, sendTo, serError, roomPublic, noticesBroadcast, isAdmin, saveSpace, deleteEntity, broadcast, getUserByAccount, sendToUser, pushNotice, broadcastStalls, broadcastLeaderboard } = api;
+  const { users, broadcastUsers, sendTo, serError, roomPublic, noticesBroadcast, isAdmin, saveSpace, saveEntity, deleteEntity, broadcast, getUserByAccount, sendToUser, pushNotice, broadcastStalls, broadcastLeaderboard } = api;
 
   function handleSetStatus(ws, user, space, msg) {
     const label = (msg.label || '').trim().slice(0, 8) || '在岗';
@@ -128,5 +128,33 @@ module.exports = function extrasModule(api) {
     sendTo(ws, { type: 'noticeRemoved', noticeId: notice.id });
   }
 
-  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace, adminSet: handleAdminSet, kick: handleKick, pause: handlePause, removeNotice: handleRemoveNotice };
+  const NOTICE_REACTIONS = ['👍', '🎉', '😮', '🤝', '🔥'];
+  function findNoticeReaction(notice, account, reaction) {
+    return notice.reactions.findIndex((r) => r.account === account && r.reaction === reaction);
+  }
+  function handleNoticeReact(ws, user, space, msg) {
+    const notice = space.notices.find((n) => n.id === msg.noticeId);
+    if (!notice) return sendTo(ws, serError('公告不存在'));
+    const reaction = String(msg.reaction || '').slice(0, 4);
+    if (!NOTICE_REACTIONS.includes(reaction)) return sendTo(ws, serError('无效的回应表情'));
+    const idx = findNoticeReaction(notice, user.account, reaction);
+    if (idx >= 0) notice.reactions.splice(idx, 1);
+    else notice.reactions.push({ account: user.account, reaction });
+    saveEntity(space.id, 'notice', notice.id, notice);
+    noticesBroadcast(space);
+    sendTo(ws, { type: 'noticeReactionUpdated', noticeId: notice.id });
+  }
+  function handleNoticeUnreact(ws, user, space, msg) {
+    const notice = space.notices.find((n) => n.id === msg.noticeId);
+    if (!notice) return sendTo(ws, serError('公告不存在'));
+    const reaction = String(msg.reaction || '').slice(0, 4);
+    const idx = findNoticeReaction(notice, user.account, reaction);
+    if (idx < 0) return sendTo(ws, serError('你尚未对该公告使用此回应'));
+    notice.reactions.splice(idx, 1);
+    saveEntity(space.id, 'notice', notice.id, notice);
+    noticesBroadcast(space);
+    sendTo(ws, { type: 'noticeReactionUpdated', noticeId: notice.id });
+  }
+
+  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace, adminSet: handleAdminSet, kick: handleKick, pause: handlePause, removeNotice: handleRemoveNotice, noticeReact: handleNoticeReact, noticeUnreact: handleNoticeUnreact };
 };
