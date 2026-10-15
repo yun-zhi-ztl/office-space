@@ -379,7 +379,7 @@ function createContext() {
       admins: new Set(), clients: new Set(), notices: [],
       paused: false, pausedReason: '',
       rooms: [], roomReservations: new Map(), roomWaitlist: new Map(), reservations: new Map(),
-      tools: [], borrows: new Map(), materialRequests: new Map(), repairs: new Map(), visitors: new Map(), urges: new Map(),
+      tools: [], borrows: new Map(), toolWaitlist: new Map(), materialRequests: new Map(), repairs: new Map(), visitors: new Map(), urges: new Map(),
     };
     sp.stalls = buildStalls(squat == null ? 4 : squat, urinal == null ? 3 : urinal);
     spaces.set(id, sp);
@@ -465,6 +465,17 @@ function createContext() {
         activeBorrows: active.map((b) => { const days = Math.floor((now - b.borrowedAt) / 86400000); return { id: b.id, qty: b.qty, borrowerAccount: b.borrowerAccount, borrowerName: info.get(b.borrowerAccount) ? info.get(b.borrowerAccount).display : b.borrowerName, borrowedAt: b.borrowedAt, dueAt: b.dueAt || null, days, extensions: b.extensions || 0, overdue: borrowOverdue(b, now), reminded: !!b.lastRemindedAt, dueSoon: b.status === 'borrowed' && !!b.dueAt && now >= b.dueAt - BORROW_SOON_WINDOW_MS && now < b.dueAt }; }),
       };
     });
+  }
+  function toolWaitlistPublic(sp, info) {
+    if (!info) info = spaceUserInfo(sp.id);
+    return [...sp.toolWaitlist.values()].filter((w) => w.status === 'waiting').map((w) => {
+      const tool = sp.tools.find((t) => t.id === w.toolId);
+      return {
+        id: w.id, toolId: w.toolId, toolName: tool ? tool.name : '',
+        account: w.account, name: info.get(w.account) ? info.get(w.account).display : w.name,
+        qty: w.qty, status: w.status, createdAt: w.createdAt,
+      };
+    }).sort((a, b) => a.createdAt - b.createdAt);
   }
   function materialsPublic(sp, info) {
     return [...sp.materialRequests.values()].map((m) => ({
@@ -755,7 +766,7 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, reservationPublic, roomWaitlistPublic, toolsPublic, materialsPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
+    roomPublic, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
     // 广播
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, noticesBroadcast, visitorsBroadcast,
     // 坑位辅助

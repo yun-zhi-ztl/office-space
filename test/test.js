@@ -272,6 +272,32 @@ async function runTests() {
   assert(errOverdue && errOverdue.message.includes('暂无逾期'), '无逾期时批量催还被拒');
   await sendMsg(w2, { type: 'toolReturn', borrowId: bwC.id });
 
+  // ========== 测试4d: 工具排队（加入/晋升/自动借用） ==========
+  console.log('\n📋 测试4d: 工具排队（加入/晋升/自动借用）');
+  await sendMsg(w1, { type: 'toolCreate', name: '排队测试机', category: '测试机器', total: 2 });
+  let wlt0 = last(w1, 'tools');
+  const wlToolId = wlt0.tools.find(t => t.name === '排队测试机').id;
+  await sendMsg(w2, { type: 'toolBorrow', toolId: wlToolId, qty: 2 });
+  wlt0 = last(w2, 'tools');
+  assert(wlt0.tools.find(t => t.id === wlToolId).available === 0, '库存被借光，可用为 0');
+  const wlb = wlt0.tools.find(t => t.id === wlToolId).activeBorrows[0].id;
+  await sendMsg(w1, { type: 'toolWaitlist', toolId: wlToolId, qty: 2 });
+  assert(mk(w1, 'toolWaitlistJoined').length >= 1, '库存不足时可加入排队');
+  const wlList = last(w1, 'tools').waitlist;
+  assert(wlList && wlList.some(w => w.toolId === wlToolId && w.account === ADMIN), '排队记录随访播');
+  await sendMsg(w1, { type: 'toolWaitlist', toolId: wlToolId, qty: 2 });
+  const errDupWl = mk(w1, 'error').pop();
+  assert(errDupWl && errDupWl.message.includes('已在排队'), '重复排队被拒');
+  await sendMsg(w2, { type: 'toolReturn', borrowId: wlb });
+  const promoted = mk(w1, 'toolWaitlistPromoted');
+  assert(promoted.length >= 1 && promoted[promoted.length - 1].toolId === wlToolId, '归还后排队晋升通知送达');
+  const wlt1 = last(w1, 'tools');
+  const wlTool = wlt1.tools.find(t => t.id === wlToolId);
+  assert(wlTool && wlTool.available === 0, '晋升后库存再次被借出');
+  assert(wlTool.activeBorrows.length === 1 && wlTool.activeBorrows[0].borrowerAccount === ADMIN, '晋升后自动为排队人创建借用');
+  assert(!wlt1.waitlist.some(w => w.toolId === wlToolId), '晋升后排队记录移出公开队列');
+  await sendMsg(w1, { type: 'toolReturn', borrowId: wlTool.activeBorrows[0].id });
+
   // ========== 测试5: 物资申领 ==========
   console.log('\n📋 测试5: 物资申领（提交/处理/自处理拒绝）');
   await sendMsg(w2, { type: 'materialRequest', name: '5号电池', qty: 4, unit: '节', reason: '遥控器没电' });

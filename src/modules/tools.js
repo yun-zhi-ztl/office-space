@@ -1,11 +1,41 @@
 'use strict';
 // 工具借用模块：toolCreate / toolDelete / toolAdjust / toolBorrow / toolReturn
 module.exports = function toolsModule(api) {
-  const { spaceUserInfo, toolsPublic, broadcast, TOOL_CATEGORIES, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToUser, sendToAccount, dueBorrowReminders } = api;
+  const { spaceUserInfo, toolsPublic, toolWaitlistPublic, broadcast, TOOL_CATEGORIES, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToUser, sendToAccount, checkAchievements, dueBorrowReminders } = api;
 
   function toolsBroadcast(space) {
     const info = spaceUserInfo(space.id);
-    broadcast(space.id, 'tools', { tools: toolsPublic(space, info) });
+    broadcast(space.id, 'tools', { tools: toolsPublic(space, info), waitlist: toolWaitlistPublic(space, info) });
+  }
+
+  // 借用归还/库存调整后，按排队顺序晋升「在借已归还」的第一位
+  function promoteToolWaitlist(space) {
+    let changed = false;
+    const now = Date.now();
+    for (const entry of [...space.toolWaitlist.values()]) {
+      if (entry.status !== 'waiting') continue;
+      const tool = space.tools.find((t) => t.id === entry.toolId);
+      if (!tool || tool.available < entry.qty) continue;
+      tool.available -= entry.qty;
+      const borrow = { id: genId('bw', null), toolId: tool.id, borrowerAccount: entry.account, borrowerName: entry.name, qty: entry.qty, borrowedAt: now, dueAt: now + 7 * 86400000, returnedAt: null, status: 'borrowed', lastRemindedAt: null, soonRemindedAt: null, extensions: 0 };
+      space.borrows.set(borrow.id, borrow);
+      entry.status = 'promoted';
+      entry.promotedAt = now;
+      entry.borrowId = borrow.id;
+      saveEntity(space.id, 'tool', tool.id, tool);
+      saveEntity(space.id, 'borrow', borrow.id, borrow);
+      saveEntity(space.id, 'toolWaitlist', entry.id, entry);
+      const user = getUserByAccount(entry.account);
+      if (user) {
+        user.stats.borrowCount = (user.stats.borrowCount || 0) + 1;
+        recordWeekly(user, 'borrows');
+        checkAchievements(user);
+        saveProfile(user);
+        sendToUser(user.id, { type: 'toolWaitlistPromoted', toolId: tool.id, toolName: tool.name, borrowId: borrow.id });
+      }
+      changed = true;
+    }
+    return changed;
   }
 
   function handleTools(ws, user, space, msg) {
@@ -41,8 +71,24 @@ module.exports = function toolsModule(api) {
       if (tool.available + diff < 0) return sendTo(ws, serError('无法将库存调低到少于当前在借数量'));
       tool.total = total;
       tool.available += diff;
+      promoteToolWaitlist(space);
       saveEntity(space.id, 'tool', tool.id, tool);
       toolsBroadcast(space);
+    } else if (msg.type === 'toolWaitlist') {
+      if (space.paused) return sendTo(ws, serError('空间已暂停，暂不可排队'));
+      const tool = space.tools.find((t) => t.id === msg.toolId);
+      if (!tool) return sendTo(ws, serError('设备不存在'));
+      const qty = parseInt(msg.qty, 10);
+      if (!Number.isInteger(qty) || qty < 1) return sendTo(ws, serError('请输入有效数量'));
+      if (qty > tool.total) return sendTo(ws, serError('所需数量超过库存'));
+      if (tool.available >= qty) return sendTo(ws, serError('当前库存充足，请直接借用'));
+      const exists = [...space.toolWaitlist.values()].find((w) => w.toolId === tool.id && w.account === user.account && w.status === 'waiting');
+      if (exists) return sendTo(ws, serError('你已在排队中'));
+      const entry = { id: genId('wl', null), toolId: tool.id, account: user.account, name: user.nickname, qty, status: 'waiting', createdAt: Date.now(), promotedAt: null, borrowId: null };
+      space.toolWaitlist.set(entry.id, entry);
+      saveEntity(space.id, 'toolWaitlist', entry.id, entry);
+      toolsBroadcast(space);
+      sendTo(ws, { type: 'toolWaitlistJoined', toolId: tool.id });
     } else if (msg.type === 'toolBorrow') {
       if (space.paused) return sendTo(ws, serError('空间已暂停，暂不可借用'));
       const tool = space.tools.find((t) => t.id === msg.toolId);
@@ -82,6 +128,7 @@ module.exports = function toolsModule(api) {
       borrow.status = 'returned';
       borrow.returnedAt = Date.now();
       tool.available = Math.min(tool.total, tool.available + borrow.qty);
+      promoteToolWaitlist(space);
       const borrower = getUserByAccount(borrow.borrowerAccount);
       if (borrower) {
         borrower.stats.borrowDuration += Math.max(0, Math.round((borrow.returnedAt - borrow.borrowedAt) / 60000));

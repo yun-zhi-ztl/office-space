@@ -52,7 +52,7 @@ function dispatch(m){
       localStorage.setItem('os_token',m.token); localStorage.setItem('os_space',S.space?S.space.id:S.lastSpace);
       $('#gate').style.display='none'; $('#app').style.display='flex'; renderAll(); break;
     case 'rooms': S.DB.rooms=m.rooms; S.DB.reservations=m.reservations; S.DB.revTotal=m.reservationTotal||0; S.DB.revOffset=S.DB.reservations.length; S.DB.waitlist=m.waitlist||[]; S.DB.waitlistTotal=m.waitlistTotal||0; break;
-    case 'tools': S.DB.tools=m.tools; break;
+    case 'tools': S.DB.tools=m.tools; S.DB.toolWaitlist=m.waitlist||[]; break;
     case 'materials': S.DB.requests=m.requests; S.DB.matTotal=m.total||0; S.DB.matOffset=S.DB.requests.length; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; break;
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
@@ -86,6 +86,8 @@ function dispatch(m){
     case 'reservation': toast('✔ 预约成功','success'); break;
     case 'cancelSuccess': toast('✔ 已取消','success'); break;
     case 'roomWaitlistPromoted': toast('🎉 候补已晋升：预约已自动创建（'+fmtTime(m.startAt)+'）','success'); render(); break;
+    case 'toolWaitlistJoined': toast('✔ 已加入排队，轮到你时会自动借用','success'); render(); break;
+    case 'toolWaitlistPromoted': toast('🎉 排队已晋升：'+(m.toolName||'设备')+' 已为你自动借用','success'); render(); break;
     case 'visitorCreated': toast('✔ 访客已登记，签到码：'+m.code,'success'); render(); break;
     case 'visitorCheckinNotification': toast('🔔 '+m.visitorName+' 已凭签到码到访','success'); render(); break;
     case 'visitorReminder': toast('🔔 '+m.visitorName+' 预计即将到访，请留意','warn'); render(); break;
@@ -433,15 +435,17 @@ function bookSugg(roomId){ const st=new Date($('#sgStart').value).getTime(), en=
 function renderTools(){
   const d=S.DB, me=S.me.account;
   const overdueCount=(d.tools||[]).reduce((a,t)=>a+(t.activeBorrows||[]).filter(b=>b.overdue).length,0);
+  const wl=(d.toolWaitlist||[]).filter(w=>w.status==='waiting');
+  const wlByTool={}; wl.forEach(w=>{ (wlByTool[w.toolId]=wlByTool[w.toolId]||[]).push(w); });
   $('#main').innerHTML = `<div class="topbar"><div><h1>工具借用</h1><div class="sub">测试电脑 / 测试机器 / 测试手机等在库设备的借还</div></div>
     ${S.admin?'<button class="btn pri" onclick="openToolCreate()">＋ 新增设备</button>':''}
     ${overdueCount?`<button class="btn danger" onclick="remindOverdue()">⏰ 批量催还 ${overdueCount} 人</button>`:''}
     <button class="btn" onclick="exportModuleCsv('borrows',BW_COLS)">导出 CSV</button></div>
     <div class="cards">${d.tools.map(t=>`<div class="card"><h3>${esc(t.name)} <span class="badge ${t.available>0?'ok':'bad'}">${t.available}/${t.total}</span></h3>
-      <div class="meta">${t.category}${t.location?' · '+esc(t.location):''}</div>
+      <div class="meta">${t.category}${t.location?' · '+esc(t.location):''}${wlByTool[t.id]&&wlByTool[t.id].length?` · 排队 ${wlByTool[t.id].length} 人`:''}${wlByTool[t.id]&&wlByTool[t.id].find(w=>w.account===me)?' · 你已排队':''}</div>
       <div class="bar"><i style="width:${t.total?Math.round(t.available/t.total*100):0}%"></i></div>
       <div class="foot fs">
-        ${t.available>0?`<button class="btn pri sm" onclick="openBorrow('${t.id}','${esc(t.name)}',${t.available})">借用</button>`:'<span class="hint">已全部借出</span>'}
+        ${t.available>0?`<button class="btn pri sm" onclick="openBorrow('${t.id}','${esc(t.name)}',${t.available})">借用</button>`:`<button class="btn sm" onclick="openToolWaitlist('${t.id}','${esc(t.name)}',${t.total})">加入排队</button>`}
         ${S.admin?`<button class="btn danger sm" onclick="removeTool('${t.id}')">删</button><button class="btn sm" onclick="openAdjust('${t.id}','${esc(t.name)}',${t.total},${t.borrowedCount})">改库存</button>`:''}
       </div>
       ${t.activeBorrows&&t.activeBorrows.length?`<div class="meta">在借：${t.activeBorrows.map(b=>{ const can=b.borrowerAccount===me||S.admin; return `${esc(b.borrowerName)}×${b.qty}${b.dueAt?' · 应还 '+fmtTime(b.dueAt):''}${b.days>=0?' · '+b.days+'天':''}${b.overdue?'<span class="badge bad">逾期</span>':''}${b.reminded?'<span class="badge grey">已提醒</span>':''}${b.dueSoon?'<span class="badge warn">即将到期</span>':''}${b.borrowerAccount===me?` <button class="btn green sm" onclick="returnTool('${b.id}')">归还</button>`:''}${can?(b.extensions>=2?'<span class="hint">续借已用完</span>':`<button class="btn sm" onclick="openExtend('${b.id}','${esc(b.borrowerName)}')">续借 (${2-(b.extensions||0)}次)</button>`):''}${b.borrowerAccount!==me&&b.overdue?` <button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒</button>`:''}`; }).join('，')}</div>`:''}
@@ -465,6 +469,11 @@ function openBorrow(id,name,avail){ openModal(`<span class="close" onclick="clos
   <div class="fld"><label>数量（可用 ${avail}）</label><input id="bwQty" type="number" min="1" max="${avail}" value="1"></div>
   <button class="btn pri" onclick="submitBorrow('${id}')">借用</button></div>`); }
 function submitBorrow(id){ wsSend({type:'toolBorrow',toolId:id,qty:parseInt($('#bwQty').value,10)}); closeModal(); }
+function openToolWaitlist(id,name,total){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>加入排队 · ${esc(name)}</h2><div class="form">
+  <div class="fld"><label>数量（库存 ${total}，当前无可用）</label><input id="wlQty" type="number" min="1" max="${total}" value="1"></div>
+  <div class="hint">轮到你时会自动借用，并在归还后优先分配给你</div>
+  <button class="btn pri" onclick="submitToolWaitlist('${id}')">加入排队</button></div>`); }
+function submitToolWaitlist(id){ wsSend({type:'toolWaitlist',toolId:id,qty:parseInt($('#wlQty').value,10)}); closeModal(); }
 function returnTool(id){ wsSend({type:'toolReturn',borrowId:id}); }
 function openExtend(id,name){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>续借 · ${esc(name)}</h2><div class="form">
   <div class="fld"><label>续借天数（1-30）</label><input id="exDays" type="number" min="1" max="30" value="7"></div>

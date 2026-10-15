@@ -250,6 +250,18 @@ spBwT.borrows.set('bwT', { id: 'bwT', toolId: 'tT', borrowerAccount: 'alice', bo
 const tp = api.toolsPublic(spBwT, new Map());
 assertEq(tp[0].activeBorrows[0].extensions, 2, 'toolsPublic 在借明细暴露续借次数');
 
+// ---------- 工具排队序列化 ----------
+console.log('\n📋 17c. 工具排队序列化');
+const spWl = api.createSpace('s10c', '排队空间', 1, 0);
+spWl.tools.push({ id: 'tW', name: '测试机', category: '测试电脑', total: 2, available: 0, location: '', description: '' });
+spWl.toolWaitlist.set('wlW', { id: 'wlW', toolId: 'tW', account: 'alice', name: '甲', qty: 2, status: 'waiting', createdAt: Date.now() });
+spWl.toolWaitlist.set('wlW2', { id: 'wlW2', toolId: 'tW', account: 'bob', name: '乙', qty: 1, status: 'promoted', createdAt: Date.now() - 1000, promotedAt: Date.now(), borrowId: 'bwW2' });
+const wlPub = api.toolWaitlistPublic(spWl, new Map());
+assertEq(wlPub.length, 1, 'toolWaitlistPublic 仅返回在排队记录');
+assertEq(wlPub[0].toolName, '测试机', 'toolWaitlistPublic 关联设备名称');
+assertEq(wlPub[0].status, 'waiting', 'toolWaitlistPublic 保留排队状态');
+assertEq(wlPub[0].qty, 2, 'toolWaitlistPublic 保留数量');
+
 // ---------- 会议室候补序列化 ----------
 console.log('\n📋 18. 会议室候补序列化');
 const spW = api.createSpace('s10', '候补空间', 1, 0);
