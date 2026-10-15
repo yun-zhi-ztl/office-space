@@ -96,6 +96,7 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'logout') { api.saveProfile(user); if (user.token) tokens.delete(user.token); return; }
     if (msg.type === 'getStats') { api.sendToUser(user.id, { type: 'stats', stats: user.stats }); return; }
+    if (msg.type === 'getAchievements') { api.sendTo(ws, { type: 'achievements', achievements: api.achievementDefsPublic(user) }); return; }
     if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }
 
     switch (msg.type) {

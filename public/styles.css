@@ -46,6 +46,8 @@
   .card h3{font-size:15px; display:flex; align-items:center; gap:8px; justify-content:space-between;}
   .card .meta{color:var(--muted); font-size:12px; line-height:1.5;}
   .card .foot{margin-top:auto;}
+  .card.achievement.unlocked{border-color:rgba(52,211,153,.45); box-shadow:0 0 0 1px rgba(52,211,153,.18) inset;}
+  .card.achievement.unlocked h3{color:var(--green);}
   .badge{display:inline-block; padding:2px 8px; border-radius:20px; font-size:11px; font-weight:600;}
   .badge.ok{background:rgba(52,211,153,.15); color:var(--green);}
   .badge.warn{background:rgba(251,191,36,.15); color:var(--yellow);}

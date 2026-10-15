@@ -59,6 +59,26 @@ api.checkAchievements(user);
 assert(user.achievements.includes('punctual'), '连续 3 次准时解锁守时达人');
 assert(!user.achievements.includes('king'), '未达成蹲坑之王');
 
+// ---------- 成就进度 ----------
+console.log('\n📋 4b. 成就进度');
+const p1 = api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'punctual'));
+assertEq(p1.current, 3, '守时进度当前值 3');
+assertEq(p1.target, 3, '守时进度目标 3');
+assertEq(p1.pct, 100, '守时进度百分比 100');
+assert(p1.unlocked === true, '守时已解锁');
+const p2 = api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'king'));
+assertEq(p2.current, 0, '蹲坑之王当前值 0');
+assertEq(p2.target, 10, '蹲坑之王目标 10');
+assertEq(p2.pct, 0, '蹲坑之王百分比 0');
+assert(p2.unlocked === false, '蹲坑之王未解锁');
+user.stats.totalVisits = 10;
+const p3 = api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'king'));
+assert(p3.unlocked === true, '累计 10 次解锁蹲坑之王');
+assertEq(p3.pct, 100, '蹲坑之王达成后进度 100');
+const pub = api.achievementDefsPublic(user);
+assertEq(pub.length, 6, '成就公开列表含 6 项');
+assert(pub.every((a) => a.id && a.name && a.desc && a.icon), '公开成就含 id/name/desc/icon');
+
 // ---------- 口令哈希 ----------
 console.log('\n📋 5. 口令哈希');
 const hash = api.hashPassword('secret123');

@@ -577,6 +577,29 @@ function createContext() {
     }
     return changed;
   }
+  // 成就进度：把「check」的判定口径与对应统计字段、目标值显式化，避免进度无法计算
+  const ACH_TARGETS = {
+    punctual: { field: 'consecutiveOnTime', target: 3 },
+    endurance: { field: 'maxDuration', target: 20 },
+    night: { field: 'nightVisits', target: 1 },
+    king: { field: 'totalVisits', target: 10 },
+    grabber: { field: 'grabSuccess', target: 5 },
+    rater: { field: 'ratingsGiven', target: 3 },
+  };
+  function achievementProgress(user, def) {
+    const t = ACH_TARGETS[def.id] || { field: 'totalVisits', target: 1 };
+    const current = Math.max(0, user.stats ? (user.stats[t.field] || 0) : 0);
+    const unlocked = !!(def.check(user));
+    return {
+      id: def.id, name: def.name, desc: def.desc, icon: def.icon,
+      current, target: t.target,
+      pct: t.target ? Math.min(100, Math.round(current / t.target * 100)) : (unlocked ? 100 : 0),
+      unlocked,
+    };
+  }
+  function achievementDefsPublic(user) {
+    return ACHIEVEMENT_DEFS.map((d) => achievementProgress(user, d));
+  }
   function notifyUrge(space, stallId, count, account) {
     for (const [, u] of users) if (u.currentSpace === space.id && u.account === account && u.ws && u.ws.readyState === 1) u.ws.send(JSON.stringify({ type: 'urgeNotification', stallId, count }));
   }
@@ -620,6 +643,7 @@ function createContext() {
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, noticesBroadcast, visitorsBroadcast,
     // 坑位辅助
     activeStallCount, checkAchievements, notifyUrge, ACHIEVEMENT_DEFS,
+    achievementProgress, achievementDefsPublic,
     // 每日看点
     buildDigest,
   };

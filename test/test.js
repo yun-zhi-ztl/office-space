@@ -609,6 +609,23 @@ async function runTests() {
     wA.close(); wB.close();
   }
 
+  // ========== 测试17: 成就墙 ==========
+  console.log('\n📋 测试17: 成就墙');
+  {
+    const spA = (await httpJson('POST', '/api/spaces', { name: '成就办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aA = 'ach_' + runKey;
+    await reg(aA, 'pw', '成就用户');
+    const wA = await createWSClient(); await loginTo(wA, spA.id, aA, 'pw');
+    await sendMsg(wA, { type: 'getAchievements' });
+    const ach = last(wA, 'achievements');
+    assert(ach && Array.isArray(ach.achievements), '成就墙返回 achievements 数组');
+    assert(ach.achievements.length === 6, '成就墙含 6 个成就');
+    assert(ach.achievements.every((a) => a.id && a.name && a.desc && a.icon), '每项成就含 id/name/desc/icon');
+    assert(ach.achievements.every((a) => a.current != null && a.target != null && a.pct != null && typeof a.unlocked === 'boolean'), '每项成就含进度字段');
+    assert(ach.achievements.find((a) => a.id === 'punctual').target === 3, '守时达人目标值为 3');
+    wA.close();
+  }
+
   // ========== 总结 ==========
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);

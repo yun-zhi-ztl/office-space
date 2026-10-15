@@ -25,7 +25,7 @@ const S = {
   lastRoomBook:null,
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['stalls','坑位看板','🚻'],['dash','概览','📊'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['dash','概览','📊'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -61,6 +61,7 @@ function dispatch(m){
     case 'roomStats': S.roomStats=m.stats; render(); break;
     case 'users': S.DB.users=m.users; break;
     case 'leaderboard': S.DB.leaderboard=m.rankings||[]; break;
+    case 'achievements': S.DB.achievements=m.achievements||[]; break;
     case 'notices': S.DB.notices=m.notices||[]; break;
     case 'digest': S.digest=m.digest; break;
     case 'suggestRooms': S.suggestions=m.suggestions||[]; renderSugg(); break;
@@ -85,17 +86,17 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','roomStats','users','leaderboard','notices','digest'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','roomStats','users','leaderboard','achievements','notices','digest'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='ach') renderAchievements(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
   else { b.style.display='none'; }
 }
 function renderAll(){ render(); }
-function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); }
+function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); }
 
 /* 分页：广播已按最近 PAGE 下发，前端按 offset 加载更多 */
 const PAGE = 30;
@@ -574,6 +575,20 @@ function renderStalls(){
   $('#main').innerHTML = `<div class="topbar"><div><h1>坑位看板</h1><div class="sub">卫生间坑位实时状态 · 蹲坑倒计时 5 分钟 · 尿槽 1 分钟</div></div>
     ${S.admin?`<button class="btn" onclick="openStallConfig()">⚙️ 配置坑位</button>`:''}</div>
     <div class="grid">${d.stalls.map(stallCard).join('')}</div>`;
+}
+function renderAchievements(){
+  const list = S.DB.achievements || [];
+  $('#main').innerHTML = `<div class="topbar"><div><h1>成就墙</h1><div class="sub">办公冒险进度 · 达成条件即可解锁专属徽章</div></div></div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr))">${list.length?list.map(a=>`
+      <div class="card achievement ${a.unlocked?'unlocked':''}">
+        <div style="font-size:34px;line-height:1">${a.unlocked?a.icon:'🔒'}</div>
+        <h3>${esc(a.name)} ${a.unlocked?'<span class="badge ok">已解锁</span>':'<span class="badge grey">未解锁</span>'}</h3>
+        <div class="meta">${esc(a.desc)}</div>
+        <div class="fs" style="flex-direction:column;align-items:stretch;gap:8px">
+          <div class="bar"><i style="width:${a.pct}%"></i></div>
+          <span class="when">${a.current}/${a.target}</span>
+        </div>
+      </div>`).join(''):'<div class="empty">暂无成就数据</div>'}</div>`;
 }
 setInterval(()=>{ if(S.module==='stalls' && S.me && document.visibilityState==='visible') renderStalls(); }, 1000);
 function openReserve(id,type){
