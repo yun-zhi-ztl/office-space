@@ -310,6 +310,65 @@ async function runTests() {
     wA.close(); wB.close();
   }
 
+  // ========== 测试12: 访客登记 ==========
+  console.log('\n📋 测试12: 访客登记');
+  {
+    const spV = (await httpJson('POST', '/api/spaces', { name: '访客办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aV = 'vhost_' + runKey, bV = 'vguest_' + runKey;
+    await reg(aV, 'pw', '接待甲'); await reg(bV, 'pw', '访客乙');
+    const wV1 = await createWSClient(); await loginTo(wV1, spV.id, aV, 'pw');
+    const wV2 = await createWSClient(); await loginTo(wV2, spV.id, bV, 'pw');
+    await sendMsg(wV1, { type: 'visitorCreate', visitorName: '客户王', purpose: '商务洽谈' });
+    let vs = last(wV1, 'visitors');
+    assert(vs && vs.visitors.length === 1 && vs.visitors[0].visitorName === '客户王', '登记访客成功');
+    const vsId = vs.visitors[0].id;
+    await sendMsg(wV1, { type: 'visitorCreate', visitorName: '', purpose: '缺姓名' });
+    const errV = mk(wV1, 'error');
+    assert(errV.length > 0 && errV[errV.length - 1].message.includes('请填写访客姓名'), '缺姓名登记被拒');
+    await sendMsg(wV1, { type: 'visitorArrived', visitorId: vsId });
+    vs = last(wV1, 'visitors');
+    assert(vs.visitors[0].status === 'arrived', '推进到访状态成功');
+    await sendMsg(wV1, { type: 'visitorLeft', visitorId: vsId });
+    vs = last(wV1, 'visitors');
+    assert(vs.visitors[0].status === 'left', '推进离开状态成功');
+    // 非登记人 / 非管理员不能操作他人访客
+    await sendMsg(wV2, { type: 'visitorArrived', visitorId: vsId });
+    const errV2 = mk(wV2, 'error');
+    assert(errV2.length > 0 && errV2[errV2.length - 1].message.includes('只能操作自己登记的访客'), '非登记人不能推进他人访客');
+    // 管理员可删除任意访客
+    await sendMsg(wV2, { type: 'visitorCreate', visitorName: '临时访客', purpose: '取件' });
+    const vsB = last(wV2, 'visitors');
+    const vsBId = vsB.visitors[0].id;
+    await sendMsg(wV1, { type: 'visitorRemove', visitorId: vsBId });
+    vs = last(wV1, 'visitors');
+    assert(!vs.visitors.some((v) => v.id === vsBId), '管理员删除任意访客成功');
+    wV1.close(); wV2.close();
+  }
+
+  // ========== 测试13: 个人资料 ==========
+  console.log('\n📋 测试13: 个人资料');
+  {
+    const spP = (await httpJson('POST', '/api/spaces', { name: '资料办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aP = 'prof_' + runKey;
+    await reg(aP, 'oldpass', '旧名');
+    const wP1 = await createWSClient(); await loginTo(wP1, spP.id, aP, 'oldpass');
+    await sendMsg(wP1, { type: 'profileUpdate', nickname: '新名字', avatar: '🦊' });
+    const pu = last(wP1, 'profileUpdated');
+    assert(pu && pu.nickname === '新名字' && pu.avatar === '🦊', '修改展示名与头像成功');
+    const uP = last(wP1, 'users').users.find((u) => u.account === aP);
+    assert(uP && uP.username === '新名字' && uP.avatar === '🦊', '用户列表同步新资料');
+    await sendMsg(wP1, { type: 'passwordChange', oldPassword: 'wrong', newPassword: 'newpass' });
+    const errPw = mk(wP1, 'error');
+    assert(errPw.length > 0 && errPw[errPw.length - 1].message.includes('旧密码错误'), '旧密码错误时拒绝改密');
+    await sendMsg(wP1, { type: 'passwordChange', oldPassword: 'oldpass', newPassword: 'newpass' });
+    assert(last(wP1, 'passwordChanged'), '凭正确旧密码修改成功');
+    const wP2 = await createWSClient();
+    await sendMsg(wP2, { type: 'join', spaceId: spP.id });
+    await sendMsg(wP2, { type: 'login', account: aP, password: 'newpass' });
+    assert(last(wP2, 'loginSuccess'), '新密码可登录');
+    wP1.close(); wP2.close();
+  }
+
   // ========== 总结 ==========
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);

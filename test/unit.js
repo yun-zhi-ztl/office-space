@@ -89,6 +89,15 @@ const tier2 = api.stallTier(ratedStall);
 assert(tier1 === tier2, '评分不变时复用缓存段位');
 assert(ratedStall.__tier === tier1, '缓存字段已写入');
 
+// ---------- 访客序列化 ----------
+console.log('\n📋 9. 访客序列化');
+const spV = api.createSpace('s3', '访客空间', 1, 0);
+spV.visitors.set('v1', { id: 'v1', hostAccount: 'alice', hostName: '甲', visitorName: '客户王', purpose: '商务洽谈', contact: '123', expectedAt: 123, arrivedAt: null, leftAt: null, status: 'pending', createdAt: Date.now() });
+const vp = api.visitorsPublic(spV, new Map());
+assertEq(vp.length, 1, 'visitorsPublic 返回访客列表');
+assertEq(vp[0].visitorName, '客户王', 'visitorsPublic 保留访客姓名');
+assertEq(vp[0].status, 'pending', 'visitorsPublic 保留访客状态');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

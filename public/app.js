@@ -18,10 +18,11 @@ const S = {
   lastSpace: localStorage.getItem('os_space')||'',
   ws: null, me:null, space:null, module:'rooms',
   pendingLogin:null,
-  DB:{ rooms:[], reservations:[], tools:[], requests:[], repairs:[], stalls:[], users:[], leaderboard:[] },
+  DB:{ rooms:[], reservations:[], tools:[], requests:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[] },
+  visitorTotal:0, visitorOffset:0,
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['repairs','报修','🛠️'],['stalls','坑位看板','🚻'],['dash','概览','📊'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['stalls','坑位看板','🚻'],['dash','概览','📊'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -48,6 +49,7 @@ function dispatch(m){
     case 'tools': S.DB.tools=m.tools; break;
     case 'materials': S.DB.requests=m.requests; S.DB.matTotal=m.total||0; S.DB.matOffset=S.DB.requests.length; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; break;
+    case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
     case 'page': handlePage(m); break;
     case 'stalls': S.DB.stalls=m.stalls; break;
     case 'users': S.DB.users=m.users; break;
@@ -62,13 +64,15 @@ function dispatch(m){
     case 'urgeNotification': toast('📣 有人催促你了（'+m.count+' 人）','urge'); break;
     case 'reservation': toast('✔ 预约成功','success'); break;
     case 'cancelSuccess': toast('✔ 已取消','success'); break;
+    case 'profileUpdated': if(S.me){ S.me.nickname=m.nickname; S.me.avatar=m.avatar; } toast('✔ 个人资料已更新','success'); render(); break;
+    case 'passwordChanged': toast('✔ 密码已修改','success'); break;
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','stalls','users','leaderboard','notices','digest'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','users','leaderboard','notices','digest'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='stalls') renderStalls(); }
+function render(){ if(!S.me) return; renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); }
 function renderAll(){ render(); }
 function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); }
 
@@ -78,9 +82,10 @@ function handlePage(m){
   if(m.module==='materials'){ S.DB.requests=(S.DB.requests||[]).concat(m.items); S.DB.matOffset=m.offset+m.items.length; }
   else if(m.module==='repairs'){ S.DB.repairs=(S.DB.repairs||[]).concat(m.items); S.DB.repOffset=m.offset+m.items.length; }
   else if(m.module==='rooms'){ S.DB.reservations=(S.DB.reservations||[]).concat(m.items); S.DB.revOffset=m.offset+m.items.length; }
+  else if(m.module==='visitors'){ S.DB.visitors=(S.DB.visitors||[]).concat(m.items); S.visitorOffset=m.offset+m.items.length; }
   render();
 }
-function loadMore(module){ wsSend({type:'fetchPage', module, offset: module==='materials'?S.DB.matOffset:module==='repairs'?S.DB.repOffset:S.DB.revOffset, limit:PAGE}); }
+function loadMore(module){ wsSend({type:'fetchPage', module, offset: module==='materials'?S.DB.matOffset:module==='repairs'?S.DB.repOffset:module==='visitors'?S.visitorOffset:S.DB.revOffset, limit:PAGE}); }
 /* ============ 侧栏 ============ */
 const STATUS_OPTS = [['在岗',''],['开会','🧘'],['午饭','🍜'],['外出','🚪'],['休息','😴'],['勿扰','⚡']];
 function myStatus(){ const u=(S.DB.users||[]).find(x=>x.account===S.me.account); return (u&&u.status)||{label:'在岗',emoji:''}; }
@@ -100,6 +105,7 @@ function renderSidebar(){
         ${STATUS_OPTS.map(([l,e],i)=>`<option value="${e}|${l}" ${st.label===l?'selected':''}>${e||'🙂'} ${l}</option>`).join('')}
       </select></div>
       ${badgeCount?`<div class="hint" style="margin-bottom:8px">🏅 徽章 ${badgeCount} 枚</div>`:''}
+      <button class="btn sm" onclick="openProfile()">个人资料</button>
       <button class="btn sm" onclick="doLogout()">退出登录</button>
     </div>`;
 }
@@ -142,6 +148,18 @@ async function createSpace(){ const name=$('#spName').value.trim(); if(!name) re
 async function submitAccount(){ const account=$('#acAccount').value.trim(), pass=$('#acPass').value; if(!account||!pass) return toast('请输入账号密码','error'); const isLogin=$('#a-login').classList.contains('active'); if(!pickedSpace) return toast('请先选择空间','error'); if(isLogin){ doLogin(account,pass); } else { const name=$('#acName').value.trim(); const r=await http('POST','/api/register',{account,password:pass,username:name||account}); if(r.ok) { toast('注册成功，正在登录','success'); doLogin(account,pass); } else toast(r.error||'注册失败','error'); } }
 function doLogin(account,password){ S.lastSpace=pickedSpace; localStorage.setItem('os_space',pickedSpace); S.pendingLogin={account,password}; wsSend({type:'join',spaceId:pickedSpace}); }
 function doLogout(){ wsSend({type:'logout'}); S.me=null; localStorage.removeItem('os_token'); location.reload(); }
+function openProfile(){
+  const me=S.me||{};
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>个人资料</h2><div class="form">
+    <div class="fld"><label>展示名</label><input id="pfName" maxlength="12" value="${esc(me.nickname||'')}"></div>
+    <div class="fld"><label>头像（1-4 字符）</label><input id="pfAvatar" maxlength="4" value="${esc(me.avatar||'🧑')}"></div>
+    <button class="btn pri" onclick="submitProfileUpdate()">保存资料</button></div>
+    <hr style="margin:16px 0;border:none;border-top:1px solid var(--line)">
+    <div class="fld"><label>修改密码</label><div class="fs"><input id="pfOld" type="password" placeholder="旧密码"><input id="pfNew" type="password" placeholder="新密码"></div></div>
+    <button class="btn" onclick="submitPasswordChange()">修改密码</button></div>`);
+}
+function submitProfileUpdate(){ wsSend({type:'profileUpdate',nickname:$('#pfName').value,avatar:$('#pfAvatar').value}); closeModal(); }
+function submitPasswordChange(){ wsSend({type:'passwordChange',oldPassword:$('#pfOld').value,newPassword:$('#pfNew').value}); closeModal(); }
 
 /* ============ 概览 ============ */
 const ACH = { punctual:'守时达人', endurance:'持久战', night:'夜行者', king:'蹲坑之王', grabber:'抢位达人', rater:'评论家' };
@@ -157,6 +175,7 @@ function renderDash(){
     ['在借数量', totalBorrowed, '📤'],
     ['待处理申领', d.requests.filter(r=>r.status==='pending').length, '📦'],
     ['处理中报修', d.repairs.filter(r=>r.status!=='resolved'&&r.status!=='cancelled').length, '🛠️'],
+    ['访客登记', S.visitorTotal||0, '🚶'],
     ['坑位占用', occupied+'/'+st.length, '🚻'],
   ];
   $('#main').innerHTML = `<div class="topbar"><div><h1>概览 <span class="view-tag">${esc(S.space?S.space.name:'')}</span></h1><div class="sub">空间内的公共资源使用概览</div></div></div>
@@ -320,6 +339,33 @@ function openRepair(){ openModal(`<span class="close" onclick="closeModal()">×<
   <button class="btn pri" onclick="submitRepair()">提交</button></div>`); }
 function submitRepair(){ wsSend({type:'repairCreate',category:$('#rpCat').value,location:$('#rpLoc').value,description:$('#rpDesc').value}); closeModal(); }
 function setRepair(id,status){ wsSend({type:'repairUpdate',repairId:id,status}); }
+/* ============ 访客登记 ============ */
+function visitorBadge(s){ return s==='pending'?'warn':s==='arrived'?'info':s==='left'?'ok':'grey'; }
+function visitorLabel(s){ return s==='pending'?'待到访':s==='arrived'?'已到访':s==='left'?'已离开':'已取消'; }
+function renderVisitors(){
+  const d=S.DB, me=S.me.account;
+  $('#main').innerHTML = `<div class="topbar"><div><h1>访客登记</h1><div class="sub">登记访客姓名、事由与预计到访，负责人可推进状态</div></div>
+    <button class="btn pri" onclick="openVisitorCreate()">＋ 登记访客</button></div>
+    <div class="list">${d.visitors.map(v=>{
+      const mine = v.hostAccount===me;
+      const can = mine||S.admin;
+      return `<div class="row"><span><span class="who">${esc(v.hostName)}</span> 接待 <b>${esc(v.visitorName)}</b><div class="desc">${esc(v.purpose)}${v.contact?' · 联系方式 '+esc(v.contact):''}</div><div class="when">${fmtTime(v.createdAt)}${v.expectedAt?' · 预计 '+fmtTime(v.expectedAt):''}</div></span>
+      <span class="fs"><span class="badge ${visitorBadge(v.status)}">${visitorLabel(v.status)}</span>
+      ${can?(v.status==='pending'?`<button class="btn green sm" onclick="visitorAction('${v.id}','visitorArrived')">确认到访</button><button class="btn danger sm" onclick="visitorAction('${v.id}','visitorCancel')">取消</button>`:v.status==='arrived'?`<button class="btn green sm" onclick="visitorAction('${v.id}','visitorLeft')">离开</button>`:''):''}
+      ${S.admin?`<button class="btn danger sm" onclick="visitorAction('${v.id}','visitorRemove')">删除</button>`:''}
+      </span></div>`; }).join('')||'<div class="empty">暂无访客记录</div>'}
+    </div>
+    ${(S.visitorOffset||0)<(S.visitorTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('visitors')">加载更多（${S.visitorTotal-(S.visitorOffset||0)}）</button></div>`:''}`;
+}
+function openVisitorCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>登记访客</h2><div class="form">
+  <div class="fld"><label>访客姓名</label><input id="vsName" placeholder="如：张三"></div>
+  <div class="fld"><label>来访事由</label><input id="vsPurpose" placeholder="如：商务拜访 / 面试 / 送修"></div>
+  <div class="fld"><label>联系方式（可选）</label><input id="vsContact" placeholder="手机号或内部短号"></div>
+  <div class="fld"><label>预计到访（可选）</label><input id="vsExpected" type="datetime-local"></div>
+  <button class="btn pri" onclick="submitVisitorCreate()">登记</button></div>`); }
+function submitVisitorCreate(){ const st=$('#vsExpected').value?new Date($('#vsExpected').value).getTime():0; wsSend({type:'visitorCreate',visitorName:$('#vsName').value,purpose:$('#vsPurpose').value,contact:$('#vsContact').value,expectedAt:st||0}); closeModal(); }
+function visitorAction(id,type){ wsSend({type, visitorId:id}); }
+
 /* ============ 坑位看板 ============ */
 function stallCard(s){
   const me=S.me?S.me.account:'';

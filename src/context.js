@@ -154,6 +154,7 @@ function createContext() {
       else if (r.kind === 'borrow') sp.borrows.set(data.id, data);
       else if (r.kind === 'material') sp.materialRequests.set(data.id, data);
       else if (r.kind === 'repair') sp.repairs.set(data.id, data);
+      else if (r.kind === 'visitor') sp.visitors.set(data.id, data);
       else if (r.kind === 'stall') { const st = sp.stalls.find((s) => s.id === data.id); if (st) st.ratings = (data.ratings || []).slice(-60); }
     }
     for (const [key, ratings] of Object.entries(byStall)) {
@@ -284,7 +285,7 @@ function createContext() {
       id, name, squatCount: squat == null ? 4 : squat, urinalCount: urinal == null ? 3 : urinal,
       admins: new Set(), clients: new Set(), notices: [],
       rooms: [], roomReservations: new Map(), reservations: new Map(),
-      tools: [], borrows: new Map(), materialRequests: new Map(), repairs: new Map(), urges: new Map(),
+      tools: [], borrows: new Map(), materialRequests: new Map(), repairs: new Map(), visitors: new Map(), urges: new Map(),
     };
     sp.stalls = buildStalls(squat == null ? 4 : squat, urinal == null ? 3 : urinal);
     spaces.set(id, sp);
@@ -347,6 +348,16 @@ function createContext() {
       reporterAccount: r.reporterAccount,
       reporterName: info.get(r.reporterAccount) ? info.get(r.reporterAccount).display : r.reporterName,
       createdAt: r.createdAt, updatedAt: r.updatedAt,
+    })).sort((a, b) => (b.createdAt - a.createdAt));
+  }
+  function visitorsPublic(sp, info) {
+    return [...sp.visitors.values()].map((v) => ({
+      id: v.id,
+      hostAccount: v.hostAccount,
+      hostName: info.get(v.hostAccount) ? info.get(v.hostAccount).display : v.hostName,
+      visitorName: v.visitorName, purpose: v.purpose, contact: v.contact || '',
+      expectedAt: v.expectedAt || null, arrivedAt: v.arrivedAt || null, leftAt: v.leftAt || null,
+      status: v.status, createdAt: v.createdAt,
     })).sort((a, b) => (b.createdAt - a.createdAt));
   }
   function stallTier(s) {
@@ -423,6 +434,11 @@ function createContext() {
   }
   function broadcastLeaderboard(sp) { broadcast(sp.id, 'leaderboard', leaderboardPublic(sp)); }
   function noticesBroadcast(sp) { broadcast(sp.id, 'notices', { notices: sp.notices }); }
+  function visitorsBroadcast(sp) {
+    const info = spaceUserInfo(sp.id);
+    const all = visitorsPublic(sp, info);
+    broadcast(sp.id, 'visitors', { visitors: all.slice(0, LIST_PAGE), total: all.length });
+  }
   function broadcastStalls(sp) {
     const info = spaceUserInfo(sp.id);
     broadcast(sp.id, 'stalls', { squat_count: sp.squatCount, urinal_count: sp.urinalCount, stalls: stallsPublic(sp, info) });
@@ -432,10 +448,12 @@ function createContext() {
     const reservations = roomReservationsPublic(sp, info);
     const materials = materialsPublic(sp, info);
     const repairs = repairsPublic(sp, info);
+    const visitors = visitorsPublic(sp, info);
     broadcast(sp.id, 'rooms', { rooms: sp.rooms.map(roomPublic), reservations: reservations.slice(0, LIST_PAGE), reservationTotal: reservations.length });
     broadcast(sp.id, 'tools', { tools: toolsPublic(sp, info) });
     broadcast(sp.id, 'materials', { requests: materials.slice(0, LIST_PAGE), total: materials.length });
     broadcast(sp.id, 'repairs', { repairs: repairs.slice(0, LIST_PAGE), total: repairs.length });
+    broadcast(sp.id, 'visitors', { visitors: visitors.slice(0, LIST_PAGE), total: visitors.length });
     broadcast(sp.id, 'stalls', { squat_count: sp.squatCount, urinal_count: sp.urinalCount, stalls: stallsPublic(sp, info) });
     broadcast(sp.id, 'notices', { notices: sp.notices });
     broadcastUsers(sp);
@@ -498,9 +516,9 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, reservationPublic, toolsPublic, materialsPublic, repairsPublic, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier,
+    roomPublic, reservationPublic, toolsPublic, materialsPublic, repairsPublic, visitorsPublic, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier,
     // 广播
-    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, noticesBroadcast,
+    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, noticesBroadcast, visitorsBroadcast,
     // 坑位辅助
     activeStallCount, checkAchievements, notifyUrge, ACHIEVEMENT_DEFS,
     // 每日看点

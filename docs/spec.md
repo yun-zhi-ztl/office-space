@@ -54,6 +54,12 @@
   - `category`: 厕所 / 灯光 / 空调 / 其它
   - 状态流转：`reported` → `in_progress` → `resolved`；上报人可取消 `reported`。
 
+### 访客登记（visitors）
+- `visitor`: `{ id, hostAccount, hostName, visitorName, purpose, contact, expectedAt, arrivedAt, leftAt, status, createdAt }`
+  - `purpose` 必填；`contact` / `expectedAt` 可选。
+  - 状态：`pending` → `arrived` → `left`；`pending` 可 `cancelled`；管理员可删除任意记录。
+  - 归属人（host）或管理员可推进状态 / 删除；其他成员只读。
+
 ### 坑位看板（restroom / 原坑位雷达）
 - 每个空间独立配置 `squat_count`（蹲坑）、`urinal_count`（尿槽）。
 - `stall`: `{ id, type: squat|urinal, name, status: free|reserved|waiting|occupied, ratings, reservation }`
@@ -82,17 +88,19 @@
 | `materialFulfill` | 处理申领为已满足 | 他人 |
 | `repairCreate` | 提交报修 | member |
 | `repairUpdate` | 推进 / 取消报修状态 | member / owner |
+| `visitorCreate` / `visitorArrived` / `visitorLeft` / `visitorCancel` / `visitorRemove` | 访客登记与状态流转 / 删除 | member / host / admin |
+| `profileUpdate` / `passwordChange` | 修改展示名、头像 / 修改密码 | member |
 | `stallControl`（子类型 reserve/grab/startUse/finish/release/cancel/urge/rate/toggleEmergency） | 坑位看板全部操作 | member |
 | `stallConfig` | 配置蹲坑 / 尿槽数量 | admin |
 
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，
-以及 `rooms`、`tools`、`materials`、`repairs`、`stalls`、`users`、`leaderboard`（含 `account`、`role`、`display`）。
+以及 `rooms`、`tools`、`materials`、`repairs`、`visitors`、`stalls`、`users`、`leaderboard`（含 `account`、`role`、`display`）。
 
 ## 5. 前端
 
-单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 报修 / 坑位看板）。
-桌面与移动端响应式，原生 HTML/CSS/JS，无构建步骤；静态文件由 Express 托管。
+单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 报修 / 访客登记 / 坑位看板），
+个人资料入口位于侧栏底部；桌面与移动端响应式，原生 HTML/CSS/JS，无构建步骤；静态文件由 Express 托管。
 
 ## 6. 非目标（本版本暂不实现）
 - 复杂审批流、权限细粒度分级、通知系统、文件上传、消息私聊。
@@ -153,12 +161,14 @@
 | 徽章与段位 | 现有成就 + 每个坑位按评分/使用量形成段位（青铜→王者「坑位传说榜」） | 排行榜/坑位 `tier` |
 | 设备催还与占用王榜 | 借用超过 7 天标记「逾期」，他人可一键提醒借用人归还；逾期列表即「占用王榜」 | `remindReturn` |
 | 一键智能选房 | 按时段+人数自动列出空闲会议室并推荐 | `suggestRoom` |
+| 访客登记 | 登记访客姓名、事由、预计到访，负责人/管理员推进到访与离开，实时同步 | `visitorCreate` / `visitorArrived` / `visitorLeft` / `visitorCancel` / `visitorRemove` |
+| 个人资料 | 成员可改展示名/头像，并凭旧密码修改登录密码 | `profileUpdate` / `passwordChange` |
 | 电视墙大屏 | 独立只读页 `public/screen.html`，展示会议室「现在/接下来」+ 空间总览 + 坑位占用 + 公告 + 在线状态；支持全屏切换与多视图自动轮播（可暂停/手动切换） | 复用现有广播 |
 | 每日看点 | 登录后推送今日要点：今天会议、逾期借用、我的未还、待处理申领/报修、本周之星 | 登录时下发 `digest` |
 
 ### 客户端→服务端新增消息
-`setStatus`、`announce`、`suggestRoom`、`remindReturn`；服务端相应广播/单发
-`users`(含 `status`) 、`notices`、`suggestRooms`、`borrowReminder`、`digest`。
+`setStatus`、`announce`、`suggestRoom`、`remindReturn`、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`profileUpdate`、`passwordChange`；服务端相应广播/单发
+`users`(含 `status`) 、`notices`、`suggestRooms`、`borrowReminder`、`digest`、`visitors`。
 
 ## 9. 代码架构（多模块拆分）
 
@@ -169,12 +179,12 @@ server.js        入口：Express + WS 分发 + 定时器 + 心跳 + 优雅停�
 src/context.js   共享上下文：状态 + 常量 + 基础工具 + 持久化(写合并) + 认证 + 序列化 + 广播 + 坑位成就 + 每日看点
 src/http.js      HTTP 路由：/api/spaces、/api/register
 src/session.js   会话：进入/切换空间、登录（含 digest）
-src/modules/     rooms / tools / materials / repairs / stalls / extras（各领域处理函数）
+src/modules/     rooms / tools / materials / repairs / visitors / profile / stalls / extras（各领域处理函数）
 ```
 
 - 各领域模块是纯函数工厂 `module.exports = (api)=>({...})`，由 `server.js` 注入共享上下文 `api`，无全局状态、便于单测。
 - 定时器、心跳、优雅停机属于进程级关注点，保留在入口。
-- 该拆分不改变任何对外协议与行为，e2e（52 项）在内存与 PostgreSQL 双模式下均通过。
+- 该拆分不改变任何对外协议与行为，e2e（63 项）在内存与 PostgreSQL 双模式下均通过。
 
 ## 10. 健康检查、自测与 CI（本版本新增）
 
@@ -182,9 +192,9 @@ src/modules/     rooms / tools / materials / repairs / stalls / extras（各领�
 - **npm 脚本**：
   - `npm start`：启动服务
   - `npm run lint`：对 `server.js` / `public` / `src/` / `test/` 全部 JS 执行 `node --check` 语法检查（`scripts/lint.js`）
-  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁、口令哈希、管理员判定、历史预约清理、段位缓存，23 项）
+  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化，26 项）
   - `npm run test:restore`：前端「自动恢复会话」回归测试（`test/restore.js`，vm stub 加载内联脚本，无需服务）
   - `npm run smoke`：快速冒烟（`test/smoke.js`）——健康检查、首页与大屏可达、WS 连接、登录、收到广播
-  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，52 项）
+  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，63 项）
 - **CI**：`.github/workflows/ci.yml` 在 push 到 `main` 或 pull_request 时自动：`npm ci` → `npm run lint` → `docker compose config` 校验 → `docker build` 构建校验 → 内存模式启动服务 → `npm run smoke` → `npm test`。用不可达的 PG 参数强制内存模式，无需外部数据库。
 - **环境变量**：见 `.env.example`（`PORT`、`PGHOST`、`PGPORT`、`PGUSER`、`PGPASSWORD`、`PGDATABASE`）；`.env` 已加入 `.gitignore`。

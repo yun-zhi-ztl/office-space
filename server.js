@@ -1,7 +1,7 @@
 // =========================================================
 // OfficeSpace · 办公空间管理 — 入口
 // 逻辑按领域拆分在 src/：context(状态/工具/持久化/序列化/广播) +
-// http + session(加入/登录) + modules(rooms/tools/materials/repairs/stalls/extras)
+// http + session(加入/登录) + modules(rooms/tools/materials/repairs/visitors/profile/stalls/extras)
 // 本文件只负责：Express + WS 组装、消息分发、定时器、心跳、优雅停机、启动。
 // =========================================================
 'use strict';
@@ -17,6 +17,8 @@ const roomsModule = require('./src/modules/rooms');
 const toolsModule = require('./src/modules/tools');
 const materialsModule = require('./src/modules/materials');
 const repairsModule = require('./src/modules/repairs');
+const visitorsModule = require('./src/modules/visitors');
+const profileModule = require('./src/modules/profile');
 const stallsModule = require('./src/modules/stalls');
 const extrasModule = require('./src/modules/extras');
 
@@ -50,6 +52,8 @@ const rooms = roomsModule(api);
 const tools = toolsModule(api);
 const materials = materialsModule(api);
 const repairs = repairsModule(api);
+const visitors = visitorsModule(api);
+const profile = profileModule(api);
 const stalls = stallsModule(api);
 const extras = extrasModule(api);
 
@@ -63,6 +67,7 @@ function handleFetchPage(ws, user, space, msg) {
   if (msg.module === 'materials') { const all = api.materialsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
   else if (msg.module === 'repairs') { const all = api.repairsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
   else if (msg.module === 'rooms') { const all = api.roomReservationsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
+  else if (msg.module === 'visitors') { const all = api.visitorsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
   else return api.sendTo(ws, api.serError('不支持的分页模块'));
   api.sendTo(ws, { type: 'page', module: msg.module, offset, items, total });
 }
@@ -101,6 +106,10 @@ wss.on('connection', (ws) => {
         materials.handleMaterials(ws, user, space, msg); break;
       case 'repairCreate': case 'repairUpdate':
         repairs.handleRepairs(ws, user, space, msg); break;
+      case 'visitorCreate': case 'visitorArrived': case 'visitorLeft': case 'visitorCancel': case 'visitorRemove':
+        visitors.handleVisitors(ws, user, space, msg); break;
+      case 'profileUpdate': case 'passwordChange':
+        profile.handleProfile(ws, user, space, msg); break;
       case 'reserve': case 'cancel': case 'grab': case 'startUse': case 'finish': case 'release': case 'urge': case 'rate': case 'toggleEmergency': case 'stallConfig':
         stalls.handleStalls(ws, user, space, msg); break;
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
