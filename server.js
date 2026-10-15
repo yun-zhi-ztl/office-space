@@ -273,6 +273,17 @@ setInterval(() => {
       }
       visitors.visitorsBroadcast(sp);
     }
+    // 报修 SLA 提醒：超时仍未处理时提醒上报人与管理员
+    const repairSlaReminders = api.dueRepairSlaReminders(sp, now);
+    if (repairSlaReminders.length) {
+      for (const r of repairSlaReminders) {
+        r.slaRemindedAt = now;
+        api.saveEntity(sp.id, 'repair', r.id, r);
+        api.sendToAccount(r.reporterAccount, { type: 'repairSla', repairId: r.id, category: r.category, location: r.location, priority: r.priority });
+        for (const acc of sp.admins) api.sendToAccount(acc, { type: 'repairSla', repairId: r.id, category: r.category, location: r.location, priority: r.priority });
+      }
+      repairs.repairsBroadcast(sp);
+    }
   }
 }, 15000);
 

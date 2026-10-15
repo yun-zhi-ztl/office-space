@@ -361,6 +361,21 @@ assertEq(api.VISIT_REMIND_WINDOW_MS, 15 * 60000, '访客提醒窗口为到访前
 const visPub = api.visitorsPublic(spVis, new Map());
 assertEq(visPub[0].remindAt, nowVis - 1, 'visitorsPublic 保留 remindAt');
 
+// ---------- 报修 SLA 超时提醒 ----------
+console.log('\n📋 26. 报修 SLA 超时提醒');
+const spRepair = api.createSpace('s18', '报修 SLA 空间', 1, 0);
+const nowSla = 1000000000;
+const sla = api.REPAIR_SLA_MS;
+spRepair.repairs.set('rp1', { id: 'rp1', category: '灯光', location: '走廊', status: 'reported', reporterAccount: 'alice', createdAt: nowSla - sla, updatedAt: nowSla - sla, priority: 'high', slaRemindedAt: null });
+spRepair.repairs.set('rp2', { id: 'rp2', category: '空调', location: '会议室', status: 'reported', reporterAccount: 'bob', createdAt: nowSla - sla + 1, updatedAt: nowSla - sla + 1, priority: 'low', slaRemindedAt: null });
+spRepair.repairs.set('rp3', { id: 'rp3', category: '厕所', location: '卫生间', status: 'reported', reporterAccount: 'carol', createdAt: nowSla - sla, updatedAt: nowSla - sla, slaRemindedAt: nowSla - 1000 });
+spRepair.repairs.set('rp4', { id: 'rp4', category: '其它', location: '茶水间', status: 'in_progress', reporterAccount: 'dave', createdAt: nowSla - sla, updatedAt: nowSla - sla, slaRemindedAt: null });
+const slaRem = api.dueRepairSlaReminders(spRepair, nowSla);
+assertEq(slaRem.map((r) => r.id), ['rp1'], '仅返回超时且未提醒过的未处理报修');
+assertEq(api.REPAIR_SLA_MS, 4 * 3600 * 1000, '报修 SLA 为 4 小时');
+const repPub = api.repairsPublic(spRepair, new Map());
+assertEq(repPub[0].slaReminded, false, 'repairsPublic 暴露 slaReminded');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

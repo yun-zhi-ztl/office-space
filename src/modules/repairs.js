@@ -17,7 +17,7 @@ module.exports = function repairsModule(api) {
       const description = (msg.description || '').trim().slice(0, 160);
       const priority = REPAIR_PRIORITIES.includes(msg.priority) ? msg.priority : 'normal';
       if (!location || !description) return sendTo(ws, serError('请填写故障位置与描述'));
-      const rep = { id: genId('rp', null), reporterAccount: user.account, reporterName: user.nickname, category, location, description, priority, status: 'reported', createdAt: Date.now(), updatedAt: Date.now() };
+      const rep = { id: genId('rp', null), reporterAccount: user.account, reporterName: user.nickname, category, location, description, priority, status: 'reported', createdAt: Date.now(), updatedAt: Date.now(), slaRemindedAt: null };
       space.repairs.set(rep.id, rep);
       user.stats.repairCount = (user.stats.repairCount || 0) + 1;
       recordWeekly(user, 'repairs');

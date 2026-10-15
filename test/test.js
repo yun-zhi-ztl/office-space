@@ -308,6 +308,7 @@ async function runTests() {
   let repairs = last(w2, 'repairs');
   assert(repairs && repairs.repairs.length === 1 && repairs.repairs[0].status === 'reported', 'member 提交报修成功');
   assert(repairs.repairs[0].priority === 'high', '报修保留优先级 high');
+   assert(repairs.repairs[0].slaReminded === false, '新报修未触发 SLA 提醒');
   const repairId = repairs.repairs[0].id;
   await sendMsg(w1, { type: 'repairUpdate', repairId, status: 'in_progress' });
   repairs = last(w1, 'repairs');

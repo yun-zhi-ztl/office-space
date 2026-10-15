@@ -22,6 +22,7 @@ function createContext() {
   const ROOM_REMIND_WINDOW_MS = 10 * 60000;
   const BORROW_SOON_WINDOW_MS = 24 * 3600 * 1000;
   const VISIT_REMIND_WINDOW_MS = 15 * 60000;
+  const REPAIR_SLA_MS = 4 * 3600 * 1000;
   const VISIT_TOKEN_TTL_MS = 24 * 3600 * 1000;
 
   // ---------- 内存状态 ----------
@@ -353,6 +354,15 @@ function createContext() {
       return nowMs >= v.remindAt;
     });
   }
+  // 报修超过 SLA 仍未处理（reported），提醒上报人与管理员跟进
+  function dueRepairSlaReminders(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    return [...space.repairs.values()].filter((r) => {
+      if (!r || r.status !== 'reported') return false;
+      if (r.slaRemindedAt) return false;
+      return nowMs >= (r.createdAt || 0) + REPAIR_SLA_MS;
+    });
+  }
   function createSpace(id, name, squat, urinal) {
     const sp = {
       id, name, squatCount: squat == null ? 4 : squat, urinalCount: urinal == null ? 3 : urinal,
@@ -464,6 +474,7 @@ function createContext() {
       handlerAccount: r.handlerAccount || null,
       handlerName: info.get(r.handlerAccount) ? info.get(r.handlerAccount).display : (r.handlerName || ''),
       createdAt: r.createdAt, updatedAt: r.updatedAt,
+       slaReminded: !!r.slaRemindedAt,
     })).sort((a, b) => (b.createdAt - a.createdAt));
   }
   function borrowsPublic(sp, info) {
@@ -717,7 +728,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, VISIT_REMIND_WINDOW_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -729,7 +740,7 @@ function createContext() {
     // 持久化
     saveSpace, saveAccount, saveProfile, saveEntity, deleteEntity, saveStallRating, saveStatsToSpace,
     // 空间
-    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, dueVisitorReminders, createSpace, buildStalls, applyProfileToUser,
+    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, dueVisitorReminders, dueRepairSlaReminders, createSpace, buildStalls, applyProfileToUser,
     // 序列化
     roomPublic, reservationPublic, roomWaitlistPublic, toolsPublic, materialsPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
     // 广播
