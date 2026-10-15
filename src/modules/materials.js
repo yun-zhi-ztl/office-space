@@ -16,7 +16,7 @@ module.exports = function materialsModule(api) {
       const qty = parseInt(msg.qty, 10);
       if (!name) return sendTo(ws, serError('请输入物资名称'));
       if (!Number.isInteger(qty) || qty < 1) return sendTo(ws, serError('请输入有效数量'));
-      const req = { id: genId('mt', null), requesterAccount: user.account, requesterName: user.nickname, name, qty, unit: (msg.unit || '个').trim().slice(0, 10), reason: (msg.reason || '').trim().slice(0, 120), status: 'pending', createdAt: Date.now(), handledAt: null };
+      const req = { id: genId('mt', null), requesterAccount: user.account, requesterName: user.nickname, name, qty, unit: (msg.unit || '个').trim().slice(0, 10), reason: (msg.reason || '').trim().slice(0, 120), status: 'pending', createdAt: Date.now(), handledAt: null, slaRemindedAt: null };
       space.materialRequests.set(req.id, req);
       user.stats.requestCount = (user.stats.requestCount || 0) + 1;
       recordWeekly(user, 'requests');

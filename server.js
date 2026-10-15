@@ -284,6 +284,17 @@ setInterval(() => {
       }
       repairs.repairsBroadcast(sp);
     }
+    // 物资申领 SLA 提醒：超时仍未处理时提醒申请人与管理员
+    const materialSlaReminders = api.dueMaterialSlaReminders(sp, now);
+    if (materialSlaReminders.length) {
+      for (const m of materialSlaReminders) {
+        m.slaRemindedAt = now;
+        api.saveEntity(sp.id, 'material', m.id, m);
+        api.sendToAccount(m.requesterAccount, { type: 'materialSla', requestId: m.id, name: m.name, qty: m.qty });
+        for (const acc of sp.admins) api.sendToAccount(acc, { type: 'materialSla', requestId: m.id, name: m.name, qty: m.qty });
+      }
+      materials.materialsBroadcast(sp);
+    }
   }
 }, 15000);
 

@@ -376,6 +376,21 @@ assertEq(api.REPAIR_SLA_MS, 4 * 3600 * 1000, '报修 SLA 为 4 小时');
 const repPub = api.repairsPublic(spRepair, new Map());
 assertEq(repPub[0].slaReminded, false, 'repairsPublic 暴露 slaReminded');
 
+// ---------- 申领 SLA 超时提醒 ----------
+console.log('\n📋 27. 申领 SLA 超时提醒');
+const spMat = api.createSpace('s19', '申领 SLA 空间', 1, 0);
+const nowMat = 1000000000;
+const mSla = api.MATERIAL_SLA_MS;
+spMat.materialRequests.set('mm1', { id: 'mm1', name: '电池', qty: 4, unit: '节', reason: '遥控器', status: 'pending', requesterAccount: 'alice', requesterName: '甲', createdAt: nowMat - mSla, handledAt: null, slaRemindedAt: null });
+spMat.materialRequests.set('mm2', { id: 'mm2', name: '纸', qty: 2, unit: '包', reason: '打印', status: 'pending', requesterAccount: 'bob', requesterName: '乙', createdAt: nowMat - mSla + 1, handledAt: null, slaRemindedAt: null });
+spMat.materialRequests.set('mm3', { id: 'mm3', name: '订书机', qty: 1, unit: '个', reason: '文书', status: 'pending', requesterAccount: 'carol', requesterName: '丙', createdAt: nowMat - mSla, handledAt: null, slaRemindedAt: nowMat - 1000 });
+spMat.materialRequests.set('mm4', { id: 'mm4', name: '笔', qty: 3, unit: '支', reason: '文具', status: 'fulfilled', requesterAccount: 'dave', requesterName: '丁', createdAt: nowMat - mSla, handledAt: nowMat, slaRemindedAt: null });
+const matSlaRem = api.dueMaterialSlaReminders(spMat, nowMat);
+assertEq(matSlaRem.map((m) => m.id), ['mm1'], '仅返回超时且未提醒过的未处理申领');
+assertEq(api.MATERIAL_SLA_MS, 2 * 24 * 3600 * 1000, '申领 SLA 为 48 小时');
+const matPub = api.materialsPublic(spMat, new Map());
+assertEq(matPub[0].slaReminded, false, 'materialsPublic 暴露 slaReminded');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

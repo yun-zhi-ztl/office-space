@@ -267,6 +267,7 @@ async function runTests() {
   await sendMsg(w2, { type: 'materialRequest', name: '5号电池', qty: 4, unit: '节', reason: '遥控器没电' });
   let mats = last(w2, 'materials');
   assert(mats && mats.requests.length === 1 && mats.requests[0].status === 'pending', 'member 提交申领成功');
+   assert(mats.requests[0].slaReminded === false, '新申领未触发 SLA 提醒');
   const reqId = mats.requests[0].id;
   // 自己不能处理
   await sendMsg(w2, { type: 'materialFulfill', requestId: reqId });

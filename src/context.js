@@ -23,6 +23,7 @@ function createContext() {
   const BORROW_SOON_WINDOW_MS = 24 * 3600 * 1000;
   const VISIT_REMIND_WINDOW_MS = 15 * 60000;
   const REPAIR_SLA_MS = 4 * 3600 * 1000;
+  const MATERIAL_SLA_MS = 2 * 24 * 3600 * 1000;
   const VISIT_TOKEN_TTL_MS = 24 * 3600 * 1000;
 
   // ---------- 内存状态 ----------
@@ -363,6 +364,15 @@ function createContext() {
       return nowMs >= (r.createdAt || 0) + REPAIR_SLA_MS;
     });
   }
+  // 物资申领超过 SLA 仍未处理（pending），提醒申请人与管理员跟进
+  function dueMaterialSlaReminders(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    return [...space.materialRequests.values()].filter((m) => {
+      if (!m || m.status !== 'pending') return false;
+      if (m.slaRemindedAt) return false;
+      return nowMs >= (m.createdAt || 0) + MATERIAL_SLA_MS;
+    });
+  }
   function createSpace(id, name, squat, urinal) {
     const sp = {
       id, name, squatCount: squat == null ? 4 : squat, urinalCount: urinal == null ? 3 : urinal,
@@ -464,6 +474,7 @@ function createContext() {
       handlerAccount: m.handlerAccount || null,
       handlerName: info.get(m.handlerAccount) ? info.get(m.handlerAccount).display : (m.handlerName || ''),
       createdAt: m.createdAt, handledAt: m.handledAt,
+      slaReminded: !!m.slaRemindedAt,
     })).sort((a, b) => (b.createdAt - a.createdAt));
   }
   function repairsPublic(sp, info) {
@@ -728,7 +739,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -740,7 +751,7 @@ function createContext() {
     // 持久化
     saveSpace, saveAccount, saveProfile, saveEntity, deleteEntity, saveStallRating, saveStatsToSpace,
     // 空间
-    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, dueVisitorReminders, dueRepairSlaReminders, createSpace, buildStalls, applyProfileToUser,
+    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, createSpace, buildStalls, applyProfileToUser,
     // 序列化
     roomPublic, reservationPublic, roomWaitlistPublic, toolsPublic, materialsPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
     // 广播
