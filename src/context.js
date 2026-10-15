@@ -19,6 +19,7 @@ function createContext() {
   const WS_PING_MS = 30000;
   const RESERVE_CONFIRM_WINDOW_MS = 5 * 60000;
   const OVERDUE_REMIND_THROTTLE_MS = 24 * 3600 * 1000;
+  const VISIT_TOKEN_TTL_MS = 24 * 3600 * 1000;
 
   // ---------- 内存状态 ----------
   const spaces = new Map();
@@ -452,7 +453,12 @@ function createContext() {
       visitorName: v.visitorName, purpose: v.purpose, contact: v.contact || '',
       expectedAt: v.expectedAt || null, arrivedAt: v.arrivedAt || null, leftAt: v.leftAt || null,
       status: v.status, createdAt: v.createdAt, code: v.code || '',
+      expiresAt: v.expiresAt || null, expired: visitorCodeExpired(v),
     })).sort((a, b) => (b.createdAt - a.createdAt));
+  }
+  function visitorCodeExpired(v, now) {
+    const nowMs = now == null ? Date.now() : now;
+    return !!(v && v.expiresAt && nowMs > v.expiresAt);
   }
   function stallTier(s) {
     if (s.__tier && s.__tierAt === s.ratings.length) return s.__tier;
@@ -677,7 +683,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -691,7 +697,7 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, reservationPublic, roomWaitlistPublic, toolsPublic, materialsPublic, repairsPublic, borrowsPublic, visitorsPublic, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
+    roomPublic, reservationPublic, roomWaitlistPublic, toolsPublic, materialsPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
     // 广播
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, noticesBroadcast, visitorsBroadcast,
     // 坑位辅助

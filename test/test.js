@@ -516,6 +516,8 @@ async function runTests() {
     assert(errDup && errDup.message.includes('已签到'), '重复核销被拒');
     const vs = last(wC2, 'visitors');
     assert(vs.visitors.some(v => v.code === code), '签到码随访客列表广播');
+    const vc = vs.visitors.find(v => v.code === code);
+    assert(vc && vc.expiresAt && vc.expired === false, '签到码携带有效期且未过期');
     wC1.close(); wC2.close();
   }
 

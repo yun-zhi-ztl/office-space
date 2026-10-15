@@ -259,6 +259,14 @@ spC.visitors.set('vc1', { id: 'vc1', hostAccount: 'alice', hostName: '甲', visi
 const vcp = api.visitorsPublic(spC, new Map());
 assertEq(vcp[0].code, 'ABC123', 'visitorsPublic 保留签到码');
 
+// ---------- 访客签到码有效期 ----------
+console.log('\n📋 19b. 访客签到码有效期');
+const nowV = 1000000000;
+assert(api.visitorCodeExpired({ expiresAt: nowV + 3600000 }, nowV) === false, '未到期时未过期');
+assert(api.visitorCodeExpired({ expiresAt: nowV - 1 }, nowV) === true, '到期后已过期');
+assert(api.visitorCodeExpired({ expiresAt: null }, nowV) === false, '无过期时间时不判过期');
+assertEq(api.VISIT_TOKEN_TTL_MS, 24 * 3600 * 1000, '签到码有效期 24 小时');
+
 // ---------- 借用逾期自动提醒 ----------
 console.log('\n📋 20. 借用逾期自动提醒');
 const spRem = api.createSpace('s12', '提醒空间', 1, 0);

@@ -1,7 +1,7 @@
 'use strict';
 // 访客登记模块：visitorCreate / visitorArrived / visitorLeft / visitorCancel / visitorRemove / visitorCheckin
 module.exports = function visitorsModule(api) {
-  const { spaceUserInfo, visitorsPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, genCheckinCode, saveEntity, deleteEntity, sendToAccount } = api;
+  const { spaceUserInfo, visitorsPublic, visitorCodeExpired, VISIT_TOKEN_TTL_MS, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, genCheckinCode, saveEntity, deleteEntity, sendToAccount } = api;
 
   function visitorsBroadcast(space) {
     const info = spaceUserInfo(space.id);
@@ -28,6 +28,7 @@ module.exports = function visitorsModule(api) {
         visitorName, purpose, contact, expectedAt,
         arrivedAt: null, leftAt: null, status: 'pending', createdAt: Date.now(),
         code: genCheckinCode(space),
+        expiresAt: Date.now() + VISIT_TOKEN_TTL_MS,
       };
       space.visitors.set(visitor.id, visitor);
       saveEntity(space.id, 'visitor', visitor.id, visitor);
@@ -38,6 +39,7 @@ module.exports = function visitorsModule(api) {
       if (!code) return sendTo(ws, serError('请输入签到码'));
       const visitor = [...space.visitors.values()].find((v) => v.code && v.code.toUpperCase() === code);
       if (!visitor) return sendTo(ws, serError('签到码不存在'));
+      if (visitorCodeExpired(visitor)) return sendTo(ws, serError('签到码已过期，请联系接待人重新登记'));
       if (visitor.status !== 'pending') return sendTo(ws, serError('该访客已签到或状态已变更'));
       visitor.status = 'arrived';
       visitor.arrivedAt = Date.now();
