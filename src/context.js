@@ -570,6 +570,10 @@ function createContext() {
     { id: 'king', name: '蹲坑之王', desc: '累计使用超过10次', icon: '👑', check: (u) => u.stats.totalVisits >= 10 },
     { id: 'grabber', name: '抢位达人', desc: '临时抢位成功5次', icon: '⚡', check: (u) => u.stats.grabSuccess >= 5 },
     { id: 'rater', name: '评论家', desc: '给坑位评分3次', icon: '✍️', check: (u) => u.stats.ratingsGiven >= 3 },
+    { id: 'borrower', name: '借阅达人', desc: '累计借用设备超过3次', icon: '💳', check: (u) => (u.stats.borrowCount || 0) >= 3 },
+    { id: 'requester', name: '物资管家', desc: '累计申领物资超过3次', icon: '📦', check: (u) => (u.stats.requestCount || 0) >= 3 },
+    { id: 'reporter', name: '热心市民', desc: '累计上报报修超过3次', icon: '🛠️', check: (u) => (u.stats.repairCount || 0) >= 3 },
+    { id: 'meeter', name: '会议达人', desc: '累计会议时长超过60分钟', icon: '🗓️', check: (u) => (u.stats.meetingDuration || 0) >= 60 },
   ];
   function checkAchievements(user) {
     let changed = false;
@@ -586,6 +590,10 @@ function createContext() {
     king: { field: 'totalVisits', target: 10 },
     grabber: { field: 'grabSuccess', target: 5 },
     rater: { field: 'ratingsGiven', target: 3 },
+    borrower: { field: 'borrowCount', target: 3 },
+    requester: { field: 'requestCount', target: 3 },
+    reporter: { field: 'repairCount', target: 3 },
+    meeter: { field: 'meetingDuration', target: 60 },
   };
   function achievementProgress(user, def) {
     const t = ACH_TARGETS[def.id] || { field: 'totalVisits', target: 1 };

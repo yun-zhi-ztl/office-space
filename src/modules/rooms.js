@@ -135,6 +135,7 @@ module.exports = function roomsModule(api) {
         res.status = 'completed';
         const owner = getUserByAccount(res.ownerAccount);
         if (owner) {
+          owner.stats.meetingCount = (owner.stats.meetingCount || 0) + 1;
           owner.stats.meetingDuration += Math.max(0, Math.round((res.endAt - res.startAt) / 60000));
           saveProfile(owner);
           sendToUser(owner.id, { type: 'stats', stats: owner.stats, achievements: owner.achievements });

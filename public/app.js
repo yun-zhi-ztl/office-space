@@ -250,7 +250,7 @@ function submitSpaceRename(){ wsSend({type:'spaceRename', name:$('#spNewName').v
 function submitPause(){ const paused=!!$('#spPaused').value; wsSend({type:'spacePause', paused, reason:$('#spPauseReason').value}); closeModal(); }
 
 /* ============ 概览 ============ */
-const ACH = { punctual:'守时达人', endurance:'持久战', night:'夜行者', king:'蹲坑之王', grabber:'抢位达人', rater:'评论家' };
+const ACH = { punctual:'守时达人', endurance:'持久战', night:'夜行者', king:'蹲坑之王', grabber:'抢位达人', rater:'评论家', borrower:'借阅达人', requester:'物资管家', reporter:'热心市民', meeter:'会议达人' };
 function renderDash(){
   const d=S.DB; const st=(d.stalls||[]); const occupied=st.filter(s=>s.status==='occupied').length;
   const totalBorrowed=d.tools.reduce((a,t)=>a+t.borrowedCount,0);
