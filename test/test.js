@@ -1,5 +1,5 @@
 // 自动化测试：OfficeSpace · 办公空间管理
-// 覆盖五模块：会议室 / 工具借用 / 物资申领 / 报修 / 坑位看板
+// 覆盖全模块：会议室 / 工具借用 / 物资申领 / 报修 / 坑位看板 / 访客 / 考勤 / 工位 / 外出 / 反馈 / 活动 / 投票 / 知识库 / 待办任务 / 通知中心 / 扩展功能
 const http = require('http');
 const WebSocket = require('ws');
 
@@ -979,7 +979,7 @@ async function runTests() {
     await sendMsg(wA, { type: 'getAchievements' });
     const ach = last(wA, 'achievements');
     assert(ach && Array.isArray(ach.achievements), '成就墙返回 achievements 数组');
-    assert(ach.achievements.length === 24, '成就墙含 24 个成就');
+    assert(ach.achievements.length === 27, '成就墙含 27 个成就');
     assert(ach.achievements.every((a) => a.id && a.name && a.desc && a.icon), '每项成就含 id/name/desc/icon');
     assert(ach.achievements.every((a) => a.current != null && a.target != null && a.pct != null && typeof a.unlocked === 'boolean'), '每项成就含进度字段');
     assert(ach.achievements.find((a) => a.id === 'punctual').target === 3, '守时达人目标值为 3');
@@ -1479,6 +1479,109 @@ async function runTests() {
     await sendMsg(wB, { type: 'knowledgeDelete', id: ownId });
     const kb3 = await waitFor(wB, 'knowledge', (k) => k.knowledge && k.knowledge.length === 1, 3000);
     assert(kb3 && kb3.knowledge.length === 1, '成员删除自己的文章成功');
+    wA.close(); wB.close();
+  }
+  // ========== 测试36: 待办任务 ==========
+  console.log('\n📋 测试36: 待办任务');
+  {
+    const spT = (await httpJson('POST', '/api/spaces', { name: '任务办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aT = 'task_' + runKey, bT = 'taskm_' + runKey;
+    await reg(aT, 'pw', '任务管理员'); await reg(bT, 'pw', '任务成员');
+    const wA = await createWSClient(); await loginTo(wA, spT.id, aT, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spT.id, bT, 'pw');
+    // 管理员创建任务并指派给成员
+    await sendMsg(wA, { type: 'taskCreate', title: '修复会议室投影', description: '投影仪无信号', priority: 'high', assigneeAccount: bT });
+    const tk0 = await waitFor(wA, 'tasks', (t) => t.tasks && t.tasks.length === 1, 3000);
+    assert(tk0 && tk0.tasks[0].title === '修复会议室投影', '管理员创建任务成功');
+    assert(tk0 && tk0.tasks[0].status === 'pending' && tk0.tasks[0].assigneeAccount === bT, '任务初始 pending 且带指派对象');
+    assert(tk0 && tk0.tasks[0].priority === 'high' && tk0.tasks[0].myAssignee === false, '任务保留优先级，创建人视角 myAssignee=false');
+    const tkId = tk0.tasks[0].id;
+    // 成员收到指派通知
+    const assigned = await waitFor(wB, 'notifications', (n) => n.notifications && n.notifications.some((x) => x.type === 'taskAssigned'), 3000);
+    assert(assigned && assigned.notifications.some((x) => x.type === 'taskAssigned'), '指派后成员收到通知');
+    // 成员视角任务列表
+    const tkB = await waitFor(wB, 'tasks', (t) => t.tasks && t.tasks.some((x) => x.id === tkId && x.myAssignee === true), 3000);
+    assert(tkB && tkB.tasks.find((x) => x.id === tkId).myAssignee === true, '成员任务列表标记 myAssignee');
+    // 负责人推进：开始 + 完成
+    await sendMsg(wB, { type: 'taskStart', taskId: tkId });
+    const tk1 = await waitFor(wB, 'tasks', (t) => t.tasks && t.tasks.some((x) => x.id === tkId && x.status === 'in_progress'), 3000);
+    assert(tk1 && tk1.tasks.find((x) => x.id === tkId).status === 'in_progress', '负责人开始任务成功');
+    await sendMsg(wB, { type: 'taskComplete', taskId: tkId });
+    const tk2 = await waitFor(wB, 'tasks', (t) => t.tasks && t.tasks.some((x) => x.id === tkId && x.status === 'done'), 3000);
+    assert(tk2 && tk2.tasks.find((x) => x.id === tkId).status === 'done', '负责人完成任务成功');
+    const doneNotif = await waitFor(wA, 'notifications', (n) => n.notifications && n.notifications.some((x) => x.type === 'taskCompleted'), 3000);
+    assert(doneNotif && doneNotif.notifications.some((x) => x.type === 'taskCompleted'), '任务完成后创建人收到通知');
+    await sendMsg(wB, { type: 'getStats' });
+    const stT = last(wB, 'stats');
+    assert(stT && stT.stats.taskDoneCount === 1, '完成任务累计 taskDoneCount=1');
+    // 非创建人删除被拒
+    await sendMsg(wB, { type: 'taskRemove', taskId: tkId });
+    const errRm = mk(wB, 'error').pop();
+    assert(errRm && errRm.message.includes('只有创建人或管理员可删除'), '非创建人删除任务被拒');
+    // 管理员删除
+    await sendMsg(wA, { type: 'taskRemove', taskId: tkId });
+    const tk3 = await waitFor(wA, 'tasks', (t) => t.tasks && t.tasks.length === 0, 3000);
+    assert(tk3 && tk3.tasks.length === 0, '管理员删除任务成功');
+    wA.close(); wB.close();
+  }
+
+  // ========== 测试37: 通知中心 ==========
+  console.log('\n📋 测试37: 通知中心');
+  {
+    const spN = (await httpJson('POST', '/api/spaces', { name: '通知办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aN = 'notif_' + runKey, bN = 'notifm_' + runKey;
+    await reg(aN, 'pw', '通知管理员'); await reg(bN, 'pw', '通知成员');
+    const wA = await createWSClient(); await loginTo(wA, spN.id, aN, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spN.id, bN, 'pw');
+    // 通过物资满足触发系统通知
+    await sendMsg(wB, { type: 'materialRequest', name: '电池', qty: 4, unit: '节', reason: '遥控器' });
+    const reqN = last(wB, 'materials').requests[0];
+    await sendMsg(wA, { type: 'materialFulfill', requestId: reqN.id });
+    // 成员收到通知且未读
+    const nt0 = await waitFor(wB, 'notifications', (n) => n.notifications && n.notifications.some((x) => x.type === 'materialFulfilled'), 3000);
+    assert(nt0 && nt0.notifications.some((x) => x.type === 'materialFulfilled'), '成员收到物资满足通知');
+    assert(nt0 && nt0.unreadCount >= 1, '通知列表携带未读数≥1');
+    assert(nt0 && nt0.notifications.some((x) => x.read === false), '未读通知 read=false');
+    // 标记单条已读
+    const ntId = nt0.notifications.find((x) => x.type === 'materialFulfilled').id;
+    await sendMsg(wB, { type: 'notificationRead', notificationId: ntId });
+    const nt1 = await waitFor(wB, 'notifications', (n) => n.notifications && n.notifications.some((x) => x.id === ntId && x.read === true), 3000);
+    assert(nt1 && nt1.notifications.find((x) => x.id === ntId).read === true, '单条通知标记已读成功');
+    // 全部已读
+    await sendMsg(wB, { type: 'notificationReadAll' });
+    const nt2 = await waitFor(wB, 'notifications', (n) => n.unreadCount === 0, 3000);
+    assert(nt2 && nt2.unreadCount === 0, '全部已读后未读数为 0');
+    wA.close(); wB.close();
+  }
+
+  // ========== 测试38: 考勤连续打卡与出勤日历 ==========
+  console.log('\n📋 测试38: 考勤连续打卡与出勤日历');
+  {
+    const spC = (await httpJson('POST', '/api/spaces', { name: '打卡办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aC = 'cal_' + runKey, bC = 'calm_' + runKey;
+    await reg(aC, 'pw', '日历管理员'); await reg(bC, 'pw', '日历成员');
+    const wA = await createWSClient(); await loginTo(wA, spC.id, aC, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spC.id, bC, 'pw');
+    await sendMsg(wA, { type: 'attendConfig', workStart: '00:00', workEnd: '18:00', lateMinutes: 0 });
+    // 成员打卡（今日）
+    await sendMsg(wB, { type: 'attendCheckIn' });
+    const attIn = last(wB, 'attendance');
+    assert(attIn && attIn.records.length === 1, '成员打卡成功');
+    await sendMsg(wB, { type: 'getStats' });
+    const stB = last(wB, 'stats');
+    assert(stB && stB.stats.attendanceStreak >= 1, '今日打卡后连续打卡数≥1');
+    assert(typeof stB.stats.attendancePerfectMonths === 'number', '打卡后统计含全勤月数');
+    // 获取出勤日历
+    const d = new Date();
+    const yyyy = d.getFullYear(), mm = d.getMonth() + 1;
+    await sendMsg(wB, { type: 'getAttendanceCalendar', year: yyyy, month: mm });
+    const cal = last(wB, 'attendanceCalendar');
+    assert(cal && cal.calendar && Array.isArray(cal.calendar.cells), '返回出勤日历单元格数组');
+    const todayStr = `${yyyy}-${String(mm).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const todayCell = cal.calendar.cells.find((c) => c && c.date === todayStr);
+    assert(todayCell && todayCell.checkedIn, '今日单元格包含打卡时间');
+    assert(cal.calendar.streak >= 1, '日历返回连续打卡数≥1');
+    assert(typeof cal.calendar.perfectMonthCount === 'number', '日历返回全勤月数');
     wA.close(); wB.close();
   }
   console.log(`\n${'='.repeat(50)}`);

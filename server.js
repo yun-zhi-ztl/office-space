@@ -30,6 +30,8 @@ const moodModule = require('./src/modules/mood');
 const eventsModule = require('./src/modules/events');
 const pollsModule = require('./src/modules/polls');
 const knowledgeModule = require('./src/modules/knowledge');
+const tasksModule = require('./src/modules/tasks');
+const notificationsModule = require('./src/modules/notifications');
 
 // ---------- 上下文 ----------
 const api = createContext();
@@ -74,6 +76,8 @@ const mood = moodModule(api);
 const events = eventsModule(api);
 const polls = pollsModule(api);
 const knowledge = knowledgeModule(api);
+const tasks = tasksModule(api);
+const notifications = notificationsModule(api);
 
 // ---------- 分页加载 ----------
 function handleFetchPage(ws, user, space, msg) {
@@ -121,6 +125,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'getAchievements') { api.sendTo(ws, { type: 'achievements', achievements: api.achievementDefsPublic(user) }); return; }
     if (msg.type === 'getMyReminders') { api.sendTo(ws, { type: 'myReminders', reminders: api.buildMyReminders(space, user) }); return; }
     if (msg.type === 'getSpaceTrend') { api.sendTo(ws, { type: 'spaceTrend', trend: api.buildSpaceTrend(space, msg.days) }); return; }
+    if (msg.type === 'getAttendanceCalendar') { api.sendTo(ws, { type: 'attendanceCalendar', calendar: api.attendanceCalendar(space, user.account, msg.year, msg.month) }); return; }
     if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }
 
     switch (msg.type) {
@@ -156,6 +161,10 @@ wss.on('connection', (ws) => {
         polls.handlePolls(ws, user, space, msg); break;
       case 'knowledgeCreate': case 'knowledgeEdit': case 'knowledgeDelete': case 'knowledgeLike':
         knowledge.handleKnowledge(ws, user, space, msg); break;
+      case 'taskCreate': case 'taskAssign': case 'taskUpdate': case 'taskStart': case 'taskComplete': case 'taskRemove':
+        tasks.handleTasks(ws, user, space, msg); break;
+      case 'notificationRead': case 'notificationReadAll':
+        notifications.handleNotifications(ws, user, space, msg); break;
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
       case 'announce': extras.announce(ws, user, space, msg); break;
       case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;

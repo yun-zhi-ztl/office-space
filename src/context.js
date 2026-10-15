@@ -22,6 +22,9 @@ function createContext() {
   const EVENT_CATEGORIES = ['培训', '分享会', '团建', '生日会', '会议', '其它'];
   const POLL_MAX_OPTIONS = 5;
   const KNOWLEDGE_CATEGORIES = ['规章制度', '操作指引', '设备说明', '常见问题', '其他'];
+  const TASK_PRIORITIES = ['high', 'normal', 'low'];
+  const TASK_STATUSES = ['pending', 'in_progress', 'done', 'cancelled'];
+  const NOTIFICATION_LEVELS = ['info', 'warn', 'success'];
   const LIST_PAGE = 30;
   const PERSIST_DEBOUNCE_MS = 500;
   const WS_PING_MS = 30000;
@@ -216,6 +219,8 @@ function createContext() {
       else if (r.kind === 'event') sp.events.set(data.id, data);
       else if (r.kind === 'poll') sp.polls.set(data.id, data);
       else if (r.kind === 'knowledge') sp.knowledge.set(data.id, data);
+      else if (r.kind === 'notification') sp.notifications.set(data.id, data);
+      else if (r.kind === 'task') sp.tasks.set(data.id, data);
       else if (r.kind === 'notice') { sp.notices.push(data); sp.notices.sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
       else if (r.kind === 'stall') { const st = sp.stalls.find((s) => s.id === data.id); if (st) st.ratings = (data.ratings || []).slice(-60); }
     }
@@ -338,10 +343,10 @@ function createContext() {
 
   // ---------- 空间 ----------
   function weekKey(ts) { const d = new Date(ts || Date.now()); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
-  function newWeekly() { return { key: weekKey(), visits: 0, borrows: 0, requests: 0, repairs: 0, meetings: 0, attends: 0, desks: 0, ooo: 0, events: 0, polls: 0 }; }
-  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, meetingActualDuration: 0, helperCount: 0, favoriteRooms: [], roomRatesGiven: 0, favoriteCount: 0, attendanceCount: 0, earlyCount: 0, deskCount: 0, oooCount: 0, eventCount: 0, eventAttendCount: 0, pollCreateCount: 0, pollVoteCount: 0, knowledgeCount: 0, knowledgeLikeCount: 0, weekly: newWeekly() }; }
+  function newWeekly() { return { key: weekKey(), visits: 0, borrows: 0, requests: 0, repairs: 0, meetings: 0, attends: 0, desks: 0, ooo: 0, events: 0, polls: 0, tasks: 0 }; }
+  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, meetingActualDuration: 0, helperCount: 0, favoriteRooms: [], roomRatesGiven: 0, favoriteCount: 0, attendanceCount: 0, earlyCount: 0, deskCount: 0, oooCount: 0, eventCount: 0, eventAttendCount: 0, pollCreateCount: 0, pollVoteCount: 0, knowledgeCount: 0, knowledgeLikeCount: 0, taskCreateCount: 0, taskDoneCount: 0, attendanceStreak: 0, attendancePerfectMonths: 0, weekly: newWeekly() }; }
   function recordWeekly(user, field) { if (!user.stats.weekly || user.stats.weekly.key !== weekKey()) user.stats.weekly = newWeekly(); user.stats.weekly[field] = (user.stats.weekly[field] || 0) + 1; }
-  function weeklyScore(stats) { const w = stats.weekly; if (!w || w.key !== weekKey()) return 0; return (w.visits || 0) + (w.borrows || 0) + (w.requests || 0) + (w.repairs || 0) + (w.meetings || 0) + (w.attends || 0) + (w.desks || 0) + (w.ooo || 0) + (w.events || 0) + (w.polls || 0); }
+  function weeklyScore(stats) { const w = stats.weekly; if (!w || w.key !== weekKey()) return 0; return (w.visits || 0) + (w.borrows || 0) + (w.requests || 0) + (w.repairs || 0) + (w.meetings || 0) + (w.attends || 0) + (w.desks || 0) + (w.ooo || 0) + (w.events || 0) + (w.polls || 0) + (w.tasks || 0); }
   function borrowOverdue(b, now) {
     if (!b || b.status !== 'borrowed') return false;
     const nowMs = now == null ? Date.now() : now;
@@ -466,6 +471,7 @@ function createContext() {
       attendanceConfig: newAttendanceConfig(), attendance: new Map(),
       desks: [], deskReservations: new Map(), ooo: new Map(), feedbacks: new Map(), moods: new Map(),
       events: new Map(), polls: new Map(), knowledge: new Map(),
+      notifications: new Map(), tasks: new Map(),
     };
     sp.weeklyReportDate = null;
     sp.stalls = buildStalls(squat == null ? 4 : squat, urinal == null ? 3 : urinal);
@@ -1012,6 +1018,128 @@ function createContext() {
     return { total: ks.length, liked: ks.reduce((s, k) => s + (k.likes ? k.likes.length : 0), 0), authors: new Set(ks.map((k) => k.authorAccount)).size };
   }
 
+  // ---------- 待办任务序列化 ----------
+  // 空间级任务看板：成员可发起 / 指派 / 认领，按优先级 + 截止时间排序
+  function tasksPublic(space, info, user) {
+    const weight = { high: 0, normal: 1, low: 2 };
+    return [...space.tasks.values()].map((t) => {
+      const assignee = t.assigneeAccount ? info.get(t.assigneeAccount) : null;
+      return {
+        id: t.id, title: t.title, description: t.description || '',
+        creatorAccount: t.creatorAccount,
+        creatorName: info.get(t.creatorAccount) ? info.get(t.creatorAccount).display : t.creatorName,
+        assigneeAccount: t.assigneeAccount || null,
+        assigneeName: assignee ? assignee.display : (t.assigneeName || ''),
+        priority: t.priority || 'normal', status: t.status,
+        dueAt: t.dueAt || null, completedAt: t.completedAt || null,
+        createdAt: t.createdAt, updatedAt: t.updatedAt,
+        myAssignee: user && t.assigneeAccount === user.account,
+        myCreator: user && t.creatorAccount === user.account,
+        myTask: user && (t.assigneeAccount === user.account || t.creatorAccount === user.account || isAdmin(space, user.account)),
+      };
+    }).sort((a, b) => {
+      const done = (s) => s.status === 'done' || s.status === 'cancelled';
+      if (done(a) !== done(b)) return done(a) ? 1 : -1;
+      if ((weight[a.priority] ?? 2) !== (weight[b.priority] ?? 2)) return weight[a.priority] - weight[b.priority];
+      return ((a.dueAt || Infinity) - (b.dueAt || Infinity));
+    });
+  }
+  function taskStats(space) {
+    const tasks = [...space.tasks.values()];
+    return {
+      total: tasks.length,
+      pending: tasks.filter((t) => t.status === 'pending').length,
+      in_progress: tasks.filter((t) => t.status === 'in_progress').length,
+      done: tasks.filter((t) => t.status === 'done').length,
+      cancelled: tasks.filter((t) => t.status === 'cancelled').length,
+      open: tasks.filter((t) => !t.assigneeAccount && t.status !== 'done' && t.status !== 'cancelled').length,
+    };
+  }
+
+  // ---------- 通知中心序列化 ----------
+  // 系统重要事件留痕（指派 / 完成 / 超时 / 提醒），全员可看、按人标记已读
+  function notificationPublic(n, user) {
+    return {
+      id: n.id, type: n.type, level: n.level || 'info',
+      title: n.title, body: n.body || '',
+      createdAt: n.createdAt,
+      read: user ? !!(n.readBy && n.readBy[user.account]) : false,
+    };
+  }
+  function notificationsPublic(space, user) {
+    const list = [...space.notifications.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map((n) => notificationPublic(n, user));
+    return { notifications: list.slice(0, LIST_PAGE), total: list.length, unreadCount: user ? list.filter((n) => !n.read).length : 0 };
+  }
+
+  // ---------- 考勤连续打卡 / 日历 ----------
+  // 连续打卡天数（今天未打则从昨天起算），避免「今天没打」直接断档
+  function attendanceStreak(space, account, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const daySet = new Set();
+    for (const [key, r] of space.attendance) {
+      if (key.split('::')[0] !== account) continue;
+      daySet.add(r.date);
+    }
+    const ds = new Date(nowMs); ds.setHours(0, 0, 0, 0);
+    if (!daySet.has(todayKey(ds.getTime()))) ds.setDate(ds.getDate() - 1);
+    let streak = 0;
+    while (daySet.has(todayKey(ds.getTime()))) { streak++; ds.setDate(ds.getDate() - 1); }
+    return streak;
+  }
+  // 全勤月数：按月聚合，至少 1 天打卡且当月无迟到
+  function attendancePerfectMonths(space, account) {
+    const monthMap = new Map();
+    for (const [key, r] of space.attendance) {
+      if (key.split('::')[0] !== account) continue;
+      if (!r.checkInAt) continue;
+      const d = new Date(r.date + 'T00:00:00');
+      const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const cur = monthMap.get(mk) || { total: 0, late: 0 };
+      cur.total++;
+      if (r.isLate) cur.late++;
+      monthMap.set(mk, cur);
+    }
+    return [...monthMap.values()].filter((v) => v.late === 0).length;
+  }
+  // 某月考勤日历 + 连续打卡 + 全勤月数
+  function attendanceCalendar(space, account, year, month, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const d0 = new Date(nowMs);
+    const y = parseInt(year, 10) || d0.getFullYear();
+    const m = parseInt(month, 10) || (d0.getMonth() + 1);
+    const monthKey = `${y}-${String(m).padStart(2, '0')}`;
+    const byDate = new Map();
+    for (const [key, r] of space.attendance) {
+      if (key.split('::')[0] !== account) continue;
+      byDate.set(r.date, r);
+    }
+    const first = new Date(y, m - 1, 1);
+    const last = new Date(y, m, 0);
+    const lead = first.getDay();
+    const total = last.getDate();
+    const cells = [];
+    for (let i = 0; i < lead; i++) cells.push(null);
+    for (let day = 1; day <= total; day++) {
+      const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const rec = byDate.get(dateStr);
+      cells.push(rec ? { date: dateStr, checkedIn: rec.checkInAt || null, checkedOut: rec.checkOutAt || null, isLate: !!rec.isLate, workedMinutes: rec.workedMinutes || 0 } : { date: dateStr });
+    }
+    const monthMap = new Map();
+    for (const [key, r] of space.attendance) {
+      if (key.split('::')[0] !== account) continue;
+      if (!r.checkInAt) continue;
+      const d = new Date(r.date + 'T00:00:00');
+      const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const cur = monthMap.get(mk) || { total: 0, late: 0 };
+      cur.total++;
+      if (r.isLate) cur.late++;
+      monthMap.set(mk, cur);
+    }
+    const curMonth = monthMap.get(monthKey);
+    const currentMonthPerfect = !!curMonth && curMonth.late === 0;
+    return { year: y, month: m, cells, streak: attendanceStreak(space, account, now), perfectMonthCount: attendancePerfectMonths(space, account), currentMonthPerfect };
+  }
+
   // ---------- 广播 ----------
   function broadcast(spaceId, type, payload) { broadcastTo(spaceId, Object.assign({ type }, payload)); }
   function broadcastUsers(sp) {
@@ -1082,6 +1210,33 @@ function createContext() {
     const knowledge = knowledgePublic(sp, info, null);
     broadcast(sp.id, 'knowledge', { knowledge: knowledge.slice(0, LIST_PAGE), total: knowledge.length, stats: knowledgeStats(sp) });
   }
+  function tasksBroadcast(sp) {
+    const info = spaceUserInfo(sp.id);
+    const stats = taskStats(sp);
+    // 与 notificationsBroadcast 一致：按用户下发，使 myAssignee / myCreator / myTask 个性化
+    for (const u of getUsersIn(sp.id)) {
+      const tasks = tasksPublic(sp, info, u);
+      sendToUser(u.id, { type: 'tasks', tasks: tasks.slice(0, LIST_PAGE), total: tasks.length, stats });
+    }
+  }
+  function notificationsBroadcast(sp) {
+    const info = spaceUserInfo(sp.id);
+    for (const u of getUsersIn(sp.id)) {
+      sendToUser(u.id, { type: 'notifications', ...notificationsPublic(sp, u) });
+    }
+  }
+  // 通知中心统一入口：写入 + 持久化 + 广播给全员（含各自未读数）
+  function pushNotification(space, n) {
+    const notice = { id: genId('nt', null), type: n.type || 'info', level: NOTIFICATION_LEVELS.includes(n.level) ? n.level : 'info', title: String(n.title || '').slice(0, 80), body: String(n.body || '').slice(0, 300), createdAt: Date.now(), readBy: {} };
+    space.notifications.set(notice.id, notice);
+    if (space.notifications.size > 200) {
+      const removed = [...space.notifications.entries()].sort((a, b) => a[1].createdAt - b[1].createdAt).slice(0, space.notifications.size - 200);
+      for (const [id] of removed) { space.notifications.delete(id); deleteEntity(space.id, 'notification', id); }
+    }
+    saveEntity(space.id, 'notification', notice.id, notice);
+    notificationsBroadcast(space);
+    return notice;
+  }
   function broadcastAll(sp) {
     const info = spaceUserInfo(sp.id);
     const reservations = roomReservationsPublic(sp, info);
@@ -1107,6 +1262,8 @@ function createContext() {
     eventsBroadcast(sp);
     pollsBroadcast(sp);
     knowledgeBroadcast(sp);
+    tasksBroadcast(sp);
+    notificationsBroadcast(sp);
     broadcastUsers(sp);
     broadcastLeaderboard(sp);
   }
@@ -1142,6 +1299,9 @@ function createContext() {
     { id: 'pollVoter', name: '参与决策者', desc: '参与投票累计5次', icon: '🙋', check: (u) => (u.stats.pollVoteCount || 0) >= 5 },
     { id: 'knowledgeAuthor', name: '知识贡献者', desc: '发布知识累计3篇', icon: '📝', check: (u) => (u.stats.knowledgeCount || 0) >= 3 },
     { id: 'knowledgeLiked', name: '知识之星', desc: '获得点赞累计10个', icon: '⭐', check: (u) => (u.stats.knowledgeLikeCount || 0) >= 10 },
+    { id: 'taskMaker', name: '任务达人', desc: '创建任务累计5次', icon: '📝', check: (u) => (u.stats.taskCreateCount || 0) >= 5 },
+    { id: 'taskDoer', name: '高效执行', desc: '完成任务累计5次', icon: '✅', check: (u) => (u.stats.taskDoneCount || 0) >= 5 },
+    { id: 'streakKnight', name: '连续打卡达人', desc: '连续打卡7天', icon: '🔥', check: (u) => (u.stats.attendanceStreak || 0) >= 7 },
   ];
   function checkAchievements(user) {
     let changed = false;
@@ -1176,6 +1336,9 @@ function createContext() {
     pollVoter: { field: 'pollVoteCount', target: 5 },
     knowledgeAuthor: { field: 'knowledgeCount', target: 3 },
     knowledgeLiked: { field: 'knowledgeLikeCount', target: 10 },
+    taskMaker: { field: 'taskCreateCount', target: 5 },
+    taskDoer: { field: 'taskDoneCount', target: 5 },
+    streakKnight: { field: 'attendanceStreak', target: 7 },
   };
   function achievementProgress(user, def) {
     const t = ACH_TARGETS[def.id] || { field: 'totalVisits', target: 1 };
@@ -1324,7 +1487,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, EVENT_CATEGORIES, POLL_MAX_OPTIONS, KNOWLEDGE_CATEGORIES, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, EVENT_CATEGORIES, POLL_MAX_OPTIONS, KNOWLEDGE_CATEGORIES, TASK_PRIORITIES, TASK_STATUSES, NOTIFICATION_LEVELS, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -1338,9 +1501,9 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
     // 广播
-    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, eventsBroadcast, pollsBroadcast, knowledgeBroadcast, noticesBroadcast, pushNotice, visitorsBroadcast,
+    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, eventsBroadcast, pollsBroadcast, knowledgeBroadcast, tasksBroadcast, notificationsBroadcast, noticesBroadcast, pushNotification, pushNotice, visitorsBroadcast,
     // 坑位辅助
     activeStallCount, checkAchievements, notifyUrge, ACHIEVEMENT_DEFS,
     achievementProgress, achievementDefsPublic,

@@ -18,18 +18,19 @@ const S = {
   lastSpace: localStorage.getItem('os_space')||'',
   ws: null, me:null, space:null, module:'rooms',
   pendingLogin:null,
-  DB:{ rooms:[], reservations:[], waitlist:[], waitlistTotal:0, tools:[], requests:[], materialTemplates:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[], inventory:{items:[],issues:[]}, attendance:{records:[],stats:{},config:{workStart:'09:00',workEnd:'18:00',lateMinutes:15}}, desks:{desks:[],reservations:[],reservationTotal:0}, ooo:{records:[],stats:{}}, events:[], polls:[], knowledge:[] },
+  DB:{ rooms:[], reservations:[], waitlist:[], waitlistTotal:0, tools:[], requests:[], materialTemplates:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[], inventory:{items:[],issues:[]}, attendance:{records:[],stats:{},config:{workStart:'09:00',workEnd:'18:00',lateMinutes:15}}, desks:{desks:[],reservations:[],reservationTotal:0}, ooo:{records:[],stats:{}}, events:[], polls:[], knowledge:[], tasks:[], notifications:[] },
   visitorTotal:0, visitorOffset:0,
   borrowTotal:0, borrowOffset:0,
-  eventTotal:0, eventOffset:0, pollTotal:0, pollOffset:0, knowledgeTotal:0, knowledgeOffset:0,
+  eventTotal:0, eventOffset:0, pollTotal:0, pollOffset:0, knowledgeTotal:0, knowledgeOffset:0, taskTotal:0, taskStats:{}, notificationTotal:0, notificationUnread:0,
   roomStats:null,
   deskStats:null,
   lastRoomBook:null,
   favorites:[],
   weeklyReport:null,
+  attendanceCalendar:null,
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -68,6 +69,8 @@ function dispatch(m){
     case 'events': S.DB.events=m.events||[]; S.eventTotal=m.total||0; S.eventOffset=S.DB.events.length; S.eventStats=m.stats||{}; break;
     case 'polls': S.DB.polls=m.polls||[]; S.pollTotal=m.total||0; S.pollOffset=S.DB.polls.length; S.pollStats=m.stats||{}; break;
     case 'knowledge': S.DB.knowledge=m.knowledge||[]; S.knowledgeTotal=m.total||0; S.knowledgeOffset=S.DB.knowledge.length; S.knowledgeStats=m.stats||{}; break;
+    case 'tasks': S.DB.tasks=m.tasks||[]; S.taskTotal=m.total||0; S.taskStats=m.stats||{}; break;
+    case 'notifications': S.DB.notifications=m.notifications||[]; S.notificationTotal=m.total||0; S.notificationUnread=m.unreadCount||0; renderSidebar(); break;
     case 'materials': S.DB.requests=m.requests; S.DB.materialTemplates=m.templates||[]; S.DB.matTotal=m.total||0; S.DB.matOffset=S.DB.requests.length; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; break;
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
@@ -104,6 +107,15 @@ function dispatch(m){
     case 'knowledgeCreated': toast('📘 知识已发布','success'); render(); break;
     case 'knowledgeUpdated': toast('✔ 文章已更新','success'); render(); break;
     case 'knowledgeLiked': { const k=(S.DB.knowledge||[]).find(x=>x.id===m.id); if(k){ k.liked=m.liked; k.likeCount=Math.max(0,(k.likeCount||0)+(m.liked?1:-1)); } toast(m.liked?'👍 已点赞':'已取消点赞','success'); render(); break; }
+    case 'taskCreated': toast('📝 任务已创建','success'); render(); break;
+    case 'taskAssigned': toast('📌 任务已指派给你：'+(m.title||''),'info'); render(); break;
+    case 'taskUpdated': toast('✔ 任务已更新','success'); render(); break;
+    case 'taskStarted': toast('▶️ 任务已开始','info'); render(); break;
+    case 'taskCompleted': toast('✅ 任务已完成','success'); render(); break;
+    case 'taskRemoved': toast('已删除任务','info'); render(); break;
+    case 'notificationRead': S.notificationUnread=Math.max(0,S.notificationUnread-1); renderSidebar(); break;
+    case 'notificationReadAll': S.notificationUnread=0; renderSidebar(); break;
+    case 'attendanceCalendar': S.attendanceCalendar=m.calendar||null; render(); break;
     case 'oooReturnSoon': toast('🔔 外出预计 '+fmtTime(m.expectedReturnAt)+' 返回，请记得回来','warn'); render(); break;
     case 'borrowDueSoon': toast('🔔 你借的设备即将到期，请按时归还','warn'); render(); break;
     case 'roomReminder': { const rm=(S.DB.rooms||[]).find(r=>r.id===m.roomId); toast('🔔 '+(rm?rm.name:'会议室')+' 即将开始：'+fmtTime(m.startAt),'success'); break; }
@@ -145,14 +157,14 @@ function dispatch(m){
   if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','roomStats','users','leaderboard','achievements','myReminders','spaceTrend','notices','digest'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
   else { b.style.display='none'; }
 }
 function renderAll(){ render(); }
-function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); }
+function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); }
 
 /* 分页：广播已按最近 PAGE 下发，前端按 offset 加载更多 */
 const PAGE = 30;
@@ -222,7 +234,7 @@ function renderSidebar(){
   $('#sidebar').innerHTML = `
     <div class="logo">OfficeSpace<small>办公空间管理</small></div>
     <div class="spacename"><b>${S.space?esc(S.space.name):'--'}</b>${S.admin?' · 管理员':''}</div>
-    <nav class="nav">${MODULES.map(m=>`<button data-m="${m[0]}" class="${S.module===m[0]?'active':''}" onclick="switchModule('${m[0]}')"><span class="ic">${m[2]}</span>${m[1]}</button>`).join('')}
+    <nav class="nav">${MODULES.map(m=>{ const badge = m[0]==='notifications' && S.notificationUnread ? `<span class="badge warn">${S.notificationUnread}</span>` : ''; return `<button data-m="${m[0]}" class="${S.module===m[0]?'active':''}" onclick="switchModule('${m[0]}')"><span class="ic">${m[2]}</span>${m[1]}${badge}</button>`; }).join('')}
       <a class="nav" href="screen.html?space=${S.space?S.space.id:''}" target="_blank" style="text-decoration:none"><button style="width:100%"><span class="ic">📺</span>电视墙大屏</button></a></nav>
     <div class="sidefoot">
       <div class="who">${who}</div>
@@ -822,6 +834,7 @@ function renderAttendance(){
       <div class="card"><h3>⏰ 今日迟到</h3><div style="font-size:30px;font-weight:800">${st.late||0}</div><div class="meta">人迟到</div></div>
       <div class="card"><h3>🌙 已下班</h3><div style="font-size:30px;font-weight:800">${st.checkedOut||0}</div><div class="meta">人已打下班卡</div></div>
       <div class="card"><h3>✅ 下班完成率</h3><div style="font-size:30px;font-weight:800">${st.completeRate||0}%</div><div class="meta">打卡 ${st.checkedIn||0} · 迟到率 ${st.lateRate||0}%</div></div>
+      <div class="card"><h3>🔥 连续打卡</h3><div style="font-size:30px;font-weight:800">${(S.me.stats&&S.me.stats.attendanceStreak)||0}</div><div class="meta">天 · 全勤月 ${(S.me.stats&&S.me.stats.attendancePerfectMonths)||0}</div></div>
     </div>
     <h3 style="margin:22px 0 10px">🔖 我的打卡</h3>
     <div class="list">${mine?`<div class="row"><span><span class="who">${esc(mine.name||me)}</span> ${attendBadge(mine.status)}
@@ -834,10 +847,25 @@ function renderAttendance(){
     <div class="list">${(d.records||[]).length?d.records.map(r=>`<div class="row"><span><span class="who">${esc(r.name||r.account)}</span> ${attendBadge(r.status)}
         <div class="when">上班 ${r.checkInAt?fmtTime(r.checkInAt):'--'}${r.isLate?' <span class="badge bad">迟到</span>':''}
         ${r.checkOutAt?' · 下班 '+fmtTime(r.checkOutAt)+'（工作 '+Math.round((r.workedMinutes||0)/60)+'h'+((r.workedMinutes||0)%60?(r.workedMinutes%60)+'m':'')+'）':''}</div>
-      </span></div>`).join(''):'<div class="empty">今日还没有人打卡</div>'}</div>`;
+      </span></div>`).join(''):'<div class="empty">今日还没有人打卡</div>'}</div>
+     <h3 style="margin:22px 0 10px">🗓️ 出勤日历</h3>
+     ${attendanceCalendarHtml()}
+   </div>`;
 }
 function attendCheckIn(){ wsSend({type:'attendCheckIn'}); }
 function attendCheckOut(){ wsSend({type:'attendCheckOut'}); }
+function attendanceCalendarHtml(){
+  const c=S.attendanceCalendar;
+  if(!c) return `<div class="card"><div class="empty">加载出勤日历…</div></div>`;
+  const cells = c.cells.map(cell=>{
+    if(!cell) return `<div class="calcell empty"></div>`;
+    const cls = cell.isLate?'late':(cell.checkedIn?'ok':'');
+    return `<div class="calcell ${cls}" title="${cell.date} ${cell.checkedIn?('上班打卡'+(cell.isLate?' 迟到':'')):'未打卡'}">${cell.date.slice(8)}</div>`;
+  }).join('');
+  return `<div class="fs" style="margin-bottom:8px"><button class="btn sm" onclick="loadAttendanceCalendar(${c.year}, ${c.month-1})">← 上月</button><b style="margin:0 8px">${c.year}年 ${c.month}月</b><button class="btn sm" onclick="loadAttendanceCalendar(${c.year}, ${c.month+1})">下月 →</button><span class="hint" style="margin-left:8px">🔥 连续 ${c.streak} 天 · 全勤月 ${c.perfectMonthCount} · 本月 ${c.currentMonthPerfect?'✅ 全勤':'有迟到'}</span></div>
+    <div class="calgrid">${cells}</div>`;
+}
+function loadAttendanceCalendar(year, month){ wsSend({type:'getAttendanceCalendar',year,month}); }
 function openAttendConfig(){
   const c=S.DB.attendance&&S.DB.attendance.config||{};
   openModal(`<span class="close" onclick="closeModal()">×</span><h2>考勤规则</h2><div class="form">
@@ -1127,6 +1155,82 @@ function openKnowledgeEdit(id){
 function submitKnowledgeEdit(id){ wsSend({type:'knowledgeEdit',id,title:$('#kbTitle').value,content:$('#kbContent').value,category:$('#kbCat').value,tags:$('#kbTags').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)}); closeModal(); }
 function knowledgeDelete(id){ wsSend({type:'knowledgeDelete',id}); }
 function knowledgeLike(id){ wsSend({type:'knowledgeLike',id}); }
+
+/* ============ 待办任务 ============ */
+function taskBadge(t){
+  const pri = { high:'badge bad', normal:'badge', low:'badge grey' }[t.priority||'normal'];
+  const st = { pending:'待办', in_progress:'进行中', done:'已完成', cancelled:'已取消' }[t.status];
+  return `<span class="${pri}">${({high:'高',normal:'中',low:'低'}[t.priority||'normal'])}优先</span> ${t.status==='done'?'<span class="badge ok">已完成</span>':t.status==='cancelled'?'<span class="badge grey">已取消</span>':'<span class="badge warn">'+st+'</span>'}`;
+}
+function taskActions(t){
+  const me=S.me.account;
+  const canAssign=t.creatorAccount===me||S.admin;
+  const canAdvance=t.assigneeAccount===me||t.creatorAccount===me||S.admin;
+  const canRemove=t.creatorAccount===me||S.admin;
+  if(t.status==='done'||t.status==='cancelled') return canRemove?`<button class="btn danger sm" onclick="taskRemove('${t.id}')">删除</button>`:'';
+  const btns=[];
+  if(canAssign) btns.push(`<button class="btn sm" onclick="openTaskAssign('${t.id}')">指派</button>`);
+  if(t.status==='pending'&&canAdvance) btns.push(`<button class="btn sm" onclick="taskStart('${t.id}')">开始</button>`);
+  if(t.status!=='done'&&canAdvance) btns.push(`<button class="btn green sm" onclick="taskComplete('${t.id}')">完成</button>`);
+  if(canRemove) btns.push(`<button class="btn danger sm" onclick="taskRemove('${t.id}')">删除</button>`);
+  return btns.join('');
+}
+function renderTasks(){
+  const list=S.DB.tasks||[]; const st=S.taskStats||{};
+  $('#main').innerHTML = `<div class="topbar"><div><h1>待办任务</h1><div class="sub">今天要做什么：发起任务、指派或认领，推动闭环</div></div>
+    <button class="btn pri" onclick="openTaskCreate()">＋ 新建任务</button></div>
+    <div class="cards">
+      <div class="card"><h3>📝 待办</h3><div style="font-size:30px;font-weight:800">${st.pending||0}</div><div class="meta">个未开始</div></div>
+      <div class="card"><h3>⏳ 进行中</h3><div style="font-size:30px;font-weight:800">${st.in_progress||0}</div><div class="meta">个进行中</div></div>
+      <div class="card"><h3>✅ 已完成</h3><div style="font-size:30px;font-weight:800">${st.done||0}</div><div class="meta">个已完成</div></div>
+      <div class="card"><h3>🙋 开放认领</h3><div style="font-size:30px;font-weight:800">${st.open||0}</div><div class="meta">个未指派</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">📝 任务列表</h3>
+    <div class="list">${list.length?list.map(t=>`
+      <div class="row"><span><span class="who">${esc(t.title)} ${taskBadge(t)}</span>
+        <div class="desc">${esc(t.description||'')}</div>
+        <div class="when">${esc(t.creatorName||'')} ${t.assigneeAccount?'→ '+esc(t.assigneeName||''):'（开放认领）'} · ${t.dueAt?'截止 '+fmtTime(t.dueAt):'无截止时间'}${t.completedAt?' · 完成于 '+fmtTime(t.completedAt):''}</div>
+      </span><span class="fs">${taskActions(t)}</span></div>`).join(''):'<div class="empty">还没有任务，来创建第一个吧</div>'}</div>`;
+}
+function openTaskCreate(){
+  const d=new Date(Date.now()+86400000);
+  const v=(t)=>`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}T${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`;
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>新建任务</h2><div class="form">
+    <div class="fld"><label>标题</label><input id="tkTitle" maxlength="60" placeholder="如：整理周报"></div>
+    <div class="fld"><label>描述</label><textarea id="tkDesc" rows="3" placeholder="任务说明…"></textarea></div>
+    <div class="fld"><label>优先级</label><select id="tkPri">${['high','normal','low'].map(p=>`<option value="${p}">${({high:'高',normal:'中',low:'低'}[p])}</option>`).join('')}</select></div>
+    <div class="fld"><label>截止时间（可选）</label><input id="tkDue" type="datetime-local" value="${v(d)}"></div>
+    <div class="fld"><label>指派给（可选，留空则开放认领）</label><select id="tkAssign"><option value="">（开放认领）</option>${(S.DB.users||[]).map(u=>`<option value="${u.account}">${esc(u.display||u.username)}</option>`).join('')}</select></div>
+    <button class="btn pri" onclick="submitTaskCreate()">创建</button></div>`);
+}
+function submitTaskCreate(){ wsSend({type:'taskCreate',title:$('#tkTitle').value,description:$('#tkDesc').value,priority:$('#tkPri').value,dueAt:Date.parse($('#tkDue').value)||null,assigneeAccount:$('#tkAssign').value||undefined}); closeModal(); }
+function openTaskAssign(id){
+  const t=(S.DB.tasks||[]).find(x=>x.id===id); if(!t) return;
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>指派任务</h2><div class="form">
+    <div class="hint">${esc(t.title)}</div>
+    <div class="fld"><label>指派给</label><select id="tkAssign2"><option value="">（开放认领）</option>${(S.DB.users||[]).map(u=>`<option value="${u.account}" ${u.account===t.assigneeAccount?'selected':''}>${esc(u.display||u.username)}</option>`).join('')}</select></div>
+    <button class="btn pri" onclick="submitTaskAssign('${id}')">保存</button></div>`);
+}
+function submitTaskAssign(id){ wsSend({type:'taskAssign',taskId:id,assigneeAccount:$('#tkAssign2').value||undefined}); closeModal(); }
+function taskStart(id){ wsSend({type:'taskStart',taskId:id}); }
+function taskComplete(id){ wsSend({type:'taskComplete',taskId:id}); }
+function taskRemove(id){ wsSend({type:'taskRemove',taskId:id}); }
+
+/* ============ 通知中心 ============ */
+function renderNotifications(){
+  const list=S.DB.notifications||[];
+  $('#main').innerHTML = `<div class="topbar"><div><h1>通知中心</h1><div class="sub">系统重要事件留痕：指派、完成、超时、提醒等</div></div>
+    <button class="btn pri" onclick="notificationReadAll()">全部已读</button></div>
+    ${S.notificationUnread?`<div class="card" style="border-left:4px solid var(--warn)"><h3>🔔 你有 ${S.notificationUnread} 条未读通知</h3><div class="meta">点击「全部已读」或逐条标记，已读状态按人独立记录</div></div>`:''}
+    <h3 style="margin:22px 0 10px">🔔 通知流</h3>
+    <div class="list">${list.length?list.map(n=>`
+      <div class="row ${n.read?'':'unread'}" onclick="notificationRead('${n.id}')"><span><span class="who">${esc(n.title)} ${n.level==='warn'?'<span class="badge warn">警告</span>':n.level==='success'?'<span class="badge ok">成功</span>':''} ${n.read?'':'<span class="badge">未读</span>'}</span>
+        <div class="desc">${esc(n.body||'')}</div>
+        <div class="when">${fmtTime(n.createdAt)}</div>
+      </span></div>`).join(''):'<div class="empty">暂无通知</div>'}</div>`;
+}
+function notificationRead(id){ wsSend({type:'notificationRead',notificationId:id}); }
+function notificationReadAll(){ wsSend({type:'notificationReadAll'}); }
 
 function renderAchievements(){
   const list = S.DB.achievements || [];

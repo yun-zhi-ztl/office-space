@@ -79,7 +79,7 @@ const p3 = api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id =
 assert(p3.unlocked === true, '累计 10 次解锁蹲坑之王');
 assertEq(p3.pct, 100, '蹲坑之王达成后进度 100');
 const pub = api.achievementDefsPublic(user);
-assertEq(pub.length, 24, '成就公开列表含 24 项');
+assertEq(pub.length, 27, '成就公开列表含 27 项');
 assert(pub.every((a) => a.id && a.name && a.desc && a.icon), '公开成就含 id/name/desc/icon');
 user.stats.borrowCount = 3;
 assert(api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'borrower')).unlocked === true, '借用 3 次解锁借阅达人');
@@ -794,6 +794,75 @@ achUser4.stats.knowledgeCount = 3; achUser4.stats.knowledgeLikeCount = 10;
 api.checkAchievements(achUser4);
 assert(achUser4.achievements.includes('knowledgeAuthor'), '发布知识 3 篇解锁知识贡献者');
 assert(achUser4.achievements.includes('knowledgeLiked'), '获得 10 赞解锁知识之星');
+
+// ---------- 待办任务序列化 + 统计 ----------
+console.log('\n📋 47. 待办任务序列化 / 统计');
+const tkSp = api.createSpace('s48', '任务空间', 1, 0);
+tkSp.tasks.set('tk1', { id: 'tk1', title: '整理周报', description: '周五前', creatorAccount: 'alice', creatorName: '甲', assigneeAccount: 'bob', assigneeName: '乙', priority: 'high', status: 'pending', dueAt: 2000, completedAt: null, createdAt: 1, updatedAt: 2 });
+tkSp.tasks.set('tk2', { id: 'tk2', title: '买电池', description: '', creatorAccount: 'bob', creatorName: '乙', assigneeAccount: '', assigneeName: '', priority: 'normal', status: 'in_progress', dueAt: null, completedAt: null, createdAt: 3, updatedAt: 4 });
+const tkPub = api.tasksPublic(tkSp, api.spaceUserInfo(tkSp.id), { account: 'bob' });
+assertEq(tkPub.length, 2, 'tasksPublic 返回任务');
+assertEq(tkPub[0].id, 'tk1', 'tasksPublic 按优先级排序');
+assertEq(tkPub[0].myAssignee, true, 'tasksPublic 标记本人为负责人');
+assertEq(tkPub[1].myCreator, true, 'tasksPublic 标记本人为创建人');
+assertEq(tkPub[0].myTask, true, 'tasksPublic 标记本人相关任务');
+const tkSt = api.taskStats(tkSp);
+assertEq(tkSt.total, 2, 'taskStats 统计总数');
+assertEq(tkSt.pending, 1, 'taskStats 统计待办');
+assertEq(tkSt.in_progress, 1, 'taskStats 统计进行中');
+assertEq(tkSt.open, 1, 'taskStats 统计开放认领');
+
+// ---------- 通知中心序列化 ----------
+console.log('\n📋 48. 通知中心序列化');
+const ntSp = api.createSpace('s49', '通知空间', 1, 0);
+ntSp.notifications.set('nt1', { id: 'nt1', type: 'taskAssigned', level: 'info', title: '任务指派', body: '测试', createdAt: 1, readBy: { alice: true } });
+ntSp.notifications.set('nt2', { id: 'nt2', type: 'materialFulfilled', level: 'success', title: '已满足', body: '', createdAt: 2, readBy: {} });
+const ntPub = api.notificationsPublic(ntSp, { account: 'alice' });
+assertEq(ntPub.notifications.length, 2, 'notificationsPublic 返回通知');
+assertEq(ntPub.notifications[0].id, 'nt2', 'notificationsPublic 按时间倒序');
+assertEq(ntPub.notifications[0].read, false, 'notificationsPublic 标记未读');
+assertEq(ntPub.unreadCount, 1, 'notificationsPublic 统计未读数');
+
+// ---------- 考勤连续打卡 / 日历 ----------
+console.log('\n📋 49. 考勤连续打卡 / 日历');
+const stSp = api.createSpace('s50', '考勤空间', 1, 0);
+const base = new Date('2026-10-01T10:00:00+08:00').getTime();
+for (let i = 2; i >= 0; i--) {
+  const day = new Date(base); day.setDate(day.getDate() - i);
+  const date = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+  stSp.attendance.set('alice::' + date, { id: 'a' + i, account: 'alice', name: '甲', date, checkInAt: day.getTime(), checkOutAt: null, isLate: false, status: 'checked_in', workedMinutes: 0 });
+}
+assertEq(api.attendanceStreak(stSp, 'alice', base), 3, 'attendanceStreak 连续 3 天');
+const st2Sp = api.createSpace('s51', '考勤空间2', 1, 0);
+for (let i = 2; i >= 1; i--) {
+  const day = new Date(base); day.setDate(day.getDate() - i);
+  const date = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+  st2Sp.attendance.set('alice::' + date, { id: 'b' + i, account: 'alice', name: '甲', date, checkInAt: day.getTime(), checkOutAt: null, isLate: false, status: 'checked_in', workedMinutes: 0 });
+}
+assertEq(api.attendanceStreak(st2Sp, 'alice', base), 2, '今天未打卡回退到昨天连续');
+const calSp = api.createSpace('s52', '日历空间', 1, 0);
+const calBase = new Date('2026-10-10T10:00:00+08:00').getTime();
+for (let day = 1; day <= 10; day++) {
+  const d = new Date('2026-10-01T10:00:00+08:00'); d.setDate(day);
+  const date = `2026-10-${String(day).padStart(2, '0')}`;
+  calSp.attendance.set('bob::' + date, { id: 'c' + day, account: 'bob', name: '乙', date, checkInAt: d.getTime(), checkOutAt: null, isLate: day % 3 === 0, status: 'checked_in', workedMinutes: 0 });
+}
+const cal = api.attendanceCalendar(calSp, 'bob', 2026, 10, calBase);
+assert(Array.isArray(cal.cells), 'attendanceCalendar 返回日历网格');
+assertEq(cal.streak, 10, 'attendanceCalendar 连续 10 天');
+assertEq(cal.perfectMonthCount, 0, '有迟到时全勤月为 0');
+assertEq(cal.currentMonthPerfect, false, '本月有迟到非全勤');
+
+// ---------- 新成就 ----------
+console.log('\n📋 50. 待办任务 / 连续打卡成就');
+const achUser5 = { stats: api.newStats(), achievements: [] };
+achUser5.stats.taskCreateCount = 5; achUser5.stats.taskDoneCount = 5;
+api.checkAchievements(achUser5);
+assert(achUser5.achievements.includes('taskMaker'), '创建任务 5 次解锁任务达人');
+assert(achUser5.achievements.includes('taskDoer'), '完成任务 5 次解锁高效执行');
+achUser5.stats.attendanceStreak = 7;
+api.checkAchievements(achUser5);
+assert(achUser5.achievements.includes('streakKnight'), '连续打卡 7 天解锁连续打卡达人');
 
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);

@@ -240,12 +240,12 @@
 
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，
-以及 `rooms`（含 `rooms` / `reservations` / `waitlist` / `waitlistTotal`）、`tools`、`materials`（含 `requests` / `templates`）、`repairs`、`visitors`、`stalls`、`attendance`（含 `records` / `stats` / `config`）、`desks`（含 `desks` / `reservations` / `reservationTotal`）、`deskStats`、`ooo`（含 `records` / `stats`）、`feedback`（含 `records` / `stats`）、`mood`（含 `records` / `stats`）、`events`（含 `events` / `total` / `stats`）、`polls`（含 `polls` / `total` / `stats`）、`knowledge`（含 `knowledge` / `total` / `stats`）、`users`、`leaderboard`（含 `account`、`role`、`display`），
-另有 `roomStats`、`spacePaused`、`roomWaitlistPromoted`、`roomRated`、`roomFavorites`、`repairEscalated`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendanceCheckedIn`、`attendanceCheckedOut`、`eventReminder`、`eventRsvpChanged`、`pollVoted`、`pollClosed`、`knowledgeLiked` 等即时广播，另有 `oooBacked`、`oooReturnSoon`、`moodCheckedIn`；全量广播含 `inventory`（物资库存台账，随 `broadcastAll` 下发）；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows` / `feedback` / `events` / `polls` / `knowledge`）。
+以及 `rooms`（含 `rooms` / `reservations` / `waitlist` / `waitlistTotal`）、`tools`、`materials`（含 `requests` / `templates`）、`repairs`、`visitors`、`stalls`、`attendance`（含 `records` / `stats` / `config`）、`desks`（含 `desks` / `reservations` / `reservationTotal`）、`deskStats`、`ooo`（含 `records` / `stats`）、`feedback`（含 `records` / `stats`）、`mood`（含 `records` / `stats`）、`events`（含 `events` / `total` / `stats`）、`polls`（含 `polls` / `total` / `stats`）、`knowledge`（含 `knowledge` / `total` / `stats`）、`tasks`（含 `tasks` / `total` / `stats`）、`notifications`（含 `notifications` / `total` / `unreadCount`）、`users`、`leaderboard`（含 `account`、`role`、`display`），
+另有 `roomStats`、`spacePaused`、`roomWaitlistPromoted`、`roomRated`、`roomFavorites`、`repairEscalated`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendanceCheckedIn`、`attendanceCheckedOut`、`attendanceCalendar`、`eventReminder`、`eventRsvpChanged`、`pollVoted`、`pollClosed`、`knowledgeLiked`、`taskCreated`、`taskAssigned`、`taskCompleted` 等即时广播，另有 `oooBacked`、`oooReturnSoon`、`moodCheckedIn`；全量广播含 `inventory`（物资库存台账，随 `broadcastAll` 下发）；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows` / `feedback` / `events` / `polls` / `knowledge` / `tasks`）。
 
 ## 5. 前端
 
-单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 物资库存 / 报修 / 访客登记 / 考勤打卡 / 工位预约 / 外出登记 / 意见反馈 / 心情打卡 / 活动管理 / 投票 / 知识库 / 坑位看板），
+单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 物资库存 / 报修 / 访客登记 / 考勤打卡 / 工位预约 / 外出登记 / 意见反馈 / 心情打卡 / 活动管理 / 投票 / 知识库 / 待办任务 / 通知中心 / 坑位看板），
 个人资料入口位于侧栏底部；桌面与移动端响应式，原生 HTML/CSS/JS，无构建步骤；静态文件由 Express 托管；
 会议室预约支持每天 / 每周周期预约（列表按 `seriesId` 聚合展示并整组取消）；
 报修列表展示工单号 `RP-日期-编号` 并可调整高 / 中 / 低优先级；空间暂停时顶部展示暂停横幅并限制对应创建操作；
@@ -367,6 +367,9 @@
 | 收藏家成就 | 收藏会议室累计 3 个解锁「收藏家」徽章 | 复用 `stats.favoriteCount` + `achievements` |
 | 物资库存台账 | 登记办公文具、耗材等公共物资库存，成员按需领用并归还；库存跌破阈值自动标记「库存告急」并通知管理员，阈值恢复后可再次提醒 | `inventoryCreate` / `inventoryAdjust`(`minAvailable`) / `inventoryIssue` / `inventoryReturn`、服务端下发 `inventoryLowStock` |
 | 考勤打卡 | 上下班打卡；管理员可配置工作时间与迟到宽限，迟到自动标记；统计今日打卡 / 迟到 / 已下班人数与下班完成率，并计入个人战绩 | `attendCheckIn` / `attendCheckOut` / `attendConfig`、服务端下发 `attendance` |
+| 待办任务 | 空间级任务看板：成员发起、指派负责人、认领推进；高 / 普通 / 低优先级与截止时间，按优先级 + 截止时间排序；负责人开始 / 完成 / 删除，创建人收到完成通知 | `taskCreate` / `taskAssign` / `taskUpdate` / `taskStart` / `taskComplete` / `taskRemove`、服务端下发 `tasks` |
+| 通知中心 | 系统重要事件留痕（指派 / 完成 / 超时 / 提醒），全员可看、按人标记已读；侧栏未读徽标，支持单条已读与一键全部已读 | `notificationRead` / `notificationReadAll`、服务端下发 `notifications`（含 `unreadCount`） |
+| 考勤连续打卡与全勤 | 连续打卡天数（今天未打回退到昨天）与全勤月数统计；按月出勤日历网格展示每日打卡 / 迟到 / 工作时长，本月全勤标记 | `getAttendanceCalendar`、服务端下发 `attendanceCalendar`、复用 `stats`(`attendanceStreak` / `attendancePerfectMonths`) |
 | 考勤战绩与成就 | 打卡计入累计打卡次数与非迟到打卡次数，周报与空间趋势新增打卡指标；解锁「早到达人」与「打卡达人」徽章 | 复用 `stats`(`attendanceCount` / `earlyCount`) + `achievements` |
 | 工位达人成就 | 预约工位累计 5 次解锁「工位达人」徽章 | 复用 `stats.deskCount` + `achievements` |
 | 外出报备达人 | 外出登记累计 5 次解锁「外出报备达人」徽章 | 复用 `stats.oooCount` + `achievements` |
@@ -392,7 +395,7 @@ src/modules/     rooms / tools / materials / inventory / repairs / visitors / at
 
 - 各领域模块是纯函数工厂 `module.exports = (api)=>({...})`，由 `server.js` 注入共享上下文 `api`，无全局状态、便于单测。
 - 定时器、心跳、优雅停机属于进程级关注点，保留在入口。
-- 该拆分不改变任何对外协议与行为，e2e（278 项）在内存与 PostgreSQL 双模式下均通过。
+- 该拆分不改变任何对外协议与行为，e2e（321 项）在内存与 PostgreSQL 双模式下均通过。
 
 ## 10. 健康检查、自测与 CI（本版本新增）
 
@@ -400,9 +403,54 @@ src/modules/     rooms / tools / materials / inventory / repairs / visitors / at
 - **npm 脚本**：
   - `npm start`：启动服务
   - `npm run lint`：对 `server.js` / `public` / `src/` / `test/` 全部 JS 执行 `node --check` 语法检查（`scripts/lint.js`）
-  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁与进度、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化、每日看点、我的待办、空间活跃趋势、用户广播、会议室时长累计 / 实际到场时长、周期预约展开、借用逾期判定、会议室占用率统计、报修优先级序列化、借用记录序列化、工具在借明细序列化、工具排队序列化、会议室候补序列化、访客签到码序列化、借用逾期提醒、会议室开始前提醒、借用到期前提醒、访客预计到访提醒、报修 SLA 超时提醒、申领 SLA 超时提醒、报修重复检测、管理员成员管理、通知统一入口、报修处理时长统计、成员移除、低库存预警、空间周报、成就扩展、物资库存台账、考勤打卡、物资优先级序列化、意见反馈序列化、工位签到字段、心情序列化与扩展成就，236 项）
+  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁与进度、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化、每日看点、我的待办、空间活跃趋势、用户广播、会议室时长累计 / 实际到场时长、周期预约展开、借用逾期判定、会议室占用率统计、报修优先级序列化、借用记录序列化、工具在借明细序列化、工具排队序列化、会议室候补序列化、访客签到码序列化、借用逾期提醒、会议室开始前提醒、借用到期前提醒、访客预计到访提醒、报修 SLA 超时提醒、申领 SLA 超时提醒、报修重复检测、管理员成员管理、通知统一入口、报修处理时长统计、成员移除、低库存预警、空间周报、成就扩展、物资库存台账、考勤打卡、物资优先级序列化、意见反馈序列化、工位签到字段、心情序列化、待办任务序列化、通知中心序列化、考勤连续打卡与出勤日历，291 项）
   - `npm run test:restore`：前端「自动恢复会话」回归测试（`test/restore.js`，vm stub 加载内联脚本，无需服务）
   - `npm run smoke`：快速冒烟（`test/smoke.js`）——健康检查、首页与大屏可达、WS 连接、登录、收到广播
-  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，278 项）
+  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，321 项）
 - **CI**：`.github/workflows/ci.yml` 在 push 到 `main` 或 pull_request 时自动：`npm ci` → `npm run lint` → `docker compose config` 校验 → `docker build` 构建校验 → 内存模式启动服务 → `npm run smoke` → `npm test`。用不可达的 PG 参数强制内存模式，无需外部数据库。
 - **环境变量**：见 `.env.example`（`PORT`、`PGHOST`、`PGPORT`、`PGUSER`、`PGPASSWORD`、`PGDATABASE`）；`.env` 已加入 `.gitignore`。
+
+## 11. 本版本新增：待办任务 / 通知中心 / 考勤连续打卡
+
+### 11.1 待办任务（tasks）
+
+空间级任务看板，覆盖「今天要做什么」的日常协作，任何成员可发起，指派或开放认领，推动闭环。
+
+- `task`: `{ id, title(≤60), description(≤300), creatorAccount, creatorName, assigneeAccount, assigneeName, priority, status, dueAt, completedAt, createdAt, updatedAt }`
+  - `priority`: `high` / `normal` / `low`（默认 `normal`），列表按优先级 + 截止时间排序。
+  - `status`: `pending`(待办) / `in_progress`(进行中) / `done`(已完成) / `cancelled`(已取消)。
+  - `assigneeAccount` 为空表示开放认领；指派后由负责人跟进。
+- 权限与消息：
+  - `taskCreate`（成员，可带 `assigneeAccount` / `priority` / `dueAt`）
+  - `taskAssign`（创建人或管理员改派 / 认领）
+  - `taskUpdate`（创建人 / 负责人 / 管理员：改标题、说明、优先级、截止时间）
+  - `taskStart`（负责人 / 创建人 / 管理员：流转为 `in_progress`）
+  - `taskComplete`（负责人 / 创建人 / 管理员：流转为 `done`，记录 `completedAt`）
+  - `taskRemove`（创建人或管理员删除）
+- 广播与单发：`tasks`（含 `stats`）、`taskCreated`、`taskAssigned`、`taskCompleted`。
+- 战绩与成就：`taskCreateCount` / `taskDoneCount`；「任务达人」（创建 5 次）、「高效执行」（完成 5 次）。
+
+### 11.2 通知中心（notifications）
+
+把系统里「会错过的事」（指派、完成、超时、提醒等）沉淀成空间级可回看的通知流，与「公告（notices）」的主动广播区分开——通知是系统对重要事件的留痕，全员可看、按人标记已读。
+
+- `notification`: `{ id, type, level(`info`/`warn`/`success`), title, body, createdAt, readBy }`
+  - `readBy`: 对象映射 `{ account: true }`，记录谁已读；随 `entities` 持久化。
+- 统一入口 `pushNotification(space, { type, level, title, body })`：写入 + 持久化 + 广播。
+- 消息：`notificationRead`（标记单条已读）、`notificationReadAll`（全部已读）。
+- 广播：`notifications`（含每条 `read` 标记与当前用户未读数 `unreadCount`）。
+- 接入点：任务指派 / 完成 / 删除、物资申领指派 / 满足、报修指派 / 解决、借用逾期等重要事件。
+
+### 11.3 考勤连续打卡与全勤（attendance streak）
+
+在既有打卡之上补充「连续」与「全勤」两个长期指标，用于月度复盘与成就。
+
+- `attendanceStreak(space, account, now)`：连续打卡天数。今天尚未打卡时回退到昨天作为连续终点，避免「今天没打」直接断档；当天有打卡则从今天往前数。
+- `attendanceCalendar(space, account, year, month)`：返回该月日历网格（每天 `checkedIn / checkedOut / isLate / workedMinutes`）及 `streak`、`perfectMonths`（历史全勤月数）、`currentMonthPerfect`（本月无迟到）。
+- 消息：`attendanceCalendar`（按 `year` / `month` 请求）。
+- 战绩与成就：`attendanceStreak`（最长连续）/ `attendancePerfectMonths`（全勤月数）；「连续打卡达人」（连续 ≥ 7 天）。
+
+### 11.4 客户端→服务端新增消息
+
+`taskCreate` / `taskAssign` / `taskUpdate` / `taskStart` / `taskComplete` / `taskRemove` / `notificationRead` / `notificationReadAll` / `attendanceCalendar`；服务端相应广播
+`tasks` / `taskCreated` / `taskAssigned` / `taskCompleted` / `notifications` / `attendanceCalendar`。

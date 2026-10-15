@@ -1,7 +1,7 @@
 'use strict';
 // 物资申领模块：materialRequest / materialCancel / materialFulfill
 module.exports = function materialsModule(api) {
-  const { MATERIAL_PRIORITIES, spaceUserInfo, materialsPublic, materialsTemplatesPublic, materialTemplatePublic, broadcast, LIST_PAGE, sendTo, serError, genId, saveEntity, deleteEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToAccount, sendToUser, checkAchievements, isAdmin } = api;
+  const { MATERIAL_PRIORITIES, spaceUserInfo, materialsPublic, materialsTemplatesPublic, materialTemplatePublic, broadcast, LIST_PAGE, sendTo, serError, genId, saveEntity, deleteEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToAccount, sendToUser, checkAchievements, isAdmin, pushNotification } = api;
 
   function materialsBroadcast(space) {
     const info = spaceUserInfo(space.id);
@@ -71,6 +71,7 @@ module.exports = function materialsModule(api) {
       req.handlerName = target.nickname;
       saveEntity(space.id, 'material', req.id, req);
       sendToAccount(target.account, { type: 'materialAssigned', requestId: req.id, name: req.name, requesterName: user.nickname });
+      pushNotification(space, { type: 'materialAssigned', level: 'info', title: '物资申领已指派', body: req.name + '（指派给 ' + target.nickname + '）' });
       materialsBroadcast(space);
     } else if (msg.type === 'materialFulfill') {
       const req = space.materialRequests.get(msg.requestId);
@@ -85,6 +86,7 @@ module.exports = function materialsModule(api) {
       checkAchievements(user);
       saveProfile(user);
       sendToAccount(req.requesterAccount, { type: 'materialFulfilled', requestId: req.id, name: req.name });
+      pushNotification(space, { type: 'materialFulfilled', level: 'success', title: '物资申领已满足', body: req.name });
       sendToUser(user.id, { type: 'stats', stats: user.stats, achievements: user.achievements });
       materialsBroadcast(space);
     }

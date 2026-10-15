@@ -1,7 +1,7 @@
 'use strict';
 // 考勤打卡模块：attendConfig（管理员配置）/ attendCheckIn / attendCheckOut（成员打卡）
 module.exports = function attendanceModule(api) {
-  const { attendanceBroadcast, attendancePublic, attendanceStats, newAttendanceConfig, todayKey, parseTime, isLateAt, broadcast, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, checkAchievements, isAdmin, sendToAccount } = api;
+  const { attendanceBroadcast, attendancePublic, attendanceStats, attendanceStreak, attendancePerfectMonths, newAttendanceConfig, todayKey, parseTime, isLateAt, broadcast, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, checkAchievements, isAdmin, sendToAccount } = api;
 
   function handleAttendance(ws, user, space, msg) {
     const now = Date.now();
@@ -27,6 +27,8 @@ module.exports = function attendanceModule(api) {
       space.attendance.set(key, rec);
       user.stats.attendanceCount = (user.stats.attendanceCount || 0) + 1;
       if (!rec.isLate) user.stats.earlyCount = (user.stats.earlyCount || 0) + 1;
+      user.stats.attendanceStreak = Math.max(user.stats.attendanceStreak || 0, attendanceStreak(space, user.account, now));
+      user.stats.attendancePerfectMonths = attendancePerfectMonths(space, user.account);
       recordWeekly(user, 'attends');
       checkAchievements(user);
       saveProfile(user);
