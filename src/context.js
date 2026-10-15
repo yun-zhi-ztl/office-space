@@ -652,6 +652,27 @@ function createContext() {
     };
   }
 
+  // ---------- 空间活跃趋势 ----------
+  // 按天聚合会议室 / 借用 / 申领 / 报修 / 访客的活动量，供空间趋势看板展示
+  function buildSpaceTrend(space, days) {
+    const n = Math.max(1, Math.min(30, parseInt(days, 10) || 7));
+    const today0 = new Date(); today0.setHours(0, 0, 0, 0);
+    const dayStart = today0.getTime() - (n - 1) * 86400000;
+    const buckets = [];
+    for (let i = 0; i < n; i++) buckets.push({ date: dayStart + i * 86400000, meetings: 0, borrows: 0, requests: 0, repairs: 0, visitors: 0 });
+    const idxOf = (ts) => Math.floor((ts - dayStart) / 86400000);
+    const bump = (b, k) => { if (b >= 0 && b < n) buckets[b][k]++; };
+    for (const r of space.roomReservations.values()) {
+      if (r.status === 'cancelled' || r.status === 'expired') continue;
+      bump(idxOf(r.startAt), 'meetings');
+    }
+    for (const b of space.borrows.values()) { bump(idxOf(b.borrowedAt), 'borrows'); }
+    for (const m of space.materialRequests.values()) { bump(idxOf(m.createdAt), 'requests'); }
+    for (const r of space.repairs.values()) { bump(idxOf(r.createdAt), 'repairs'); }
+    for (const v of space.visitors.values()) { bump(idxOf(v.createdAt), 'visitors'); }
+    return buckets.map((b) => ({ date: b.date, meetings: b.meetings, borrows: b.borrows, requests: b.requests, repairs: b.repairs, visitors: b.visitors }));
+  }
+
   return {
     // 状态
     spaces, users, accounts, tokens, profiles,
@@ -680,6 +701,8 @@ function createContext() {
     buildDigest,
     // 我的待办
     buildMyReminders,
+    // 空间活跃趋势
+    buildSpaceTrend,
   };
 }
 

@@ -25,7 +25,7 @@ const S = {
   lastRoomBook:null,
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['dash','概览','📊'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -63,6 +63,7 @@ function dispatch(m){
     case 'leaderboard': S.DB.leaderboard=m.rankings||[]; break;
     case 'achievements': S.DB.achievements=m.achievements||[]; break;
     case 'myReminders': S.DB.reminders=m.reminders||{}; break;
+    case 'spaceTrend': S.DB.trend=m.trend||[]; break;
     case 'notices': S.DB.notices=m.notices||[]; break;
     case 'digest': S.digest=m.digest; break;
     case 'suggestRooms': S.suggestions=m.suggestions||[]; renderSugg(); break;
@@ -88,17 +89,17 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','roomStats','users','leaderboard','achievements','myReminders','notices','digest'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','roomStats','users','leaderboard','achievements','myReminders','spaceTrend','notices','digest'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
   else { b.style.display='none'; }
 }
 function renderAll(){ render(); }
-function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); }
+function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); }
 
 /* 分页：广播已按最近 PAGE 下发，前端按 offset 加载更多 */
 const PAGE = 30;
@@ -608,6 +609,17 @@ function renderReminders(){
   $('#main').innerHTML = `<div class="topbar"><div><h1>我的待办</h1><div class="sub">按优先级聚合与你相关的到期、临期与待处理事项</div></div>
     <button class="btn" onclick="wsSend({type:'getMyReminders'})">刷新</button></div>${sec(r)}`;
 }
+function renderTrend(){
+  const list = S.DB.trend || [];
+  const metrics = [['meetings','🏢 会议'],['borrows','🔧 借用'],['requests','📦 申领'],['repairs','🛠️ 报修'],['visitors','🚶 访客']];
+  const maxVal = Math.max(1, ...list.map((b) => Math.max(b.meetings, b.borrows, b.requests, b.repairs, b.visitors)));
+  $('#main').innerHTML = `<div class="topbar"><div><h1>空间趋势</h1><div class="sub">近 ${list.length} 天各模块活动量</div></div>
+    <div class="btn grp"><button class="btn" onclick="loadTrend(7)">近7天</button><button class="btn pri" onclick="loadTrend(14)">近14天</button><button class="btn" onclick="loadTrend(30)">近30天</button></div></div>
+    ${list.length?metrics.map(([k,label])=>`
+      <h3 style="margin:18px 0 8px">${label}</h3>
+      <div class="chart">${list.map(b=>`<div class="barcol"><div class="barval">${b[k]||0}</div><div class="barwrap"><i style="height:${Math.round((b[k]||0)/maxVal*100)}%"></i></div><span class="xlab">${(b.date.getMonth()+1)}/${b.date.getDate()}</span></div>`).join('')}</div>`).join(''):'<div class="empty">暂无趋势数据</div>'}`;
+}
+function loadTrend(days){ wsSend({type:'getSpaceTrend',days}); }
 setInterval(()=>{ if(S.module==='stalls' && S.me && document.visibilityState==='visible') renderStalls(); }, 1000);
 function openReserve(id,type){
   const opts = type==='urinal' ? [['1分钟',1],['2分钟',2],['5分钟',5]] : [['15分钟',15],['30分钟',30],['45分钟',45]];

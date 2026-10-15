@@ -664,6 +664,20 @@ async function runTests() {
     wR.close();
   }
 
+  // ========== 测试20: 空间趋势 ==========
+  console.log('\n📋 测试20: 空间趋势');
+  {
+    const spT = (await httpJson('POST', '/api/spaces', { name: '趋势办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aT = 'trend_' + runKey;
+    await reg(aT, 'pw', '趋势用户');
+    const wT = await createWSClient(); await loginTo(wT, spT.id, aT, 'pw');
+    await sendMsg(wT, { type: 'getSpaceTrend', days: 14 });
+    const t = last(wT, 'spaceTrend');
+    assert(t && Array.isArray(t.trend) && t.trend.length === 14, '趋势返回 14 天数组');
+    assert(t.trend.every((b) => 'date' in b && 'meetings' in b && 'borrows' in b && 'requests' in b && 'repairs' in b && 'visitors' in b), '每项含 date 与五类计数');
+    wT.close();
+  }
+
   // ========== 总结 ==========
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);

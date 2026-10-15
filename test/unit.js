@@ -289,6 +289,26 @@ assertEq(myRem.assignedMaterialCount, 1, '我的待办统计指派申领');
 assertEq(myRem.assignedRepairCount, 1, '我的待办统计指派报修');
 assertEq(api.buildMyReminders(spRem2, { account: 'bob' }, nowR2).overdueCount, 0, '他人不统计我的逾期');
 
+// ---------- 空间活跃趋势 ----------
+console.log('\n📋 22. 空间活跃趋势');
+const spT = api.createSpace('s14', '趋势空间', 1, 0);
+const nowT = Date.now();
+spT.roomReservations.set('rt1', { id: 'rt1', roomId: 'rm1', ownerAccount: 'alice', startAt: nowT, endAt: nowT + 60000, status: 'completed', title: '会' });
+spT.borrows.set('rbt1', { id: 'rbt1', toolId: 't1', borrowerAccount: 'alice', qty: 1, borrowedAt: nowT, returnedAt: null, status: 'borrowed' });
+spT.materialRequests.set('rmat', { id: 'rmat', name: '电池', createdAt: nowT, handlerAccount: '', requesterAccount: 'bob', requesterName: '乙', status: 'pending', qty: 1, unit: '节', reason: '' });
+spT.repairs.set('rrep', { id: 'rrep', category: '灯光', location: '走廊', createdAt: nowT, reporterAccount: 'bob', reporterName: '乙', priority: 'normal', description: '', status: 'reported', handlerAccount: '' });
+spT.visitors.set('rvis', { id: 'rvis', hostAccount: 'bob', hostName: '乙', visitorName: '客户', createdAt: nowT, status: 'pending', purpose: '', code: '' });
+const trend = api.buildSpaceTrend(spT, 7);
+assertEq(trend.length, 7, '趋势返回 7 天');
+const today = trend[trend.length - 1];
+assertEq(today.meetings, 1, '今日会议计数');
+assertEq(today.borrows, 1, '今日借用计数');
+assertEq(today.requests, 1, '今日申领计数');
+assertEq(today.repairs, 1, '今日报修计数');
+assertEq(today.visitors, 1, '今日访客计数');
+assertEq(api.buildSpaceTrend(spT, 30).length, 30, '30 天上限返回 30 天');
+assertEq(api.buildSpaceTrend(spT, 999).length, 30, '超出上限截断为 30 天');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

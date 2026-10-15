@@ -62,6 +62,12 @@
   .empty{padding:30px; text-align:center; color:var(--muted);}
   .bar{height:6px; background:var(--panel2); border-radius:6px; overflow:hidden;}
   .bar i{display:block; height:100%; background:var(--accent); border-radius:6px;}
+  .chart{display:flex; align-items:flex-end; gap:4px; height:120px; overflow-x:auto; padding:8px 2px 0; border-bottom:1px solid var(--line);}
+  .chart .barcol{flex:1 0 26px; display:flex; flex-direction:column; align-items:center; gap:4px; min-width:26px;}
+  .chart .barval{font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums;}
+  .chart .barwrap{width:100%; height:80px; background:var(--panel2); border-radius:5px 5px 0 0; display:flex; align-items:flex-end; overflow:hidden;}
+  .chart .barwrap i{display:block; width:100%; background:var(--accent); border-radius:5px 5px 0 0; min-height:2px;}
+  .chart .xlab{font-size:10px; color:var(--muted); margin-top:4px; white-space:nowrap;}
   .muted{color:var(--muted);}
   .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px;}
   .stall{border-radius:var(--radius); padding:12px; border:1px solid var(--line); background:var(--panel2); text-align:center; display:flex; flex-direction:column; gap:6px; min-height:120px;}

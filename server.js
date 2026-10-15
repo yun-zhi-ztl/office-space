@@ -98,6 +98,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'getStats') { api.sendToUser(user.id, { type: 'stats', stats: user.stats }); return; }
     if (msg.type === 'getAchievements') { api.sendTo(ws, { type: 'achievements', achievements: api.achievementDefsPublic(user) }); return; }
     if (msg.type === 'getMyReminders') { api.sendTo(ws, { type: 'myReminders', reminders: api.buildMyReminders(space, user) }); return; }
+    if (msg.type === 'getSpaceTrend') { api.sendTo(ws, { type: 'spaceTrend', trend: api.buildSpaceTrend(space, msg.days) }); return; }
     if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }
 
     switch (msg.type) {
