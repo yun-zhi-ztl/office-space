@@ -266,6 +266,25 @@ spRem.borrows.set('r4', { id: 'r4', toolId: 't1', borrowerAccount: 'dave', qty: 
 const rem = api.dueBorrowReminders(spRem, nowR);
 assertEq(rem.map((b) => b.id), ['r1'], '仅返回逾期且未在静默期内的借用');
 
+// ---------- 我的待办 ----------
+console.log('\n📋 21. 我的待办');
+const spRem2 = api.createSpace('s13', '待办空间', 1, 0);
+const nowR2 = 1000000000;
+const remUser = { account: 'alice', stats: api.newStats(), achievements: [] };
+spRem2.borrows.set('rb1', { id: 'rb1', toolId: 't1', borrowerAccount: 'alice', qty: 1, borrowedAt: nowR2 - 10 * 86400000, dueAt: nowR2 - 2 * 86400000, returnedAt: null, status: 'borrowed' });
+spRem2.roomReservations.set('rr1', { id: 'rr1', roomId: 'rm1', ownerAccount: 'alice', startAt: nowR2 + 30 * 60000, endAt: nowR2 + 60 * 60000, status: 'pending', title: '评审' });
+spRem2.visitors.set('rv1', { id: 'rv1', hostAccount: 'alice', visitorName: '客户王', status: 'pending', purpose: '', createdAt: nowR2, code: '' });
+spRem2.materialRequests.set('rm1', { id: 'rm1', name: '电池', handlerAccount: 'alice', status: 'pending', requesterAccount: 'bob', requesterName: '乙', qty: 1, unit: '节', reason: '' });
+spRem2.repairs.set('rrp1', { id: 'rrp1', handlerAccount: 'alice', category: '灯光', location: '走廊', status: 'reported', reporterAccount: 'bob', reporterName: '乙', priority: 'normal', description: '', createdAt: nowR2, updatedAt: nowR2 });
+const myRem = api.buildMyReminders(spRem2, remUser, nowR2);
+assertEq(myRem.overdueCount, 1, '我的待办统计逾期借用');
+assertEq(myRem.overdue[0].toolId, 't1', '逾期借用关联设备');
+assertEq(myRem.upcomingCount, 1, '我的待办统计临近会议');
+assertEq(myRem.pendingVisitorCount, 1, '我的待办统计待接待访客');
+assertEq(myRem.assignedMaterialCount, 1, '我的待办统计指派申领');
+assertEq(myRem.assignedRepairCount, 1, '我的待办统计指派报修');
+assertEq(api.buildMyReminders(spRem2, { account: 'bob' }, nowR2).overdueCount, 0, '他人不统计我的逾期');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

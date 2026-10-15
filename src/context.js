@@ -621,6 +621,29 @@ function createContext() {
     return { todayMeetingCount: todayMeetings.length, todayMeetings: todayMeetings.slice(0, 5), todayMeetingMinutes, todayBorrowMinutes, overdueCount: overdue.length, myBorrows: myBorrows.length, pendingMaterialsCount: pendingMaterials.length, openRepairsCount: openRepairs.length, pendingVisitorsCount: pendingVisitors.length, pendingVisitors: pendingVisitors.slice(0, 5).map((v) => ({ visitorName: v.visitorName, hostName: v.hostName, status: v.status })), mvp };
   }
 
+  // ---------- 我的待办 ----------
+  // 聚合当前用户与个人相关的到期/待处理事项：逾期借用、临近会议、待接待访客、指派给我的物资与报修
+  function buildMyReminders(space, user, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const overdue = [...space.borrows.values()].filter((b) => b.borrowerAccount === user.account && borrowOverdue(b, nowMs));
+    const upcoming = [...space.roomReservations.values()].filter((r) => r.ownerAccount === user.account && r.status === 'pending' && r.startAt >= nowMs && r.startAt <= nowMs + 60 * 60000);
+    const pendingVisitors = [...space.visitors.values()].filter((v) => v.hostAccount === user.account && (v.status === 'pending' || v.status === 'arrived'));
+    const assignedMaterials = [...space.materialRequests.values()].filter((m) => m.handlerAccount === user.account && m.status !== 'fulfilled' && m.status !== 'cancelled');
+    const assignedRepairs = [...space.repairs.values()].filter((r) => r.handlerAccount === user.account && (r.status === 'reported' || r.status === 'in_progress'));
+    return {
+      overdueCount: overdue.length,
+      overdue: overdue.map((b) => ({ id: b.id, toolId: b.toolId, qty: b.qty, dueAt: b.dueAt || null, days: Math.floor((nowMs - (b.borrowedAt || nowMs)) / 86400000) })),
+      upcomingCount: upcoming.length,
+      upcoming: upcoming.map((r) => ({ id: r.id, roomId: r.roomId, title: r.title, startAt: r.startAt, endAt: r.endAt })),
+      pendingVisitorCount: pendingVisitors.length,
+      pendingVisitors: pendingVisitors.map((v) => ({ id: v.id, visitorName: v.visitorName, status: v.status })),
+      assignedMaterialCount: assignedMaterials.length,
+      assignedMaterials: assignedMaterials.map((m) => ({ id: m.id, name: m.name, status: m.status })),
+      assignedRepairCount: assignedRepairs.length,
+      assignedRepairs: assignedRepairs.map((r) => ({ id: r.id, category: r.category, location: r.location, status: r.status })),
+    };
+  }
+
   return {
     // 状态
     spaces, users, accounts, tokens, profiles,
@@ -647,6 +670,8 @@ function createContext() {
     achievementProgress, achievementDefsPublic,
     // 每日看点
     buildDigest,
+    // 我的待办
+    buildMyReminders,
   };
 }
 

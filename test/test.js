@@ -649,6 +649,20 @@ async function runTests() {
     wN.close(); wM.close();
   }
 
+  // ========== 测试19: 我的待办 ==========
+  console.log('\n📋 测试19: 我的待办');
+  {
+    const spR = (await httpJson('POST', '/api/spaces', { name: '待办办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aR = 'rem_' + runKey;
+    await reg(aR, 'pw', '待办用户');
+    const wR = await createWSClient(); await loginTo(wR, spR.id, aR, 'pw');
+    await sendMsg(wR, { type: 'getMyReminders' });
+    const r = last(wR, 'myReminders').reminders;
+    assert(r && 'overdueCount' in r && 'upcomingCount' in r && 'pendingVisitorCount' in r && 'assignedMaterialCount' in r && 'assignedRepairCount' in r, '我的待办返回完整聚合字段');
+    assert(r.overdueCount === 0 && r.upcomingCount === 0 && r.pendingVisitorCount === 0, '无待办时各项计数为 0');
+    wR.close();
+  }
+
   // ========== 总结 ==========
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
