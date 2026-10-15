@@ -120,6 +120,7 @@ wss.on('connection', (ws) => {
       case 'spacePause': extras.pause(ws, user, space, msg); break;
       case 'suggestRoom': extras.suggestRoom(ws, user, space, msg); break;
       case 'remindReturn': extras.remindReturn(ws, user, space, msg); break;
+      case 'removeNotice': extras.removeNotice(ws, user, space, msg); break;
       default:
         api.sendTo(ws, api.serError('未知操作'));
     }

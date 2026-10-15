@@ -1,11 +1,16 @@
 'use strict';
 // 扩展功能：setStatus / announce / suggestRoom / remindReturn + 公告推送
 module.exports = function extrasModule(api) {
-  const { users, broadcastUsers, sendTo, serError, genId, roomPublic, noticesBroadcast, isAdmin, saveSpace, broadcast } = api;
+  const { users, broadcastUsers, sendTo, serError, genId, roomPublic, noticesBroadcast, isAdmin, saveSpace, saveEntity, deleteEntity, broadcast } = api;
 
   function pushNotice(space, text, fromAccount, fromName) {
-    space.notices.unshift({ id: genId('n', null), text, from: fromName || fromAccount || '系统', ts: Date.now() });
-    if (space.notices.length > 50) space.notices.length = 50;
+    const notice = { id: genId('n', null), text, from: fromName || fromAccount || '系统', ts: Date.now() };
+    space.notices.unshift(notice);
+    if (space.notices.length > 50) {
+      const removed = space.notices.splice(50);
+      removed.forEach((n) => deleteEntity(space.id, 'notice', n.id));
+    }
+    saveEntity(space.id, 'notice', notice.id, notice);
     noticesBroadcast(space);
   }
 
@@ -67,5 +72,15 @@ module.exports = function extrasModule(api) {
     sendTo(ws, { type: 'remindSent', count: n });
   }
 
-  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace, pause: handlePause };
+  function handleRemoveNotice(ws, user, space, msg) {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可删除公告'));
+    const idx = space.notices.findIndex((n) => n.id === msg.noticeId);
+    if (idx === -1) return sendTo(ws, serError('公告不存在'));
+    const [notice] = space.notices.splice(idx, 1);
+    deleteEntity(space.id, 'notice', notice.id);
+    noticesBroadcast(space);
+    sendTo(ws, { type: 'noticeRemoved', noticeId: notice.id });
+  }
+
+  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace, pause: handlePause, removeNotice: handleRemoveNotice };
 };

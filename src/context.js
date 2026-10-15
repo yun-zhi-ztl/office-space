@@ -178,6 +178,7 @@ function createContext() {
       else if (r.kind === 'material') sp.materialRequests.set(data.id, data);
       else if (r.kind === 'repair') sp.repairs.set(data.id, data);
       else if (r.kind === 'visitor') sp.visitors.set(data.id, data);
+      else if (r.kind === 'notice') { sp.notices.push(data); sp.notices.sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
       else if (r.kind === 'stall') { const st = sp.stalls.find((s) => s.id === data.id); if (st) st.ratings = (data.ratings || []).slice(-60); }
     }
     for (const [key, ratings] of Object.entries(byStall)) {

@@ -626,6 +626,29 @@ async function runTests() {
     wA.close();
   }
 
+  // ========== 测试18: 公告管理（管理员删除） ==========
+  console.log('\n📋 测试18: 公告管理');
+  {
+    const spN = (await httpJson('POST', '/api/spaces', { name: '公告办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aN = 'noti_' + runKey, bN = 'notim_' + runKey;
+    await reg(aN, 'pw', '公告管理员'); await reg(bN, 'pw', '公告成员');
+    const wN = await createWSClient(); await loginTo(wN, spN.id, aN, 'pw');
+    const wM = await createWSClient(); await loginTo(wM, spN.id, bN, 'pw');
+    await sendMsg(wN, { type: 'announce', text: '今晚加班' });
+    let nt = last(wN, 'notices');
+    assert(nt && nt.notices.length === 1 && nt.notices[0].text === '今晚加班', '公告广播成功');
+    const nid = nt.notices[0].id;
+    await sendMsg(wM, { type: 'removeNotice', noticeId: nid });
+    const errN = mk(wM, 'error');
+    assert(errN.length > 0 && errN[errN.length - 1].message.includes('仅管理员'), '非管理员删除公告被拒');
+    await sendMsg(wN, { type: 'removeNotice', noticeId: nid });
+    const rm = last(wN, 'noticeRemoved');
+    assert(rm && rm.noticeId === nid, '管理员删除公告成功');
+    nt = last(wN, 'notices');
+    assert(nt && nt.notices.length === 0, '删除后公告列表清空');
+    wN.close(); wM.close();
+  }
+
   // ========== 总结 ==========
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);

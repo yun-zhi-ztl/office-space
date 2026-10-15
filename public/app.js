@@ -82,6 +82,7 @@ function dispatch(m){
     case 'passwordChanged': toast('✔ 密码已修改','success'); break;
     case 'spaceRenamed': if(S.space) S.space.name=m.name; renderSidebar(); render(); break;
     case 'spacePaused': if(S.space){ S.space.paused=!!m.paused; S.space.pausedReason=m.reason||''; } render(); break;
+    case 'noticeRemoved': toast('公告已删除','success'); break;
     case 'emergencyToggled': if(S.me) S.me.emergencyMode=!!m.enabled; toast(m.enabled?'🆘 已开启紧急模式':'✅ 已退出紧急模式'); render(); break;
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
@@ -287,7 +288,7 @@ function renderDash(){
     <div class="fs">${(d.users||[]).map(u=>`<span class="badge info">${esc(u.avatar||'' )} ${esc(u.display||u.username)}${u.emergencyMode?' 🆘':''}${u.status&&u.status.emoji?' '+esc(u.status.emoji):''} ${u.status?esc(u.status.label):'在岗'}</span>`).join('')||'<span class="hint">仅自己在线</span>'}</div>
     <h3 style="margin:22px 0 10px">📢 公告</h3>
     <div class="fs" style="margin-bottom:10px"><input id="annInput" placeholder="向整个空间喊一句话..."><button class="btn pri" onclick="doAnnounce()">喊话</button></div>
-    <div class="list">${(d.notices||[]).map(n=>`<div class="row"><span><span class="who">${esc(n.from)}</span> <span class="when">${fmtTime(n.ts)}</span><div>${esc(n.text)}</div></span></div>`).join('')||'<div class="empty">还没有公告</div>'}
+    <div class="list">${(d.notices||[]).map(n=>`<div class="row"><span><span class="who">${esc(n.from)}</span> <span class="when">${fmtTime(n.ts)}</span><div>${esc(n.text)}</div></span>${S.admin?`<button class="btn danger sm" onclick="removeNotice('${n.id}')">删除</button>`:''}</div>`).join('')||'<div class="empty">还没有公告</div>'}
     </div>
     ${overdue.length?`<h3 style="margin:22px 0 10px">⏰ 逾期借用 · 占用王</h3><div class="list">${overdue.map(b=>`<div class="row"><span>${esc(b.borrowerName)} ×${b.qty} · 已借 ${b.days} 天</span><button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒归还</button></div>`).join('')}</div>`:''}
     ${S.me&&S.me.achievements&&S.me.achievements.length?`<h3 style="margin:22px 0 10px">🏅 我的徽章（${S.me.achievements.length} 枚）</h3><div class="fs">${S.me.achievements.map(a=>`<span class="badge ok">${ACH[a]||a}</span>`).join('')}</div>`:''}
@@ -296,6 +297,7 @@ function renderDash(){
     </div>`;
 }
 function doAnnounce(){ const t=$('#annInput'); const v=(t?t.value:'').trim(); if(v){ wsSend({type:'announce',text:v}); if(t)t.value=''; } }
+function removeNotice(id){ if(confirm('确认删除该公告？')) wsSend({type:'removeNotice',noticeId:id}); }
 function remindReturn(id){ wsSend({type:'remindReturn',borrowId:id}); }
 function remindOverdue(){ wsSend({type:'remindOverdue'}); }
 
