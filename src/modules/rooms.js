@@ -1,11 +1,12 @@
 'use strict';
 // 会议室模块：roomCreate / roomRemove / roomBook / reservationCancel / roomStart / roomEnd
 module.exports = function roomsModule(api) {
-  const { roomReservationsPublic, roomPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly, getUserByAccount, sendToUser, saveProfile, broadcastLeaderboard, expandRecurring } = api;
+  const { roomReservationsPublic, roomPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly, getUserByAccount, sendToUser, saveProfile, broadcastLeaderboard, expandRecurring, roomStatsBroadcast } = api;
 
   function roomsBroadcast(space) {
     const reservations = roomReservationsPublic(space);
     broadcast(space.id, 'rooms', { rooms: space.rooms.map(roomPublic), reservations: reservations.slice(0, LIST_PAGE), reservationTotal: reservations.length });
+    roomStatsBroadcast(space);
   }
 
   function handleRooms(ws, user, space, msg) {

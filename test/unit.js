@@ -149,6 +149,7 @@ const fakeApi = {
   sendToUser: () => {},
   saveProfile: () => {},
   broadcastLeaderboard: () => {},
+  roomStatsBroadcast: () => {},
 };
 const rooms = roomsModule(fakeApi);
 const rsvSpace = { id: 's6', roomReservations: new Map(), rooms: [] };
@@ -178,6 +179,20 @@ assertEq(api.borrowOverdue({ status: 'borrowed', borrowedAt: 0, dueAt: 1000 }, 2
 assertEq(api.borrowOverdue({ status: 'borrowed', borrowedAt: 0, dueAt: 3000 }, 2000), false, '未到 dueAt 未逾期');
 assertEq(api.borrowOverdue({ status: 'borrowed', borrowedAt: 0 }, 8 * 86400000), true, '默认 7 天到期后逾期');
 assertEq(api.borrowOverdue({ status: 'returned', borrowedAt: 0, dueAt: 1000 }, 2000), false, '已归还不计逾期');
+
+// ---------- 会议室占用率 ----------
+console.log('\n📋 15. 会议室占用率统计');
+const us = api.createSpace('s7', '占用空间', 1, 0);
+us.rooms.push({ id: 'r7', name: '小间', capacity: 4 });
+const now7 = new Date(); now7.setHours(12, 0, 0, 0);
+const now7ms = now7.getTime();
+us.roomReservations.set('u7', { id: 'u7', roomId: 'r7', ownerAccount: 'alice', startAt: now7ms, endAt: now7ms + 60 * 60000, status: 'active' });
+us.roomReservations.set('u8', { id: 'u8', roomId: 'r7', ownerAccount: 'bob', startAt: now7ms + 86400000, endAt: now7ms + 86400000 + 30 * 60000, status: 'pending' });
+const usage = api.roomUsageStats(us, now7ms);
+assertEq(usage.rooms[0].todayCount, 1, '今日场次统计为 1');
+assertEq(usage.rooms[0].todayMinutes, 60, '今日时长统计 60 分钟');
+assertEq(usage.rooms[0].upcomingCount, 1, '待开始场次统计为 1');
+assert(usage.utilizationPct >= 0 && usage.utilizationPct <= 100, '占用率在 0-100 区间');
 
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);

@@ -332,6 +332,25 @@ function createContext() {
     return out;
   }
 
+  // ---------- 会议室统计 ----------
+  function roomUsageStats(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const ds = new Date(nowMs); ds.setHours(0, 0, 0, 0);
+    const dStart = ds.getTime(), dEnd = dStart + 86400000;
+    const workStart = new Date(ds); workStart.setHours(9, 0, 0, 0);
+    const workEnd = new Date(ds); workEnd.setHours(21, 0, 0, 0);
+    const rooms = space.rooms.map((r) => {
+      const res = [...space.roomReservations.values()].filter((x) => x.roomId === r.id && x.status !== 'cancelled' && x.status !== 'expired');
+      const today = res.filter((x) => x.startAt >= dStart && x.startAt < dEnd);
+      const upcoming = res.filter((x) => x.startAt >= nowMs && x.status === 'pending');
+      const todayMinutes = today.reduce((s, x) => s + Math.max(0, Math.round((Math.min(x.endAt, dEnd) - x.startAt) / 60000)), 0);
+      return { roomId: r.id, name: r.name, capacity: r.capacity, todayCount: today.length, todayMinutes, upcomingCount: upcoming.length };
+    });
+    const totalToday = rooms.reduce((s, r) => s + r.todayMinutes, 0);
+    const capacity = space.rooms.length * (workEnd - workStart) / 60000;
+    return { rooms, totalTodayMinutes: totalToday, capacityMinutes: capacity, utilizationPct: capacity ? Math.round(totalToday / capacity * 100) : 0, workStart: workStart.getTime(), workEnd: workEnd.getTime() };
+  }
+
   // ---------- 序列化 ----------
   function roomPublic(r) { return { id: r.id, name: r.name, capacity: r.capacity, location: r.location, description: r.description }; }
   function reservationPublic(res, info) {
@@ -470,6 +489,7 @@ function createContext() {
     const info = spaceUserInfo(sp.id);
     broadcast(sp.id, 'stalls', { squat_count: sp.squatCount, urinal_count: sp.urinalCount, stalls: stallsPublic(sp, info) });
   }
+  function roomStatsBroadcast(sp) { broadcast(sp.id, 'roomStats', roomUsageStats(sp)); }
   function broadcastAll(sp) {
     const info = spaceUserInfo(sp.id);
     const reservations = roomReservationsPublic(sp, info);
@@ -483,6 +503,7 @@ function createContext() {
     broadcast(sp.id, 'visitors', { visitors: visitors.slice(0, LIST_PAGE), total: visitors.length });
     broadcast(sp.id, 'stalls', { squat_count: sp.squatCount, urinal_count: sp.urinalCount, stalls: stallsPublic(sp, info) });
     broadcast(sp.id, 'notices', { notices: sp.notices });
+    roomStatsBroadcast(sp);
     broadcastUsers(sp);
     broadcastLeaderboard(sp);
   }
@@ -546,9 +567,9 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, reservationPublic, toolsPublic, materialsPublic, repairsPublic, visitorsPublic, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring,
+    roomPublic, reservationPublic, toolsPublic, materialsPublic, repairsPublic, visitorsPublic, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
     // 广播
-    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, noticesBroadcast, visitorsBroadcast,
+    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, noticesBroadcast, visitorsBroadcast,
     // 坑位辅助
     activeStallCount, checkAchievements, notifyUrge, ACHIEVEMENT_DEFS,
     // 每日看点

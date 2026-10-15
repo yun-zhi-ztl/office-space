@@ -104,6 +104,8 @@ async function runTests() {
   await sendMsg(w2, { type: 'roomBook', roomId, startAt: t0 + 10 * 60000, endAt: t0 + 40 * 60000, title: '评审会' });
   rooms = last(w2, 'rooms');
   assert(rooms && rooms.reservations.length === 1 && rooms.reservations[0].status === 'pending', 'member 预约会议室成功');
+  const rs = last(w2, 'roomStats');
+  assert(rs && rs.rooms.some(r => r.todayCount === 1) && rs.utilizationPct >= 0, 'roomStats 统计到今日会议');
   const resId = rooms.reservations[0].id;
   // 过去时间预约被拒
   await sendMsg(w2, { type: 'roomBook', roomId, startAt: Date.now() - 60000, endAt: Date.now() + 3600000 });

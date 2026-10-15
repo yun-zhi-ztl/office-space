@@ -20,6 +20,7 @@ const S = {
   pendingLogin:null,
   DB:{ rooms:[], reservations:[], tools:[], requests:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[] },
   visitorTotal:0, visitorOffset:0,
+  roomStats:null,
   admin:false, sockOpen:false,
 };
 const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['stalls','坑位看板','🚻'],['dash','概览','📊'] ];
@@ -52,6 +53,7 @@ function dispatch(m){
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
     case 'page': handlePage(m); break;
     case 'stalls': S.DB.stalls=m.stalls; break;
+    case 'roomStats': S.roomStats=m.stats; render(); break;
     case 'users': S.DB.users=m.users; break;
     case 'leaderboard': S.DB.leaderboard=m.rankings||[]; break;
     case 'notices': S.DB.notices=m.notices||[]; break;
@@ -71,7 +73,7 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','users','leaderboard','notices','digest'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','roomStats','users','leaderboard','notices','digest'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
 function render(){ if(!S.me) return; renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); }
@@ -244,6 +246,8 @@ function renderDash(){
   $('#main').innerHTML = `<div class="topbar"><div><h1>概览 <span class="view-tag">${esc(S.space?S.space.name:'')}</span></h1><div class="sub">空间内的公共资源使用概览</div></div></div>
     ${mvp?`<div class="row" style="border-color:var(--yellow)"><span><span class="who">👑 本周之星</span> <b>${esc(mvp.username)}</b> · 本周活跃 ${mvp.weekly} 次</span><span class="badge ok">MVP</span></div>`:''}
     <div class="cards">${cards.map(c=>`<div class="card"><h3>${c[2]} ${c[0]}</h3><div style="font-size:30px;font-weight:800">${c[1]}</div></div>`).join('')}</div>
+    ${(S.roomStats&&S.roomStats.rooms&&S.roomStats.rooms.length)?`<h3 style="margin:22px 0 10px">📊 会议室今日占用 <span class="badge info">${S.roomStats.utilizationPct}%（9:00-21:00）</span></h3>
+    <div class="list">${S.roomStats.rooms.map(r=>{ const cap=S.roomStats.capacityMinutes/S.roomStats.rooms.length||1; return `<div class="row"><span><span class="who">${esc(r.name)}</span> <span class="when">今日 ${r.todayCount} 场 · ${Math.round(r.todayMinutes/60)}h${r.todayMinutes%60?''+r.todayMinutes%60+'m':''} · 待开始 ${r.upcomingCount}</span></span><span class="fs"><span class="bar"><i style="width:${Math.min(100,Math.round(r.todayMinutes/cap*100))}%"></i></span></span></div>`; }).join('')}</div>`:''}
     ${dig?`<h3 style="margin:22px 0 10px">📌 每日看点</h3><div class="list">
       <div class="row"><span>今日会议 ${dig.todayMeetingCount} 场</span>${dig.todayMeetingCount?`<span class="when">${dig.todayMeetings.map(r=>`${esc(r.title)}(${esc(r.ownerName)})`).join('、')}</span>`:''}</div>
       ${dig.overdueCount?`<div class="row"><span>⚠️ 有 <b>${dig.overdueCount}</b> 笔借用逾期未还</span></div>`:''}
