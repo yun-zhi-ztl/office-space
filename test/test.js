@@ -480,6 +480,34 @@ async function runTests() {
     wV1.close(); wV2.close();
   }
 
+  // ========== 测试12b: 访客签到码核销 ==========
+  console.log('\n📋 测试12b: 访客签到码核销');
+  {
+    const spC = (await httpJson('POST', '/api/spaces', { name: '签到办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aC = 'ckin_' + runKey, bC = 'ckinm_' + runKey;
+    await reg(aC, 'pw', '接待员'); await reg(bC, 'pw', '前台');
+    const wC1 = await createWSClient(); await loginTo(wC1, spC.id, aC, 'pw');
+    const wC2 = await createWSClient(); await loginTo(wC2, spC.id, bC, 'pw');
+    await sendMsg(wC1, { type: 'visitorCreate', visitorName: '客户李', purpose: '拜访' });
+    const created = last(wC1, 'visitorCreated');
+    assert(created && created.code && created.code.length === 6, '登记访客返回 6 位签到码');
+    const code = created.code;
+    await sendMsg(wC2, { type: 'visitorCheckin', code: 'WRONG1' });
+    const errCode = mk(wC2, 'error').pop();
+    assert(errCode && errCode.message.includes('签到码不存在'), '错误签到码被拒');
+    await sendMsg(wC2, { type: 'visitorCheckin', code });
+    const checked = mk(wC2, 'visitorCheckedIn');
+    assert(checked.length >= 1 && checked[checked.length - 1].visitorName === '客户李', '前台凭码核销成功');
+    const notify = mk(wC1, 'visitorCheckinNotification');
+    assert(notify.length >= 1 && notify[notify.length - 1].visitorName === '客户李', '接待人收到签到核销通知');
+    await sendMsg(wC2, { type: 'visitorCheckin', code });
+    const errDup = mk(wC2, 'error').pop();
+    assert(errDup && errDup.message.includes('已签到'), '重复核销被拒');
+    const vs = last(wC2, 'visitors');
+    assert(vs.visitors.some(v => v.code === code), '签到码随访客列表广播');
+    wC1.close(); wC2.close();
+  }
+
   // ========== 测试13: 个人资料 ==========
   console.log('\n📋 测试13: 个人资料');
   {

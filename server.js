@@ -107,7 +107,7 @@ wss.on('connection', (ws) => {
         materials.handleMaterials(ws, user, space, msg); break;
       case 'repairCreate': case 'repairUpdate': case 'repairAssign':
         repairs.handleRepairs(ws, user, space, msg); break;
-      case 'visitorCreate': case 'visitorArrived': case 'visitorLeft': case 'visitorCancel': case 'visitorRemove':
+      case 'visitorCreate': case 'visitorArrived': case 'visitorLeft': case 'visitorCancel': case 'visitorRemove': case 'visitorCheckin':
         visitors.handleVisitors(ws, user, space, msg); break;
       case 'profileUpdate': case 'passwordChange':
         profile.handleProfile(ws, user, space, msg); break;

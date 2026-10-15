@@ -224,6 +224,17 @@ assertEq(wlp.length, 1, 'roomWaitlistPublic 仅返回 waiting 候补');
 assertEq(wlp[0].ownerName, '甲', 'roomWaitlistPublic 保留候补人');
 assertEq(wlp[0].roomId, 'rw1', 'roomWaitlistPublic 保留会议室');
 
+// ---------- 访客签到码 ----------
+console.log('\n📋 19. 访客签到码');
+const spC = api.createSpace('s11', '签到空间', 1, 0);
+const code1 = api.genCheckinCode(spC);
+const code2 = api.genCheckinCode(spC);
+assert(/^[A-Z2-9]{6}$/.test(code1), '签到码为 6 位合法字符');
+assert(code1 !== code2, '签到码同空间两次生成不同');
+spC.visitors.set('vc1', { id: 'vc1', hostAccount: 'alice', hostName: '甲', visitorName: '客户王', purpose: '商务洽谈', contact: '', expectedAt: null, arrivedAt: null, leftAt: null, status: 'pending', createdAt: Date.now(), code: 'ABC123' });
+const vcp = api.visitorsPublic(spC, new Map());
+assertEq(vcp[0].code, 'ABC123', 'visitorsPublic 保留签到码');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

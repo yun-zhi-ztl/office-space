@@ -72,6 +72,9 @@ function dispatch(m){
     case 'reservation': toast('✔ 预约成功','success'); break;
     case 'cancelSuccess': toast('✔ 已取消','success'); break;
     case 'roomWaitlistPromoted': toast('🎉 候补已晋升：预约已自动创建（'+fmtTime(m.startAt)+'）','success'); render(); break;
+    case 'visitorCreated': toast('✔ 访客已登记，签到码：'+m.code,'success'); render(); break;
+    case 'visitorCheckinNotification': toast('🔔 '+m.visitorName+' 已凭签到码到访','success'); render(); break;
+    case 'visitorCheckedIn': toast('✔ '+m.visitorName+' 核销签到成功','success'); render(); break;
     case 'profileUpdated': if(S.me){ S.me.nickname=m.nickname; S.me.avatar=m.avatar; } toast('✔ 个人资料已更新','success'); render(); break;
     case 'passwordChanged': toast('✔ 密码已修改','success'); break;
     case 'spaceRenamed': if(S.space) S.space.name=m.name; renderSidebar(); render(); break;
@@ -516,12 +519,12 @@ function visitorBadge(s){ return s==='pending'?'warn':s==='arrived'?'info':s==='
 function visitorLabel(s){ return s==='pending'?'待到访':s==='arrived'?'已到访':s==='left'?'已离开':'已取消'; }
 function renderVisitors(){
   const d=S.DB, me=S.me.account;
-  $('#main').innerHTML = `<div class="topbar"><div><h1>访客登记</h1><div class="sub">登记访客姓名、事由与预计到访，负责人可推进状态</div></div>
-    <button class="btn pri" onclick="openVisitorCreate()">＋ 登记访客</button><button class="btn" onclick="exportModuleCsv('visitors',VIS_COLS)">导出 CSV</button></div>
+  $('#main').innerHTML = `<div class="topbar"><div><h1>访客登记</h1><div class="sub">登记访客姓名、事由与预计到访，负责人可推进状态；访客凭签到码到访核销</div></div>
+    <button class="btn pri" onclick="openVisitorCreate()">＋ 登记访客</button><button class="btn" onclick="openCheckin()">🔑 凭码核销</button><button class="btn" onclick="exportModuleCsv('visitors',VIS_COLS)">导出 CSV</button></div>
     <div class="list">${d.visitors.map(v=>{
       const mine = v.hostAccount===me;
       const can = mine||S.admin;
-      return `<div class="row"><span><span class="who">${esc(v.hostName)}</span> 接待 <b>${esc(v.visitorName)}</b><div class="desc">${esc(v.purpose)}${v.contact?' · 联系方式 '+esc(v.contact):''}</div><div class="when">${fmtTime(v.createdAt)}${v.expectedAt?' · 预计 '+fmtTime(v.expectedAt):''}</div></span>
+      return `<div class="row"><span><span class="who">${esc(v.hostName)}</span> 接待 <b>${esc(v.visitorName)}</b><div class="desc">${esc(v.purpose)}${v.contact?' · 联系方式 '+esc(v.contact):''}</div><div class="when">${fmtTime(v.createdAt)}${v.expectedAt?' · 预计 '+fmtTime(v.expectedAt):''}</div>${v.code?`<span class="badge ${v.status==='pending'?'warn':'info'}">签到码 ${esc(v.code)}</span>`:''}</span>
       <span class="fs"><span class="badge ${visitorBadge(v.status)}">${visitorLabel(v.status)}</span>
       ${can?(v.status==='pending'?`<button class="btn green sm" onclick="visitorAction('${v.id}','visitorArrived')">确认到访</button><button class="btn danger sm" onclick="visitorAction('${v.id}','visitorCancel')">取消</button>`:v.status==='arrived'?`<button class="btn green sm" onclick="visitorAction('${v.id}','visitorLeft')">离开</button>`:''):''}
       ${S.admin?`<button class="btn danger sm" onclick="visitorAction('${v.id}','visitorRemove')">删除</button>`:''}
@@ -536,6 +539,11 @@ function openVisitorCreate(){ openModal(`<span class="close" onclick="closeModal
   <div class="fld"><label>预计到访（可选）</label><input id="vsExpected" type="datetime-local"></div>
   <button class="btn pri" onclick="submitVisitorCreate()">登记</button></div>`); }
 function submitVisitorCreate(){ const st=$('#vsExpected').value?new Date($('#vsExpected').value).getTime():0; wsSend({type:'visitorCreate',visitorName:$('#vsName').value,purpose:$('#vsPurpose').value,contact:$('#vsContact').value,expectedAt:st||0}); closeModal(); }
+/* 访客签到码核销：访客到访时输入/报出 6 位签到码 */
+function openCheckin(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>🔑 凭签到码核销</h2><div class="form">
+  <div class="fld"><label>访客签到码（6 位）</label><input id="ckCode" placeholder="如：ABC123" maxlength="6" style="text-transform:uppercase;letter-spacing:4px"></div>
+  <button class="btn pri" onclick="submitCheckin()">核销签到</button></div>`); }
+function submitCheckin(){ const code=$('#ckCode').value.trim(); if(!code) return toast('请输入签到码','error'); wsSend({type:'visitorCheckin',code}); closeModal(); }
 function visitorAction(id,type){ wsSend({type, visitorId:id}); }
 
 /* ============ 坑位看板 ============ */

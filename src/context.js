@@ -42,6 +42,15 @@ function createContext() {
     } while (spaces.has(id));
     return id;
   }
+  function genCheckinCode(space) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code;
+    do {
+      code = '';
+      for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    } while ([...space.visitors.values()].some((v) => v.code === code));
+    return code;
+  }
   function sendTo(ws, obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
   function broadcastTo(spaceId, obj) {
     const sp = spaces.get(spaceId);
@@ -431,7 +440,7 @@ function createContext() {
       hostName: info.get(v.hostAccount) ? info.get(v.hostAccount).display : v.hostName,
       visitorName: v.visitorName, purpose: v.purpose, contact: v.contact || '',
       expectedAt: v.expectedAt || null, arrivedAt: v.arrivedAt || null, leftAt: v.leftAt || null,
-      status: v.status, createdAt: v.createdAt,
+      status: v.status, createdAt: v.createdAt, code: v.code || '',
     })).sort((a, b) => (b.createdAt - a.createdAt));
   }
   function stallTier(s) {
@@ -588,7 +597,7 @@ function createContext() {
     set pgEnabled(v) { usePg = v; },
     initDb, flushWrites, scheduleFlush,
     // 工具
-    genId, genSpaceId, sendTo, broadcastTo, sendToUser, sendToAccount, getUsersIn, getUserByAccount, isAdmin, serError, lk, spaceUserInfo,
+    genId, genSpaceId, genCheckinCode, sendTo, broadcastTo, sendToUser, sendToAccount, getUsersIn, getUserByAccount, isAdmin, serError, lk, spaceUserInfo,
     // 认证
     hashPassword, verifyPassword, issueToken, accountByLogin,
     // 持久化

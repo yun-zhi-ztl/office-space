@@ -68,8 +68,9 @@
   - 状态流转：`reported` → `in_progress` → `resolved`；上报人可取消 `reported`。
 
 ### 访客登记（visitors）
-- `visitor`: `{ id, hostAccount, hostName, visitorName, purpose, contact, expectedAt, arrivedAt, leftAt, status, createdAt }`
+- `visitor`: `{ id, hostAccount, hostName, visitorName, purpose, contact, expectedAt, arrivedAt, leftAt, status, createdAt, code }`
   - `purpose` 必填；`contact` / `expectedAt` 可选。
+  - `code`：登记时自动生成的 6 位签到码（同空间唯一），访客到访时报码，由空间内成员核销（`visitorCheckin`）推进为 `arrived`。
   - 状态：`pending` → `arrived` → `left`；`pending` 可 `cancelled`；管理员可删除任意记录。
   - 归属人（host）或管理员可推进状态 / 删除；其他成员只读。
 
@@ -105,7 +106,7 @@
 | `repairCreate` | 提交报修（可带 `priority`） | member |
 | `repairAssign` | 指派报修负责人 | reporter / admin |
 | `repairUpdate` | 推进 / 取消报修状态，或调整 `priority` | member / owner / admin |
-| `visitorCreate` / `visitorArrived` / `visitorLeft` / `visitorCancel` / `visitorRemove` | 访客登记与状态流转 / 删除 | member / host / admin |
+| `visitorCreate` / `visitorArrived` / `visitorLeft` / `visitorCancel` / `visitorRemove` / `visitorCheckin` | 访客登记与状态流转 / 删除 / 凭签到码核销 | member / host / admin |
 | `profileUpdate` / `passwordChange` | 修改展示名、头像 / 修改密码 | member |
 | `stallControl`（子类型 reserve/grab/startUse/finish/release/cancel/urge/rate/toggleEmergency） | 坑位看板全部操作 | member |
 | `stallConfig` | 配置蹲坑 / 尿槽数量 | admin |
@@ -190,6 +191,7 @@
 | 空间暂停 | 管理员可暂停空间，全员暂停预约 / 借用 / 申领 / 报修 / 访客登记，顶部横幅提示 | `spacePause` |
 | 工具续借 | 借用可延长归还期限（默认 7 天，可续借 1-30 天），列表展示应还日期与逾期状态 | `toolExtend` |
 | 访客登记 | 登记访客姓名、事由、预计到访，负责人/管理员推进到访与离开，实时同步 | `visitorCreate` / `visitorArrived` / `visitorLeft` / `visitorCancel` / `visitorRemove` |
+| 访客签到码 | 登记访客时自动生成 6 位签到码，访客到访时报码由空间成员核销为已到访，并向接待人推送通知 | `visitorCheckin` / `visitorCheckinNotification` |
 | 个人资料 | 成员可改展示名/头像，并凭旧密码修改登录密码 | `profileUpdate` / `passwordChange` |
 | 空间设置 | 管理员可修改空间名、配置蹲坑 / 尿槽数量 | `spaceRename` / `stallConfig` |
 | 紧急模式 | 个人一键标记「紧急」，在线列表显示 🆘，方便他人避让 | `toggleEmergency` |
@@ -200,8 +202,8 @@
 | 借用记录导出 | 工具借用页一键导出全部借用记录 CSV（自动拉取分页） | 复用 `fetchPage`(`borrows`) |
 
 ### 客户端→服务端新增消息
-`setStatus`、`announce`、`spaceRename`、`spacePause`、`suggestRoom`、`remindReturn`、`toolExtend`、`roomBook`(周期 `repeat`/`repeatCount`)、`reservationCancelSeries`、`roomWaitlist`、`roomWaitlistCancel`、`materialAssign`、`repairAssign`、`repairUpdate`(优先级)、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`profileUpdate`、`passwordChange`、`toggleEmergency`、`fetchPage`(`borrows` 等分页模块)；服务端相应广播/单发
-`users`(含 `status`、`emergencyMode`) 、`notices`、`suggestRooms`、`borrowReminder`、`digest`、`visitors`、`spaceRenamed`、`spacePaused`、`roomWaitlistPromoted`、`rooms`(含 `waitlist`)。
+`setStatus`、`announce`、`spaceRename`、`spacePause`、`suggestRoom`、`remindReturn`、`toolExtend`、`roomBook`(周期 `repeat`/`repeatCount`)、`reservationCancelSeries`、`roomWaitlist`、`roomWaitlistCancel`、`materialAssign`、`repairAssign`、`repairUpdate`(优先级)、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`visitorCheckin`、`profileUpdate`、`passwordChange`、`toggleEmergency`、`fetchPage`(`borrows` 等分页模块)；服务端相应广播/单发
+`users`(含 `status`、`emergencyMode`) 、`notices`、`suggestRooms`、`borrowReminder`、`digest`、`visitors`、`spaceRenamed`、`spacePaused`、`roomWaitlistPromoted`、`rooms`(含 `waitlist`)、`visitorCheckinNotification`。
 
 ## 9. 代码架构（多模块拆分）
 
@@ -217,7 +219,7 @@ src/modules/     rooms / tools / materials / repairs / visitors / profile / stal
 
 - 各领域模块是纯函数工厂 `module.exports = (api)=>({...})`，由 `server.js` 注入共享上下文 `api`，无全局状态、便于单测。
 - 定时器、心跳、优雅停机属于进程级关注点，保留在入口。
-- 该拆分不改变任何对外协议与行为，e2e（105 项）在内存与 PostgreSQL 双模式下均通过。
+- 该拆分不改变任何对外协议与行为，e2e（111 项）在内存与 PostgreSQL 双模式下均通过。
 
 ## 10. 健康检查、自测与 CI（本版本新增）
 
@@ -225,9 +227,9 @@ src/modules/     rooms / tools / materials / repairs / visitors / profile / stal
 - **npm 脚本**：
   - `npm start`：启动服务
   - `npm run lint`：对 `server.js` / `public` / `src/` / `test/` 全部 JS 执行 `node --check` 语法检查（`scripts/lint.js`）
-  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化、每日看点、用户广播、会议室时长累计、周期预约展开、借用逾期判定、会议室占用率统计、报修优先级序列化、借用记录序列化、会议室候补序列化，62 项）
+  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化、每日看点、用户广播、会议室时长累计、周期预约展开、借用逾期判定、会议室占用率统计、报修优先级序列化、借用记录序列化、会议室候补序列化、访客签到码序列化，65 项）
   - `npm run test:restore`：前端「自动恢复会话」回归测试（`test/restore.js`，vm stub 加载内联脚本，无需服务）
   - `npm run smoke`：快速冒烟（`test/smoke.js`）——健康检查、首页与大屏可达、WS 连接、登录、收到广播
-  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，105 项）
+  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，111 项）
 - **CI**：`.github/workflows/ci.yml` 在 push 到 `main` 或 pull_request 时自动：`npm ci` → `npm run lint` → `docker compose config` 校验 → `docker build` 构建校验 → 内存模式启动服务 → `npm run smoke` → `npm test`。用不可达的 PG 参数强制内存模式，无需外部数据库。
 - **环境变量**：见 `.env.example`（`PORT`、`PGHOST`、`PGPORT`、`PGUSER`、`PGPASSWORD`、`PGDATABASE`）；`.env` 已加入 `.gitignore`。

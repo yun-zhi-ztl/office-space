@@ -1,7 +1,7 @@
 'use strict';
-// 访客登记模块：visitorCreate / visitorArrived / visitorLeft / visitorCancel / visitorRemove
+// 访客登记模块：visitorCreate / visitorArrived / visitorLeft / visitorCancel / visitorRemove / visitorCheckin
 module.exports = function visitorsModule(api) {
-  const { spaceUserInfo, visitorsPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity } = api;
+  const { spaceUserInfo, visitorsPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, genCheckinCode, saveEntity, deleteEntity, sendToAccount } = api;
 
   function visitorsBroadcast(space) {
     const info = spaceUserInfo(space.id);
@@ -27,10 +27,24 @@ module.exports = function visitorsModule(api) {
         hostName: user.nickname,
         visitorName, purpose, contact, expectedAt,
         arrivedAt: null, leftAt: null, status: 'pending', createdAt: Date.now(),
+        code: genCheckinCode(space),
       };
       space.visitors.set(visitor.id, visitor);
       saveEntity(space.id, 'visitor', visitor.id, visitor);
       visitorsBroadcast(space);
+      sendTo(ws, { type: 'visitorCreated', visitorId: visitor.id, code: visitor.code });
+    } else if (msg.type === 'visitorCheckin') {
+      const code = (msg.code || '').trim().toUpperCase();
+      if (!code) return sendTo(ws, serError('请输入签到码'));
+      const visitor = [...space.visitors.values()].find((v) => v.code && v.code.toUpperCase() === code);
+      if (!visitor) return sendTo(ws, serError('签到码不存在'));
+      if (visitor.status !== 'pending') return sendTo(ws, serError('该访客已签到或状态已变更'));
+      visitor.status = 'arrived';
+      visitor.arrivedAt = Date.now();
+      saveEntity(space.id, 'visitor', visitor.id, visitor);
+      visitorsBroadcast(space);
+      sendToAccount(visitor.hostAccount, { type: 'visitorCheckinNotification', visitorId: visitor.id, visitorName: visitor.visitorName, code: visitor.code });
+      sendTo(ws, { type: 'visitorCheckedIn', visitorId: visitor.id, visitorName: visitor.visitorName });
     } else if (msg.type === 'visitorArrived') {
       const visitor = space.visitors.get(msg.visitorId);
       if (!visitor) return sendTo(ws, serError('访客记录不存在'));
