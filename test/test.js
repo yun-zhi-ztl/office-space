@@ -371,6 +371,21 @@ async function runTests() {
   const errPrio = mk(w2, 'error');
   assert(errPrio.length > 0 && errPrio[errPrio.length - 1].message.includes('无效的优先级'), '非法优先级被拒');
 
+  // ========== 测试6c: 报修重复检测 ==========
+  console.log('\n📋 测试6c: 报修重复检测');
+  await sendMsg(w2, { type: 'repairCreate', category: '厕所', location: '三层男厕', description: '冲水坏了' });
+  let rep6 = last(w2, 'repairs');
+  assert(rep6.repairs[0].status === 'reported', 'member 提交新报修成功');
+  const rep6Id = rep6.repairs[0].id;
+  await sendMsg(w1, { type: 'repairCreate', category: '厕所', location: '三层男厕', description: '冲水又坏了' });
+  const errDupRepair = mk(w1, 'error').pop();
+  assert(errDupRepair && errDupRepair.code === 'duplicateRepair' && errDupRepair.repairId === rep6Id, '同位置同类未处理报修被识别为重复');
+  assert(errDupRepair.message.includes('请先处理或取消'), '重复报修提示先处理旧单');
+  await sendMsg(w1, { type: 'repairUpdate', repairId: rep6Id, status: 'resolved' });
+  await sendMsg(w1, { type: 'repairCreate', category: '厕所', location: '三层男厕', description: '冲水又坏了' });
+  const okAfterResolve = last(w1, 'repairs');
+  assert(okAfterResolve.repairs.some(r => r.description === '冲水又坏了'), '旧单解决后可再次提交同位置报修');
+
   // ========== 测试6b: 报修指派 ==========
   console.log('\n📋 测试6b: 报修指派负责人');
   await sendMsg(w2, { type: 'repairCreate', category: '空调', location: '3F 会议室', description: '不制冷' });
@@ -642,6 +657,29 @@ async function runTests() {
     const errR = mk(wM, 'error');
     assert(errR.length > 0 && errR[errR.length - 1].message.includes('仅管理员'), '非管理员改名被拒');
     wS.close(); wM.close();
+  }
+
+  // ========== 测试14b: 管理员成员管理 ==========
+  console.log('\n📋 测试14b: 管理员成员管理');
+  {
+    const spM = (await httpJson('POST', '/api/spaces', { name: '管理员办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aM = 'mng_' + runKey, bM = 'mngb_' + runKey;
+    await reg(aM, 'pw', '管理员'); await reg(bM, 'pw', '成员');
+    const wA = await createWSClient(); await loginTo(wA, spM.id, aM, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spM.id, bM, 'pw');
+    await sendMsg(wB, { type: 'spaceAdminSet', account: aM, admin: true });
+    const errMng = mk(wB, 'error').pop();
+    assert(errMng && errMng.message.includes('仅管理员'), '非管理员管理管理员被拒');
+    await sendMsg(wA, { type: 'spaceAdminSet', account: bM, admin: true });
+    const granted = last(wB, 'adminSet');
+    assert(granted && granted.admin === true, '成员收到授予管理员通知');
+    assert(last(wB, 'users').users.find(u => u.account === bM).role === 'admin', '用户列表角色更新为管理员');
+    await sendMsg(wA, { type: 'spaceAdminSet', account: aM, admin: false });
+    assert(last(wA, 'users').users.find(u => u.account === aM).role === 'member', '取消自己管理员后角色变为成员');
+    await sendMsg(wB, { type: 'spaceAdminSet', account: bM, admin: false });
+    const errLast = mk(wB, 'error').pop();
+    assert(errLast && errLast.message.includes('至少保留一名管理员'), '移除最后一名管理员被拒');
+    wA.close(); wB.close();
   }
 
   // ========== 测试15: 紧急模式 ==========

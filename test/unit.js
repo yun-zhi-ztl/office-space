@@ -3,6 +3,7 @@
 // 覆盖 ID 生成、周统计、坑位段位、成就解锁、口令哈希等核心逻辑。
 const { createContext } = require('../src/context');
 const roomsModule = require('../src/modules/rooms');
+const extrasModule = require('../src/modules/extras');
 
 let passed = 0;
 let failed = 0;
@@ -415,6 +416,61 @@ assertEq(matSlaRem.map((m) => m.id), ['mm1'], '仅返回超时且未提醒过的
 assertEq(api.MATERIAL_SLA_MS, 2 * 24 * 3600 * 1000, '申领 SLA 为 48 小时');
 const matPub = api.materialsPublic(spMat, new Map());
 assertEq(matPub[0].slaReminded, false, 'materialsPublic 暴露 slaReminded');
+
+// ---------- 报修重复检测 ----------
+console.log('\n📋 28. 报修重复检测');
+const spDup = api.createSpace('s20', '报修重复空间', 1, 0);
+const nowDup = 1000000000;
+spDup.repairs.set('d1', { id: 'd1', category: '灯光', location: '三层走廊', reporterAccount: 'alice', reporterName: '甲', priority: 'normal', description: '闪烁', status: 'reported', createdAt: nowDup, updatedAt: nowDup });
+spDup.repairs.set('d2', { id: 'd2', category: '灯光', location: '三层走廊', reporterAccount: 'bob', reporterName: '乙', priority: 'low', description: '不亮', status: 'in_progress', createdAt: nowDup + 1, updatedAt: nowDup + 1 });
+spDup.repairs.set('d3', { id: 'd3', category: '空调', location: '三层走廊', reporterAccount: 'carol', reporterName: '丙', priority: 'normal', description: '不制冷', status: 'reported', createdAt: nowDup + 2, updatedAt: nowDup + 2 });
+spDup.repairs.set('d4', { id: 'd4', category: '灯光', location: '三层走廊', reporterAccount: 'dave', reporterName: '丁', priority: 'normal', description: '已修', status: 'resolved', createdAt: nowDup + 3, updatedAt: nowDup + 3 });
+spDup.repairs.set('d5', { id: 'd5', category: '灯光', location: '三层走廊', reporterAccount: 'eve', reporterName: '戊', priority: 'normal', description: '取消', status: 'cancelled', createdAt: nowDup + 4, updatedAt: nowDup + 4 });
+const dupRepair = api.findDuplicateRepair(spDup, '灯光', '三层走廊');
+assertEq(dupRepair && dupRepair.id, 'd2', '重复检测返回最近一条未处理同位置同类报修');
+assertEq(api.findDuplicateRepair(spDup, '灯光', '二层走廊'), null, '不同位置不视为重复');
+assertEq(api.findDuplicateRepair(spDup, '空调', '三层走廊').id, 'd3', '同位置不同类型不视为重复');
+assertEq(api.findDuplicateRepair(spDup, '灯光', '三层走廊 ').id, 'd2', '位置去空格后匹配');
+assertEq(api.findDuplicateRepair(spDup, '灯光', ''), null, '位置为空不返回重复');
+
+// ---------- 管理员成员管理 ----------
+console.log('\n📋 29. 管理员成员管理');
+let lastAdminErr = null;
+const fakeAdminApi = {
+  users: new Map(),
+  broadcastUsers: () => {},
+  sendTo: (ws, m) => { if (m.type === 'error') lastAdminErr = m.message; },
+  serError: (m) => ({ type: 'error', message: m }),
+  genId: () => 'x',
+  roomPublic: (r) => r,
+  noticesBroadcast: () => {},
+  isAdmin: (sp, acc) => sp.admins.has(acc),
+  saveSpace: () => {},
+  saveEntity: () => {},
+  deleteEntity: () => {},
+  broadcast: () => {},
+  getUserByAccount: (a) => ({ id: 'u_' + a, account: a, nickname: a, currentSpace: 's21' }),
+  sendToUser: () => {},
+};
+const fakeAdminWs = { readyState: 1, send: () => {} };
+const extras = extrasModule(fakeAdminApi);
+const spAdmin = api.createSpace('s21', '管理员空间', 1, 0);
+spAdmin.admins.add('alice');
+extras.adminSet(fakeAdminWs, { account: 'alice' }, spAdmin, { account: 'bob', admin: true });
+assert(spAdmin.admins.has('bob'), '管理员可授予其他成员管理员');
+extras.adminSet(fakeAdminWs, { account: 'alice' }, spAdmin, { account: 'bob', admin: false });
+assert(!spAdmin.admins.has('bob'), '管理员可取消其他成员管理员');
+extras.adminSet(fakeAdminWs, { account: 'alice' }, spAdmin, { account: 'alice', admin: false });
+assert(spAdmin.admins.has('alice'), '移除最后一名管理员被拒绝');
+assert(lastAdminErr && lastAdminErr.includes('至少保留一名管理员'), '最后一名管理员被拒绝并返回提示');
+extras.adminSet(fakeAdminWs, { account: 'alice' }, spAdmin, { account: 'carol', admin: true });
+assert(spAdmin.admins.has('carol'), '管理员可授予在线成员');
+lastAdminErr = null;
+extras.adminSet(fakeAdminWs, { account: 'alice' }, spAdmin, { account: 'carol', admin: true });
+assert(lastAdminErr && lastAdminErr.includes('已是管理员'), '重复授予管理员被拒绝');
+lastAdminErr = null;
+extras.adminSet(fakeAdminWs, { account: 'dave' }, spAdmin, { account: 'carol', admin: false });
+assert(lastAdminErr && lastAdminErr.includes('仅管理员'), '非管理员管理被拒绝');
 
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);

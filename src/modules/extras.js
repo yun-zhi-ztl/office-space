@@ -1,7 +1,7 @@
 'use strict';
 // 扩展功能：setStatus / announce / suggestRoom / remindReturn + 公告推送
 module.exports = function extrasModule(api) {
-  const { users, broadcastUsers, sendTo, serError, genId, roomPublic, noticesBroadcast, isAdmin, saveSpace, saveEntity, deleteEntity, broadcast } = api;
+  const { users, broadcastUsers, sendTo, serError, genId, roomPublic, noticesBroadcast, isAdmin, saveSpace, saveEntity, deleteEntity, broadcast, getUserByAccount, sendToUser } = api;
 
   function pushNotice(space, text, fromAccount, fromName) {
     const notice = { id: genId('n', null), text, from: fromName || fromAccount || '系统', ts: Date.now() };
@@ -61,6 +61,22 @@ module.exports = function extrasModule(api) {
     broadcast(space.id, 'spaceRenamed', { name });
   }
 
+  function handleAdminSet(ws, user, space, msg) {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可管理管理员'));
+    const account = (msg.account || '').trim().slice(0, 40);
+    if (!account) return sendTo(ws, serError('请选择成员'));
+    const target = getUserByAccount(account);
+    if (!target || target.currentSpace !== space.id) return sendTo(ws, serError('成员必须为空间内在线成员'));
+    const makeAdmin = !!msg.admin;
+    if (space.admins.has(account) === makeAdmin) return sendTo(ws, serError(makeAdmin ? '该成员已是管理员' : '该成员已不是管理员'));
+    if (!makeAdmin && space.admins.size === 1) return sendTo(ws, serError('至少保留一名管理员，无法移除最后一名管理员'));
+    if (makeAdmin) space.admins.add(account); else space.admins.delete(account);
+    saveSpace(space);
+    broadcastUsers(space);
+    sendTo(ws, { type: 'adminSet', account, admin: makeAdmin, adminCount: space.admins.size });
+    sendToUser(target.id, { type: 'adminSet', account, admin: makeAdmin, adminCount: space.admins.size });
+  }
+
   function handleRemindReturn(ws, user, space, msg) {
     const b = space.borrows.get(msg.borrowId);
     if (!b || b.status !== 'borrowed') return sendTo(ws, serError('借用记录不存在或已归还'));
@@ -82,5 +98,5 @@ module.exports = function extrasModule(api) {
     sendTo(ws, { type: 'noticeRemoved', noticeId: notice.id });
   }
 
-  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace, pause: handlePause, removeNotice: handleRemoveNotice };
+  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace, adminSet: handleAdminSet, pause: handlePause, removeNotice: handleRemoveNotice };
 };

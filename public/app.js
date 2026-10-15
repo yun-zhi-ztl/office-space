@@ -98,6 +98,7 @@ function dispatch(m){
     case 'passwordChanged': toast('✔ 密码已修改','success'); break;
     case 'spaceRenamed': if(S.space) S.space.name=m.name; renderSidebar(); render(); break;
     case 'spacePaused': if(S.space){ S.space.paused=!!m.paused; S.space.pausedReason=m.reason||''; } render(); break;
+    case 'adminSet': if(S.me && m.account===S.me.account){ S.admin=!!m.admin; renderSidebar(); } render(); break;
     case 'noticeRemoved': toast('公告已删除','success'); break;
     case 'emergencyToggled': if(S.me) S.me.emergencyMode=!!m.enabled; toast(m.enabled?'🆘 已开启紧急模式':'✅ 已退出紧急模式'); render(); break;
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
@@ -247,9 +248,12 @@ function submitProfileUpdate(){ wsSend({type:'profileUpdate',nickname:$('#pfName
 function submitPasswordChange(){ wsSend({type:'passwordChange',oldPassword:$('#pfOld').value,newPassword:$('#pfNew').value}); closeModal(); }
 
 function openSpaceSettings(){
+  const memberRows=(S.DB.users||[]).map(u=>{ const isSelf=u.account===S.me.account; const admin=u.role==='admin'; return `<div class="row"><span><span class="who">${esc(u.display||u.username||u.account)}</span> <span class="badge ${admin?'info':'grey'}">${admin?'管理员':'成员'}</span>${isSelf?'<span class="hint">（自己）</span>':''}</span>${isSelf?'':(admin?`<button class="btn danger sm" onclick="setAdmin('${u.account}',false)">取消管理员</button>`:`<button class="btn sm" onclick="setAdmin('${u.account}',true)">设为管理员</button>`)}`; }).join('')||'<div class="hint">暂无在线成员</div>';
   openModal(`<span class="close" onclick="closeModal()">×</span><h2>空间设置</h2><div class="form">
     <div class="fld"><label>空间名（最多 30 字）</label><input id="spNewName" maxlength="30" value="${esc(S.space?S.space.name:'')}"></div>
     <button class="btn pri" onclick="submitSpaceRename()">保存名称</button></div>
+    <hr style="margin:16px 0;border:none;border-top:1px solid var(--line)">
+    <div class="fld"><label>管理员管理</label><div class="list">${memberRows}</div><div class="hint">至少保留一名管理员，避免空间无人可管理</div></div>
     <hr style="margin:16px 0;border:none;border-top:1px solid var(--line)">
     <div class="fld"><label>暂停状态</label><div class="fs"><select id="spPaused"><option value="">未暂停</option><option value="1" ${S.space&&S.space.paused?'selected':''}>已暂停</option></select>
     <input id="spPauseReason" placeholder="原因（如：办公室搬迁）" maxlength="40" style="flex:1"></div></div>
@@ -262,6 +266,7 @@ function openSpaceSettings(){
     <div class="hint">坑位改动会使未开始的预约失效</div></div>`);
 }
 function submitSpaceRename(){ wsSend({type:'spaceRename', name:$('#spNewName').value}); closeModal(); }
+function setAdmin(account, admin){ wsSend({type:'spaceAdminSet', account, admin}); closeModal(); }
 function submitPause(){ const paused=!!$('#spPaused').value; wsSend({type:'spacePause', paused, reason:$('#spPauseReason').value}); closeModal(); }
 
 /* ============ 概览 ============ */
@@ -527,6 +532,7 @@ function openRepair(){ openModal(`<span class="close" onclick="closeModal()">×<
   <div class="fld"><label>优先级</label><select id="rpPri"><option value="normal">中</option><option value="high">高</option><option value="low">低</option></select></div>
   <div class="fld"><label>位置</label><input id="rpLoc" placeholder="如：三层男厕第二个坑位"></div>
   <div class="fld"><label>描述</label><input id="rpDesc" placeholder="故障现象"></div>
+  <div class="hint">同一位置的同类故障若仍有未处理报修，将被识别为重复报修并提示先处理旧单</div>
   <button class="btn pri" onclick="submitRepair()">提交</button></div>`); }
 function submitRepair(){ wsSend({type:'repairCreate',category:$('#rpCat').value,priority:$('#rpPri').value,location:$('#rpLoc').value,description:$('#rpDesc').value}); closeModal(); }
 function setRepair(id,status){ wsSend({type:'repairUpdate',repairId:id,status}); }

@@ -1,7 +1,7 @@
 'use strict';
 // 报修模块：repairCreate / repairUpdate
 module.exports = function repairsModule(api) {
-  const { spaceUserInfo, repairsPublic, broadcast, LIST_PAGE, REPAIR_CATEGORIES, REPAIR_PRIORITIES, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToAccount, sendToUser, checkAchievements, isAdmin } = api;
+  const { spaceUserInfo, repairsPublic, broadcast, LIST_PAGE, REPAIR_CATEGORIES, REPAIR_PRIORITIES, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToAccount, sendToUser, checkAchievements, isAdmin, findDuplicateRepair } = api;
 
   function repairsBroadcast(space) {
     const info = spaceUserInfo(space.id);
@@ -17,6 +17,8 @@ module.exports = function repairsModule(api) {
       const description = (msg.description || '').trim().slice(0, 160);
       const priority = REPAIR_PRIORITIES.includes(msg.priority) ? msg.priority : 'normal';
       if (!location || !description) return sendTo(ws, serError('请填写故障位置与描述'));
+      const dup = findDuplicateRepair(space, category, location);
+      if (dup) return sendTo(ws, { type: 'error', code: 'duplicateRepair', repairId: dup.id, category: dup.category, location: dup.location, message: `该位置已有相同类型的未处理报修（#${dup.id}），请先处理或取消后再提交` });
       const rep = { id: genId('rp', null), reporterAccount: user.account, reporterName: user.nickname, category, location, description, priority, status: 'reported', createdAt: Date.now(), updatedAt: Date.now(), slaRemindedAt: null };
       space.repairs.set(rep.id, rep);
       user.stats.repairCount = (user.stats.repairCount || 0) + 1;

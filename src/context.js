@@ -373,6 +373,19 @@ function createContext() {
       return nowMs >= (m.createdAt || 0) + MATERIAL_SLA_MS;
     });
   }
+  // 报修重复检测：同一空间下相同类型 + 相同位置、且仍未解决/取消的报修视为重复
+  function findDuplicateRepair(space, category, location) {
+    const loc = String(location || '').trim().toLowerCase();
+    if (!loc) return null;
+    let found = null;
+    for (const r of space.repairs.values()) {
+      if (r.status !== 'reported' && r.status !== 'in_progress') continue;
+      if (r.category !== category) continue;
+      if (String(r.location || '').trim().toLowerCase() !== loc) continue;
+      if (!found || r.createdAt > found.createdAt) found = r;
+    }
+    return found;
+  }
   function createSpace(id, name, squat, urinal) {
     const sp = {
       id, name, squatCount: squat == null ? 4 : squat, urinalCount: urinal == null ? 3 : urinal,
@@ -764,7 +777,7 @@ function createContext() {
     // 持久化
     saveSpace, saveAccount, saveProfile, saveEntity, deleteEntity, saveStallRating, saveStatsToSpace,
     // 空间
-    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, createSpace, buildStalls, applyProfileToUser,
+    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
     // 序列化
     roomPublic, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
     // 广播
