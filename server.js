@@ -99,7 +99,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }
 
     switch (msg.type) {
-      case 'roomCreate': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'reservationCancelSeries': case 'roomStart': case 'roomEnd':
+      case 'roomCreate': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'reservationCancelSeries': case 'roomWaitlist': case 'roomWaitlistCancel': case 'roomStart': case 'roomEnd':
         rooms.handleRooms(ws, user, space, msg); break;
       case 'toolCreate': case 'toolDelete': case 'toolAdjust': case 'toolBorrow': case 'toolReturn': case 'toolExtend':
         tools.handleTools(ws, user, space, msg); break;
@@ -218,6 +218,17 @@ setInterval(() => {
     }
     if (roomsChanged) rooms.roomsBroadcast(sp);
     if (api.pruneRoomReservations(sp, now - 7 * 86400000)) rooms.roomsBroadcast(sp);
+    // 候补清理：时段已过仍未晋升的候补标记为 expired
+    let waitlistChanged = false;
+    for (const [wid, w] of [...sp.roomWaitlist]) {
+      if (w.status === 'waiting' && now > w.endAt) {
+        w.status = 'expired';
+        sp.roomWaitlist.delete(wid);
+        api.deleteEntity(sp.id, 'room_waitlist', wid);
+        waitlistChanged = true;
+      }
+    }
+    if (waitlistChanged) rooms.roomsBroadcast(sp);
   }
 }, 15000);
 

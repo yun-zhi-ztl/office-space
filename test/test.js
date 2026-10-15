@@ -145,6 +145,46 @@ async function runTests() {
   const cancelledSeries = rooms.reservations.filter(r => r.seriesId === seriesId);
   assert(cancelledSeries.length === 4 && cancelledSeries.every(r => r.status === 'cancelled'), '取消整组后全部场次置为 cancelled');
 
+  // ========== 测试3c: 会议室候补 ==========
+  console.log('\n📋 测试3c: 会议室候补（加入/空闲拒绝/重复拒绝/晋升/取消）');
+  {
+    const tW = Date.now();
+    await sendMsg(w2, { type: 'roomBook', roomId, startAt: tW + 10 * 60000, endAt: tW + 40 * 60000, title: '评审会' });
+    let rw = last(w2, 'rooms');
+    const wRes = rw.reservations.find(r => r.ownerAccount === MEMBER && r.title === '评审会' && r.status === 'pending');
+    assert(wRes, 'member 预约候补测试时段成功');
+    const wResId = wRes.id;
+    await sendMsg(wA, { type: 'roomBook', roomId, startAt: tW + 20 * 60000, endAt: tW + 50 * 60000 });
+    const errConflict = mk(wA, 'error').pop();
+    assert(errConflict && errConflict.message.includes('已被预约') && errConflict.code === 'roomConflict', '冲突预约返回 roomConflict 错误码');
+    await sendMsg(wA, { type: 'roomWaitlist', roomId, startAt: tW + 20 * 60000, endAt: tW + 50 * 60000, title: '评审会' });
+    rw = last(wA, 'rooms');
+    assert(rw && rw.waitlist.length === 1 && rw.waitlist[0].ownerAccount === ADMIN, 'admin 加入候补成功');
+    assert(rw.waitlistTotal === 1, '候补广播携带 waitlistTotal');
+    await sendMsg(wA, { type: 'roomWaitlist', roomId, startAt: tW + 3 * 3600000, endAt: tW + 4 * 3600000, title: '空会' });
+    const errFree = mk(wA, 'error').pop();
+    assert(errFree && errFree.message.includes('可直接预约'), '空闲时段加入候补被拒');
+    await sendMsg(wA, { type: 'roomWaitlist', roomId, startAt: tW + 20 * 60000, endAt: tW + 50 * 60000, title: '评审会' });
+    const errDup = mk(wA, 'error').pop();
+    assert(errDup && errDup.message.includes('已在该时段'), '重复加入候补被拒');
+    await sendMsg(w2, { type: 'roomWaitlistCancel', waitlistId: rw.waitlist[0].id });
+    const errCancel = mk(w2, 'error').pop();
+    assert(errCancel && errCancel.message.includes('只能取消自己的'), '非本人取消候补被拒');
+    await sendMsg(w2, { type: 'reservationCancel', reservationId: wResId });
+    const promoted = mk(wA, 'roomWaitlistPromoted');
+    assert(promoted.length >= 1 && promoted[promoted.length - 1].reservationId, '预约取消后候补晋升通知送达');
+    rw = last(wA, 'rooms');
+    const promotedRes = (rw.reservations || []).find(r => r.ownerAccount === ADMIN && r.status === 'pending');
+    assert(promotedRes && promotedRes.title === '评审会', '晋升后生成真实预约');
+    assert(rw.waitlist.length === 0, '晋升后候补从队列移除');
+    await sendMsg(w2, { type: 'roomBook', roomId, startAt: tW + 50 * 60000, endAt: tW + 80 * 60000, title: '周会' });
+    await sendMsg(wA, { type: 'roomWaitlist', roomId, startAt: tW + 60 * 60000, endAt: tW + 90 * 60000, title: '候补A' });
+    const wWaitId = last(wA, 'rooms').waitlist[0].id;
+    await sendMsg(wA, { type: 'roomWaitlistCancel', waitlistId: wWaitId });
+    rw = last(wA, 'rooms');
+    assert(rw.waitlist.length === 0 && rw.waitlistTotal === 0, '本人取消候补后队列清空');
+  }
+
   // ========== 测试4: 工具借用 ==========
   console.log('\n📋 测试4: 工具借用（创建/借用/不足/归还）');
   await sendMsg(w1, { type: 'toolCreate', name: '测试机', category: '测试电脑', total: 2, location: '3F 机柜' });

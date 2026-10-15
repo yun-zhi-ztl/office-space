@@ -52,6 +52,9 @@ function createContext() {
   function sendToUser(userId, obj) {
     for (const [, u] of users) if (u.id === userId && u.ws && u.ws.readyState === 1) u.ws.send(JSON.stringify(obj));
   }
+  function sendToAccount(account, obj) {
+    for (const [, u] of users) if (u.account === account && u.ws && u.ws.readyState === 1) u.ws.send(JSON.stringify(obj));
+  }
   function getUsersIn(spaceId) {
     const out = [];
     for (const [, u] of users) if (u.currentSpace === spaceId) out.push(u);
@@ -159,6 +162,7 @@ function createContext() {
       const data = r.data;
       if (r.kind === 'room') sp.rooms.push(data);
       else if (r.kind === 'room_reservation') sp.roomReservations.set(data.id, data);
+      else if (r.kind === 'room_waitlist') sp.roomWaitlist.set(data.id, data);
       else if (r.kind === 'tool') sp.tools.push(data);
       else if (r.kind === 'borrow') sp.borrows.set(data.id, data);
       else if (r.kind === 'material') sp.materialRequests.set(data.id, data);
@@ -300,7 +304,7 @@ function createContext() {
       id, name, squatCount: squat == null ? 4 : squat, urinalCount: urinal == null ? 3 : urinal,
       admins: new Set(), clients: new Set(), notices: [],
       paused: false, pausedReason: '',
-      rooms: [], roomReservations: new Map(), reservations: new Map(),
+      rooms: [], roomReservations: new Map(), roomWaitlist: new Map(), reservations: new Map(),
       tools: [], borrows: new Map(), materialRequests: new Map(), repairs: new Map(), visitors: new Map(), urges: new Map(),
     };
     sp.stalls = buildStalls(squat == null ? 4 : squat, urinal == null ? 3 : urinal);
@@ -361,6 +365,13 @@ function createContext() {
   function reservationPublic(res, info) {
     const who = info.get(res.ownerAccount);
     return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status, repeat: res.repeat || null, seriesId: res.seriesId || null };
+  }
+  function roomWaitlistPublic(space, info) {
+    if (!info) info = spaceUserInfo(space.id);
+    return [...space.roomWaitlist.values()].filter((w) => w.status === 'waiting').map((w) => {
+      const who = info.get(w.ownerAccount);
+      return { id: w.id, roomId: w.roomId, ownerAccount: w.ownerAccount, ownerName: who ? who.display : w.ownerName, title: w.title, startAt: w.startAt, endAt: w.endAt, note: w.note, createdAt: w.createdAt };
+    }).sort((a, b) => a.createdAt - b.createdAt);
   }
     function toolsPublic(sp, info) {
     const now = Date.now();
@@ -510,10 +521,11 @@ function createContext() {
   function broadcastAll(sp) {
     const info = spaceUserInfo(sp.id);
     const reservations = roomReservationsPublic(sp, info);
+    const waitlist = roomWaitlistPublic(sp, info);
     const materials = materialsPublic(sp, info);
     const repairs = repairsPublic(sp, info);
     const visitors = visitorsPublic(sp, info);
-    broadcast(sp.id, 'rooms', { rooms: sp.rooms.map(roomPublic), reservations: reservations.slice(0, LIST_PAGE), reservationTotal: reservations.length });
+    broadcast(sp.id, 'rooms', { rooms: sp.rooms.map(roomPublic), reservations: reservations.slice(0, LIST_PAGE), reservationTotal: reservations.length, waitlist: waitlist.slice(0, LIST_PAGE), waitlistTotal: waitlist.length });
     broadcast(sp.id, 'tools', { tools: toolsPublic(sp, info) });
     broadcast(sp.id, 'materials', { requests: materials.slice(0, LIST_PAGE), total: materials.length });
     broadcast(sp.id, 'repairs', { repairs: repairs.slice(0, LIST_PAGE), total: repairs.length });
@@ -576,7 +588,7 @@ function createContext() {
     set pgEnabled(v) { usePg = v; },
     initDb, flushWrites, scheduleFlush,
     // 工具
-    genId, genSpaceId, sendTo, broadcastTo, sendToUser, getUsersIn, getUserByAccount, isAdmin, serError, lk, spaceUserInfo,
+    genId, genSpaceId, sendTo, broadcastTo, sendToUser, sendToAccount, getUsersIn, getUserByAccount, isAdmin, serError, lk, spaceUserInfo,
     // 认证
     hashPassword, verifyPassword, issueToken, accountByLogin,
     // 持久化
@@ -584,7 +596,7 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, reservationPublic, toolsPublic, materialsPublic, repairsPublic, borrowsPublic, visitorsPublic, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
+    roomPublic, reservationPublic, roomWaitlistPublic, toolsPublic, materialsPublic, repairsPublic, borrowsPublic, visitorsPublic, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
     // 广播
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, noticesBroadcast, visitorsBroadcast,
     // 坑位辅助

@@ -135,6 +135,7 @@ console.log('\n📋 12. 会议室时长累计');
 const ownerUser = { id: 'ru1', account: 'alice', nickname: '甲', stats: { meetingDuration: 0 }, achievements: [] };
 const fakeApi = {
   roomReservationsPublic: () => [],
+  roomWaitlistPublic: () => [],
   roomPublic: (r) => r,
   broadcast: () => {},
   LIST_PAGE: 30,
@@ -211,6 +212,17 @@ assertEq(bwp.length, 1, 'borrowsPublic 返回借用记录');
 assertEq(bwp[0].toolName, '测试手机', 'borrowsPublic 关联设备名称');
 assertEq(bwp[0].status, 'borrowed', 'borrowsPublic 保留状态');
 assertEq(bwp[0].overdue, true, 'borrowsPublic 标记逾期');
+
+// ---------- 会议室候补序列化 ----------
+console.log('\n📋 18. 会议室候补序列化');
+const spW = api.createSpace('s10', '候补空间', 1, 0);
+spW.rooms.push({ id: 'rw1', name: '小会', capacity: 4 });
+spW.roomWaitlist.set('wl1', { id: 'wl1', roomId: 'rw1', ownerAccount: 'alice', ownerName: '甲', title: '评审', startAt: Date.now() + 3600000, endAt: Date.now() + 3780000, note: '', status: 'waiting', createdAt: Date.now() });
+spW.roomWaitlist.set('wl2', { id: 'wl2', roomId: 'rw1', ownerAccount: 'bob', ownerName: '乙', title: '周会', startAt: Date.now() + 3600000, endAt: Date.now() + 3780000, note: '', status: 'cancelled', createdAt: Date.now() });
+const wlp = api.roomWaitlistPublic(spW, new Map());
+assertEq(wlp.length, 1, 'roomWaitlistPublic 仅返回 waiting 候补');
+assertEq(wlp[0].ownerName, '甲', 'roomWaitlistPublic 保留候补人');
+assertEq(wlp[0].roomId, 'rw1', 'roomWaitlistPublic 保留会议室');
 
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);

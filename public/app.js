@@ -18,10 +18,11 @@ const S = {
   lastSpace: localStorage.getItem('os_space')||'',
   ws: null, me:null, space:null, module:'rooms',
   pendingLogin:null,
-  DB:{ rooms:[], reservations:[], tools:[], requests:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[] },
+  DB:{ rooms:[], reservations:[], waitlist:[], waitlistTotal:0, tools:[], requests:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[] },
   visitorTotal:0, visitorOffset:0,
   borrowTotal:0, borrowOffset:0,
   roomStats:null,
+  lastRoomBook:null,
   admin:false, sockOpen:false,
 };
 const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['stalls','坑位看板','🚻'],['dash','概览','📊'] ];
@@ -38,7 +39,10 @@ function connect(){
 }
 function dispatch(m){
   switch(m.type){
-    case 'error': toast('✘ '+m.message,'error'); if(!S.me) renderGate(); break;
+    case 'error':
+      if(m.code==='roomConflict'){ toast('✘ '+m.message,'warn'); if(S.lastRoomBook) openWaitlistModal(S.lastRoomBook); }
+      else { toast('✘ '+m.message,'error'); if(!S.me) renderGate(); }
+      break;
     case 'joined': S.space=m.space; renderSidebar(); if(S.pendingLogin){ const p=S.pendingLogin; S.pendingLogin=null; wsSend({type:'login',token:p.token!==undefined?p.token:undefined,account:p.account,password:p.password}); } break;
     case 'loginSuccess':
       S.me={account:m.account,nickname:m.nickname,avatar:m.avatar,role:m.role,token:m.token};
@@ -47,7 +51,7 @@ function dispatch(m){
       S.admin = m.role==='admin'; S.token=m.token;
       localStorage.setItem('os_token',m.token); localStorage.setItem('os_space',S.space?S.space.id:S.lastSpace);
       $('#gate').style.display='none'; $('#app').style.display='flex'; renderAll(); break;
-    case 'rooms': S.DB.rooms=m.rooms; S.DB.reservations=m.reservations; S.DB.revTotal=m.reservationTotal||0; S.DB.revOffset=S.DB.reservations.length; break;
+    case 'rooms': S.DB.rooms=m.rooms; S.DB.reservations=m.reservations; S.DB.revTotal=m.reservationTotal||0; S.DB.revOffset=S.DB.reservations.length; S.DB.waitlist=m.waitlist||[]; S.DB.waitlistTotal=m.waitlistTotal||0; break;
     case 'tools': S.DB.tools=m.tools; break;
     case 'materials': S.DB.requests=m.requests; S.DB.matTotal=m.total||0; S.DB.matOffset=S.DB.requests.length; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; break;
@@ -67,6 +71,7 @@ function dispatch(m){
     case 'urgeNotification': toast('📣 有人催促你了（'+m.count+' 人）','urge'); break;
     case 'reservation': toast('✔ 预约成功','success'); break;
     case 'cancelSuccess': toast('✔ 已取消','success'); break;
+    case 'roomWaitlistPromoted': toast('🎉 候补已晋升：预约已自动创建（'+fmtTime(m.startAt)+'）','success'); render(); break;
     case 'profileUpdated': if(S.me){ S.me.nickname=m.nickname; S.me.avatar=m.avatar; } toast('✔ 个人资料已更新','success'); render(); break;
     case 'passwordChanged': toast('✔ 密码已修改','success'); break;
     case 'spaceRenamed': if(S.space) S.space.name=m.name; renderSidebar(); render(); break;
@@ -327,6 +332,9 @@ function renderRooms(){
     <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))">${d.rooms.map(r=>roomCard(r)).join('')||'<div class="empty">还没有会议室，管理员可新增</div>'}</div>
     <h3 style="margin:22px 0 10px">📅 全部预约</h3>
     <div class="list">${roomReservationListHtml(d, me)}</div>
+    <h3 style="margin:22px 0 10px">⏳ 候补队列 <span class="badge info">${d.waitlistTotal||0}</span></h3>
+    <div class="list">${(d.waitlist||[]).length?d.waitlist.map(w=>{ const rm=d.rooms.find(x=>x.id===w.roomId); const mine=w.ownerAccount===me; return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(w.title)} <span class="when">${fmtTime(w.startAt)} → ${fmtTime(w.endAt)}</span><div class="when">${esc(w.ownerName)}${mine?'（你）':''} · ${fmtTime(w.createdAt)}</div></span>
+      <span class="fs">${mine?`<button class="btn danger sm" onclick="cancelWaitlist('${w.id}')">取消候补</button>`:'<span class="badge warn">候补中</span>'}</span></div>`; }).join(''):'<div class="empty">暂无候补</div>'}</div>
     ${(S.DB.revOffset||0)<(S.DB.revTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('rooms')">加载更多（${S.DB.revTotal-(S.DB.revOffset||0)}）</button></div>`:''}`;
 }
 function roomCard(r){
@@ -364,11 +372,23 @@ function submitBook(roomId){
   if(!(st>0)||!(en>st)) return toast('时间无效','error');
   const repeat=$('#bkRepeat').value;
   const count=parseInt($('#bkCount').value,10)||1;
+  S.lastRoomBook={roomId,startAt:st,endAt:en,title:$('#bkTitle').value,note:$('#bkNote').value};
   wsSend({type:'roomBook',roomId,startAt:st,endAt:en,title:$('#bkTitle').value,note:$('#bkNote').value,repeat,repeatCount:count});
   closeModal();
 }
 function cancelReservation(id){ wsSend({type:'reservationCancel',reservationId:id}); }
 function cancelSeries(seriesId){ if(confirm('确认取消该周期预约的全部待开始场次？')) wsSend({type:'reservationCancelSeries',seriesId}); }
+/* 会议室候补：时段冲突时加入队列，他人取消后自动晋升 */
+function openWaitlistModal(attempt){
+  const room=(S.DB.rooms||[]).find(r=>r.id===attempt.roomId);
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>加入候补 · ${esc(room?room.name:'会议室')}</h2><div class="form">
+    <div class="hint">该时段已被占用，可先加入候补；一旦时段释放，将按先来先服务自动为你预约。</div>
+    <div class="fld"><label>时段</label><input value="${fmtTime(attempt.startAt)} → ${fmtTime(attempt.endAt)}（${Math.round((attempt.endAt-attempt.startAt)/60000)} 分钟）"></div>
+    <button class="btn pri" onclick="submitWaitlist()">加入候补</button>
+    <div class="hint">同一时段只保留一条候补；候补成功后会收到通知</div></div>`);
+}
+function submitWaitlist(){ const a=S.lastRoomBook||{}; wsSend({type:'roomWaitlist',roomId:a.roomId,startAt:a.startAt,endAt:a.endAt,title:a.title||'会议',note:a.note||''}); closeModal(); }
+function cancelWaitlist(id){ wsSend({type:'roomWaitlistCancel',waitlistId:id}); }
 /* 智能选房：按时段+人数找空闲会议室 */
 function openSuggest(){
   const now=Date.now(), start=now+10*60000, end=start+60*60000, d=(ms)=>{ const x=new Date(ms), off=x.getTimezoneOffset(); return new Date(ms-off).toISOString().slice(0,16); };
