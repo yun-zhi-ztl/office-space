@@ -50,7 +50,7 @@ module.exports = function toolsModule(api) {
       if (!Number.isInteger(qty) || qty < 1) return sendTo(ws, serError('请输入有效借用数量'));
       if (qty > tool.available) return sendTo(ws, serError('库存不足，当前可用 ' + tool.available));
       tool.available -= qty;
-      const borrow = { id: genId('bw', null), toolId: tool.id, borrowerAccount: user.account, borrowerName: user.nickname, qty, borrowedAt: Date.now(), returnedAt: null, status: 'borrowed' };
+      const borrow = { id: genId('bw', null), toolId: tool.id, borrowerAccount: user.account, borrowerName: user.nickname, qty, borrowedAt: Date.now(), dueAt: Date.now() + 7 * 86400000, returnedAt: null, status: 'borrowed' };
       space.borrows.set(borrow.id, borrow);
       user.stats.borrowCount = (user.stats.borrowCount || 0) + 1;
       recordWeekly(user, 'borrows');
@@ -59,6 +59,16 @@ module.exports = function toolsModule(api) {
       saveEntity(space.id, 'borrow', borrow.id, borrow);
       toolsBroadcast(space);
       broadcastLeaderboard(space);
+    } else if (msg.type === 'toolExtend') {
+      const borrow = space.borrows.get(msg.borrowId);
+      if (!borrow) return sendTo(ws, serError('借用记录不存在'));
+      if (borrow.status !== 'borrowed') return sendTo(ws, serError('该借用已归还，无法续借'));
+      if (borrow.borrowerAccount !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('只能续借自己的借用'));
+      const days = parseInt(msg.days, 10);
+      if (!Number.isInteger(days) || days < 1 || days > 30) return sendTo(ws, serError('续借天数需为 1-30 天'));
+      borrow.dueAt = (borrow.dueAt || borrow.borrowedAt + 7 * 86400000) + days * 86400000;
+      saveEntity(space.id, 'borrow', borrow.id, borrow);
+      toolsBroadcast(space);
     } else if (msg.type === 'toolReturn') {
       const borrow = space.borrows.get(msg.borrowId);
       if (!borrow) return sendTo(ws, serError('借用记录不存在'));

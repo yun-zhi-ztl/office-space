@@ -172,6 +172,13 @@ assertEq(once.length, 1, '不重复只展开 1 场');
 assertEq(api.expandRecurring(t0, t0 + span, 'weekly', 999).length, 52, '每周次数上限 52');
 assertEq(api.expandRecurring(t0, t0 + span, 'daily', 0).length, 1, '次数下限为 1');
 
+// ---------- 借用逾期判定 ----------
+console.log('\n📋 14. 借用逾期判定');
+assertEq(api.borrowOverdue({ status: 'borrowed', borrowedAt: 0, dueAt: 1000 }, 2000), true, '超过 dueAt 判定逾期');
+assertEq(api.borrowOverdue({ status: 'borrowed', borrowedAt: 0, dueAt: 3000 }, 2000), false, '未到 dueAt 未逾期');
+assertEq(api.borrowOverdue({ status: 'borrowed', borrowedAt: 0 }, 8 * 86400000), true, '默认 7 天到期后逾期');
+assertEq(api.borrowOverdue({ status: 'returned', borrowedAt: 0, dueAt: 1000 }, 2000), false, '已归还不计逾期');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

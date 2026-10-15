@@ -100,7 +100,7 @@ wss.on('connection', (ws) => {
     switch (msg.type) {
       case 'roomCreate': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'reservationCancelSeries': case 'roomStart': case 'roomEnd':
         rooms.handleRooms(ws, user, space, msg); break;
-      case 'toolCreate': case 'toolDelete': case 'toolAdjust': case 'toolBorrow': case 'toolReturn':
+      case 'toolCreate': case 'toolDelete': case 'toolAdjust': case 'toolBorrow': case 'toolReturn': case 'toolExtend':
         tools.handleTools(ws, user, space, msg); break;
       case 'materialRequest': case 'materialCancel': case 'materialFulfill': case 'materialAssign':
         materials.handleMaterials(ws, user, space, msg); break;

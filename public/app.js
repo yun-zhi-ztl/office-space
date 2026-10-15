@@ -377,7 +377,7 @@ function renderTools(){
         ${t.available>0?`<button class="btn pri sm" onclick="openBorrow('${t.id}','${esc(t.name)}',${t.available})">借用</button>`:'<span class="hint">已全部借出</span>'}
         ${S.admin?`<button class="btn danger sm" onclick="removeTool('${t.id}')">删</button><button class="btn sm" onclick="openAdjust('${t.id}','${esc(t.name)}',${t.total},${t.borrowedCount})">改库存</button>`:''}
       </div>
-      ${t.activeBorrows&&t.activeBorrows.length?`<div class="meta">在借：${t.activeBorrows.map(b=>`${esc(b.borrowerName)}×${b.qty}${b.days>=0?'·'+b.days+'天':''}${b.overdue?'<span class="badge bad">逾期</span>':''}${b.borrowerAccount===me?` <button class="btn green sm" onclick="returnTool('${b.id}')">归还</button>`:`${b.overdue?` <button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒</button>`:''}`}`).join('，')}</div>`:''}
+      ${t.activeBorrows&&t.activeBorrows.length?`<div class="meta">在借：${t.activeBorrows.map(b=>{ const can=b.borrowerAccount===me||S.admin; return `${esc(b.borrowerName)}×${b.qty}${b.dueAt?' · 应还 '+fmtTime(b.dueAt):''}${b.days>=0?' · '+b.days+'天':''}${b.overdue?'<span class="badge bad">逾期</span>':''}${b.borrowerAccount===me?` <button class="btn green sm" onclick="returnTool('${b.id}')">归还</button>`:''}${can?` <button class="btn sm" onclick="openExtend('${b.id}','${esc(b.borrowerName)}')">续借</button>`:''}${b.borrowerAccount!==me&&b.overdue?` <button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒</button>`:''}`; }).join('，')}</div>`:''}
     </div>`).join('')||'<div class="empty">还没有设备，管理员可新增</div>'}
     </div>`;
 }
@@ -399,6 +399,10 @@ function openBorrow(id,name,avail){ openModal(`<span class="close" onclick="clos
   <button class="btn pri" onclick="submitBorrow('${id}')">借用</button></div>`); }
 function submitBorrow(id){ wsSend({type:'toolBorrow',toolId:id,qty:parseInt($('#bwQty').value,10)}); closeModal(); }
 function returnTool(id){ wsSend({type:'toolReturn',borrowId:id}); }
+function openExtend(id,name){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>续借 · ${esc(name)}</h2><div class="form">
+  <div class="fld"><label>续借天数（1-30）</label><input id="exDays" type="number" min="1" max="30" value="7"></div>
+  <button class="btn pri" onclick="submitExtend('${id}')">确认续借</button></div>`); }
+function submitExtend(id){ wsSend({type:'toolExtend',borrowId:id,days:parseInt($('#exDays').value,10)||7}); closeModal(); }
 
 /* ============ 物资申领 ============ */
 function renderMaterials(){

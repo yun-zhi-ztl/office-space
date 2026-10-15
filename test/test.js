@@ -166,6 +166,29 @@ async function runTests() {
   const stB = last(w2, 'stats');
   assert(stB && typeof stB.stats.borrowDuration === 'number' && stB.stats.borrowDuration >= 0, '归还后统计含 borrowDuration');
 
+  // ========== 测试4b: 工具续借 ==========
+  console.log('\n📋 测试4b: 工具续借');
+  await sendMsg(w2, { type: 'toolBorrow', toolId, qty: 1 });
+  let tools4 = last(w2, 'tools');
+  const bw = tools4.tools.find(t => t.id === toolId).activeBorrows[0];
+  assert(bw && bw.dueAt && bw.dueAt - bw.borrowedAt === 7 * 86400000, '借用生成 7 天归还期限');
+  await sendMsg(w2, { type: 'toolExtend', borrowId: bw.id, days: 7 });
+  tools4 = last(w2, 'tools');
+  const bw2 = tools4.tools.find(t => t.id === toolId).activeBorrows[0];
+  assert(bw2 && bw2.dueAt - bw2.borrowedAt === 14 * 86400000, '续借 7 天后归还期限延长');
+  const MEMBER2 = 'staff2_' + runKey;
+  await reg(MEMBER2, 'pw', '员工二');
+  const wM2 = await createWSClient();
+  await loginTo(wM2, sp.id, MEMBER2, 'pw');
+  await sendMsg(wM2, { type: 'toolExtend', borrowId: bw2.id, days: 7 });
+  const errExtend = mk(wM2, 'error');
+  assert(errExtend.length > 0 && errExtend[errExtend.length - 1].message.includes('只能续借自己'), '非借用人续借被拒');
+  await sendMsg(w2, { type: 'toolReturn', borrowId: bw2.id });
+  await sendMsg(w2, { type: 'toolExtend', borrowId: bw2.id, days: 7 });
+  const errReturned = mk(w2, 'error');
+  assert(errReturned.length > 0 && errReturned[errReturned.length - 1].message.includes('已归还'), '已归还的借用无法续借');
+  wM2.close();
+
   // ========== 测试5: 物资申领 ==========
   console.log('\n📋 测试5: 物资申领（提交/处理/自处理拒绝）');
   await sendMsg(w2, { type: 'materialRequest', name: '5号电池', qty: 4, unit: '节', reason: '遥控器没电' });

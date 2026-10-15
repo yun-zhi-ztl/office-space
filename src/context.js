@@ -285,6 +285,12 @@ function createContext() {
   function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, weekly: newWeekly() }; }
   function recordWeekly(user, field) { if (!user.stats.weekly || user.stats.weekly.key !== weekKey()) user.stats.weekly = newWeekly(); user.stats.weekly[field] = (user.stats.weekly[field] || 0) + 1; }
   function weeklyScore(stats) { const w = stats.weekly; if (!w || w.key !== weekKey()) return 0; return (w.visits || 0) + (w.borrows || 0) + (w.requests || 0) + (w.repairs || 0) + (w.meetings || 0); }
+  function borrowOverdue(b, now) {
+    if (!b || b.status !== 'borrowed') return false;
+    const nowMs = now == null ? Date.now() : now;
+    const dueAt = b.dueAt || b.borrowedAt + 7 * 86400000;
+    return nowMs >= dueAt;
+  }
   function createSpace(id, name, squat, urinal) {
     const sp = {
       id, name, squatCount: squat == null ? 4 : squat, urinalCount: urinal == null ? 3 : urinal,
@@ -332,7 +338,7 @@ function createContext() {
     const who = info.get(res.ownerAccount);
     return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status, repeat: res.repeat || null, seriesId: res.seriesId || null };
   }
-  function toolsPublic(sp, info) {
+    function toolsPublic(sp, info) {
     const now = Date.now();
     const activeByTool = new Map();
     for (const b of sp.borrows.values()) {
@@ -347,7 +353,7 @@ function createContext() {
         id: t.id, name: t.name, category: t.category, total: t.total, available: t.available,
         location: t.location, description: t.description,
         borrowedCount: active.reduce((s, b) => s + b.qty, 0),
-        activeBorrows: active.map((b) => { const days = Math.floor((now - b.borrowedAt) / 86400000); return { id: b.id, qty: b.qty, borrowerAccount: b.borrowerAccount, borrowerName: info.get(b.borrowerAccount) ? info.get(b.borrowerAccount).display : b.borrowerName, borrowedAt: b.borrowedAt, days, overdue: days >= 7 }; }),
+        activeBorrows: active.map((b) => { const days = Math.floor((now - b.borrowedAt) / 86400000); return { id: b.id, qty: b.qty, borrowerAccount: b.borrowerAccount, borrowerName: info.get(b.borrowerAccount) ? info.get(b.borrowerAccount).display : b.borrowerName, borrowedAt: b.borrowedAt, dueAt: b.dueAt || null, days, overdue: borrowOverdue(b, now) }; }),
       };
     });
   }
@@ -511,7 +517,7 @@ function createContext() {
     const day0 = new Date(); day0.setHours(0, 0, 0, 0);
     const today0 = day0.getTime(), todayEnd = today0 + 86400000;
     const todayMeetings = roomReservationsPublic(space).filter((r) => r.startAt >= today0 && r.startAt < todayEnd && r.status !== 'cancelled' && r.status !== 'expired');
-    const overdue = [...space.borrows.values()].filter((b) => b.status === 'borrowed' && (Date.now() - b.borrowedAt) >= 7 * 86400000);
+    const overdue = [...space.borrows.values()].filter((b) => borrowOverdue(b));
     const myBorrows = [...space.borrows.values()].filter((b) => b.borrowerAccount === user.account && b.status === 'borrowed');
     const pendingMaterials = [...space.materialRequests.values()].filter((r) => r.status === 'pending');
     const openRepairs = [...space.repairs.values()].filter((r) => r.status === 'reported' || r.status === 'in_progress');
@@ -538,7 +544,7 @@ function createContext() {
     // 持久化
     saveSpace, saveAccount, saveProfile, saveEntity, deleteEntity, saveStallRating, saveStatsToSpace,
     // 空间
-    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, createSpace, buildStalls, applyProfileToUser,
+    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, createSpace, buildStalls, applyProfileToUser,
     // 序列化
     roomPublic, reservationPublic, toolsPublic, materialsPublic, repairsPublic, visitorsPublic, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring,
     // 广播

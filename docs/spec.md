@@ -42,9 +42,10 @@
 ### 工具借用（tools）
 - `tool`: `{ id, name, category, total, available, location, description }`
   - `category`: 测试电脑 / 测试机器 / 测试手机 / 其它
-- `tool_borrow`: `{ id, toolId, borrowerAccount, borrowerName, qty, borrowedAt, returnedAt?, status }`
+- `tool_borrow`: `{ id, toolId, borrowerAccount, borrowerName, qty, borrowedAt, dueAt?, returnedAt?, status }`
   - 状态：`borrowed` / `returned`
   - 借出时 `available -= qty`，归还时 `available += qty`；`available < qty` 不可借。
+  - 默认归还期限为借出后 7 天（`dueAt`），借用人可「续借」延长 1-30 天；逾期由 `dueAt` 判定。
 
 ### 物资申领（materials）
 - `material_request`: `{ id, requesterAccount, requesterName, name, qty, unit, reason, status, handlerAccount?, handlerName?, createdAt, handledAt? }`
@@ -88,7 +89,7 @@
 | `reservationCancel` | 取消自己的单次预约 | owner |
 | `reservationCancelSeries` | 取消自己的周期预约全部待开始场次 | owner |
 | `toolCreate` / `toolDelete` / `toolAdjust` | 增删设备 / 调整库存 | admin |
-| `toolBorrow` / `toolReturn` | 借用 / 归还设备 | member |
+| `toolBorrow` / `toolReturn` / `toolExtend` | 借用 / 归还 / 续借设备 | member |
 | `materialRequest` / `materialCancel` | 提交 / 取消申领 | member / owner |
 | `materialAssign` | 指派申领负责人 | member / admin |
 | `materialFulfill` | 处理申领为已满足 | 未指派时他人；已指派时负责人或管理员 |
@@ -172,6 +173,7 @@
 | 一键智能选房 | 按时段+人数自动列出空闲会议室并推荐 | `suggestRoom` |
 | 周期预约 | 会议室支持每天 / 每周重复，一次预约自动展开全部场次，列表聚合展示并整组取消 | `roomBook`(repeat/repeatCount) / `reservationCancelSeries` |
 | 指派负责人 | 物资申领 / 报修可指派空间内在线成员为负责人，列表展示并据此约束处理权限 | `materialAssign` / `repairAssign` |
+| 工具续借 | 借用可延长归还期限（默认 7 天，可续借 1-30 天），列表展示应还日期与逾期状态 | `toolExtend` |
 | 访客登记 | 登记访客姓名、事由、预计到访，负责人/管理员推进到访与离开，实时同步 | `visitorCreate` / `visitorArrived` / `visitorLeft` / `visitorCancel` / `visitorRemove` |
 | 个人资料 | 成员可改展示名/头像，并凭旧密码修改登录密码 | `profileUpdate` / `passwordChange` |
 | 空间设置 | 管理员可修改空间名、配置蹲坑 / 尿槽数量 | `spaceRename` / `stallConfig` |
@@ -181,7 +183,7 @@
 | 每日看点 | 登录后推送今日要点：今天会议（含时长）、逾期借用、我的未还、待处理申领/报修、待接待访客、今日归还借用时长、本周之星 | 登录时下发 `digest` |
 
 ### 客户端→服务端新增消息
-`setStatus`、`announce`、`spaceRename`、`suggestRoom`、`remindReturn`、`roomBook`(周期 `repeat`/`repeatCount`)、`reservationCancelSeries`、`materialAssign`、`repairAssign`、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`profileUpdate`、`passwordChange`、`toggleEmergency`；服务端相应广播/单发
+`setStatus`、`announce`、`spaceRename`、`suggestRoom`、`remindReturn`、`toolExtend`、`roomBook`(周期 `repeat`/`repeatCount`)、`reservationCancelSeries`、`materialAssign`、`repairAssign`、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`profileUpdate`、`passwordChange`、`toggleEmergency`；服务端相应广播/单发
 `users`(含 `status`、`emergencyMode`) 、`notices`、`suggestRooms`、`borrowReminder`、`digest`、`visitors`、`spaceRenamed`。
 
 ## 9. 代码架构（多模块拆分）
@@ -198,7 +200,7 @@ src/modules/     rooms / tools / materials / repairs / visitors / profile / stal
 
 - 各领域模块是纯函数工厂 `module.exports = (api)=>({...})`，由 `server.js` 注入共享上下文 `api`，无全局状态、便于单测。
 - 定时器、心跳、优雅停机属于进程级关注点，保留在入口。
-- 该拆分不改变任何对外协议与行为，e2e（79 项）在内存与 PostgreSQL 双模式下均通过。
+- 该拆分不改变任何对外协议与行为，e2e（83 项）在内存与 PostgreSQL 双模式下均通过。
 
 ## 10. 健康检查、自测与 CI（本版本新增）
 
@@ -206,9 +208,9 @@ src/modules/     rooms / tools / materials / repairs / visitors / profile / stal
 - **npm 脚本**：
   - `npm start`：启动服务
   - `npm run lint`：对 `server.js` / `public` / `src/` / `test/` 全部 JS 执行 `node --check` 语法检查（`scripts/lint.js`）
-  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化、每日看点、用户广播、会议室时长累计、周期预约展开，45 项）
+  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化、每日看点、用户广播、会议室时长累计、周期预约展开、借用逾期判定，49 项）
   - `npm run test:restore`：前端「自动恢复会话」回归测试（`test/restore.js`，vm stub 加载内联脚本，无需服务）
   - `npm run smoke`：快速冒烟（`test/smoke.js`）——健康检查、首页与大屏可达、WS 连接、登录、收到广播
-  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，79 项）
+  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，83 项）
 - **CI**：`.github/workflows/ci.yml` 在 push 到 `main` 或 pull_request 时自动：`npm ci` → `npm run lint` → `docker compose config` 校验 → `docker build` 构建校验 → 内存模式启动服务 → `npm run smoke` → `npm test`。用不可达的 PG 参数强制内存模式，无需外部数据库。
 - **环境变量**：见 `.env.example`（`PORT`、`PGHOST`、`PGPORT`、`PGUSER`、`PGPASSWORD`、`PGDATABASE`）；`.env` 已加入 `.gitignore`。
