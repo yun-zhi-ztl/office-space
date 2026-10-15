@@ -51,7 +51,7 @@ module.exports = function toolsModule(api) {
       if (!Number.isInteger(qty) || qty < 1) return sendTo(ws, serError('请输入有效借用数量'));
       if (qty > tool.available) return sendTo(ws, serError('库存不足，当前可用 ' + tool.available));
       tool.available -= qty;
-      const borrow = { id: genId('bw', null), toolId: tool.id, borrowerAccount: user.account, borrowerName: user.nickname, qty, borrowedAt: Date.now(), dueAt: Date.now() + 7 * 86400000, returnedAt: null, status: 'borrowed', lastRemindedAt: null };
+      const borrow = { id: genId('bw', null), toolId: tool.id, borrowerAccount: user.account, borrowerName: user.nickname, qty, borrowedAt: Date.now(), dueAt: Date.now() + 7 * 86400000, returnedAt: null, status: 'borrowed', lastRemindedAt: null, soonRemindedAt: null };
       space.borrows.set(borrow.id, borrow);
       user.stats.borrowCount = (user.stats.borrowCount || 0) + 1;
       recordWeekly(user, 'borrows');

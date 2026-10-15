@@ -253,6 +253,16 @@ setInterval(() => {
       }
       rooms.roomsBroadcast(sp);
     }
+    // 借用到期前提醒：到期前 24 小时内提醒一次，避免逾期
+    const borrowSoonReminders = api.dueBorrowSoonReminders(sp, now);
+    if (borrowSoonReminders.length) {
+      for (const b of borrowSoonReminders) {
+        b.soonRemindedAt = now;
+        api.saveEntity(sp.id, 'borrow', b.id, b);
+        api.sendToAccount(b.borrowerAccount, { type: 'borrowDueSoon', borrowId: b.id });
+      }
+      tools.toolsBroadcast(sp);
+    }
   }
 }, 15000);
 

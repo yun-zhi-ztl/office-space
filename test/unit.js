@@ -333,6 +333,20 @@ assertEq(api.ROOM_REMIND_WINDOW_MS, 10 * 60000, '会议提醒窗口为开始前 
 const resPub = api.reservationPublic(spRoom.roomReservations.get('rr1'), new Map());
 assertEq(resPub.remindAt, nowRoom - 1, 'reservationPublic 保留 remindAt');
 
+// ---------- 借用到期前提醒 ----------
+console.log('\n📋 24. 借用到期前提醒');
+const spBorrow = api.createSpace('s16', '到期提醒空间', 1, 0);
+const nowB = 1000000000;
+const SOON = api.BORROW_SOON_WINDOW_MS;
+spBorrow.borrows.set('bb1', { id: 'bb1', toolId: 't1', borrowerAccount: 'alice', qty: 1, borrowedAt: nowB - 6 * 86400000, dueAt: nowB + 12 * 3600000, returnedAt: null, status: 'borrowed', lastRemindedAt: null, soonRemindedAt: null });
+spBorrow.borrows.set('bb2', { id: 'bb2', toolId: 't1', borrowerAccount: 'bob', qty: 1, borrowedAt: nowB - 6 * 86400000, dueAt: nowB + 2 * 86400000, returnedAt: null, status: 'borrowed', lastRemindedAt: null, soonRemindedAt: null });
+spBorrow.borrows.set('bb3', { id: 'bb3', toolId: 't1', borrowerAccount: 'carol', qty: 1, borrowedAt: nowB - 6 * 86400000, dueAt: nowB - 1 * 86400000, returnedAt: null, status: 'borrowed', lastRemindedAt: null, soonRemindedAt: null });
+spBorrow.borrows.set('bb4', { id: 'bb4', toolId: 't1', borrowerAccount: 'dave', qty: 1, borrowedAt: nowB - 6 * 86400000, dueAt: nowB + 12 * 3600000, returnedAt: null, status: 'borrowed', lastRemindedAt: null, soonRemindedAt: nowB - 1000 });
+spBorrow.borrows.set('bb5', { id: 'bb5', toolId: 't1', borrowerAccount: 'eve', qty: 1, borrowedAt: nowB - 6 * 86400000, dueAt: nowB + 12 * 3600000, returnedAt: nowB, status: 'returned', lastRemindedAt: null, soonRemindedAt: null });
+const soonRem = api.dueBorrowSoonReminders(spBorrow, nowB);
+assertEq(soonRem.map((b) => b.id), ['bb1'], '仅返回临近到期且未提醒过的在借用');
+assertEq(api.BORROW_SOON_WINDOW_MS, 24 * 3600 * 1000, '到期提醒窗口为到期前 24 小时');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

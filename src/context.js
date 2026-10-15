@@ -20,6 +20,7 @@ function createContext() {
   const RESERVE_CONFIRM_WINDOW_MS = 5 * 60000;
   const OVERDUE_REMIND_THROTTLE_MS = 24 * 3600 * 1000;
   const ROOM_REMIND_WINDOW_MS = 10 * 60000;
+  const BORROW_SOON_WINDOW_MS = 24 * 3600 * 1000;
   const VISIT_TOKEN_TTL_MS = 24 * 3600 * 1000;
 
   // ---------- 内存状态 ----------
@@ -331,6 +332,16 @@ function createContext() {
       return nowMs >= r.remindAt;
     });
   }
+  // 借用临近到期（默认到期前 24 小时内）且尚未提醒过的在借用
+  function dueBorrowSoonReminders(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    return [...space.borrows.values()].filter((b) => {
+      if (!b || b.status !== 'borrowed') return false;
+      if (b.soonRemindedAt) return false;
+      if (!b.dueAt) return false;
+      return nowMs >= b.dueAt - BORROW_SOON_WINDOW_MS && nowMs < b.dueAt;
+    });
+  }
   function createSpace(id, name, squat, urinal) {
     const sp = {
       id, name, squatCount: squat == null ? 4 : squat, urinalCount: urinal == null ? 3 : urinal,
@@ -420,7 +431,7 @@ function createContext() {
         id: t.id, name: t.name, category: t.category, total: t.total, available: t.available,
         location: t.location, description: t.description,
         borrowedCount: active.reduce((s, b) => s + b.qty, 0),
-        activeBorrows: active.map((b) => { const days = Math.floor((now - b.borrowedAt) / 86400000); return { id: b.id, qty: b.qty, borrowerAccount: b.borrowerAccount, borrowerName: info.get(b.borrowerAccount) ? info.get(b.borrowerAccount).display : b.borrowerName, borrowedAt: b.borrowedAt, dueAt: b.dueAt || null, days, overdue: borrowOverdue(b, now), reminded: !!b.lastRemindedAt }; }),
+        activeBorrows: active.map((b) => { const days = Math.floor((now - b.borrowedAt) / 86400000); return { id: b.id, qty: b.qty, borrowerAccount: b.borrowerAccount, borrowerName: info.get(b.borrowerAccount) ? info.get(b.borrowerAccount).display : b.borrowerName, borrowedAt: b.borrowedAt, dueAt: b.dueAt || null, days, overdue: borrowOverdue(b, now), reminded: !!b.lastRemindedAt, dueSoon: b.status === 'borrowed' && !!b.dueAt && now >= b.dueAt - BORROW_SOON_WINDOW_MS && now < b.dueAt }; }),
       };
     });
   }
@@ -452,7 +463,7 @@ function createContext() {
         borrowerAccount: b.borrowerAccount,
         borrowerName: info.get(b.borrowerAccount) ? info.get(b.borrowerAccount).display : b.borrowerName,
         qty: b.qty, borrowedAt: b.borrowedAt, dueAt: b.dueAt || null, returnedAt: b.returnedAt || null,
-        status: b.status, overdue: borrowOverdue(b),
+        status: b.status, overdue: borrowOverdue(b), soonReminded: !!b.soonRemindedAt,
       };
     }).sort((a, b) => (b.borrowedAt - a.borrowedAt));
   }
@@ -694,7 +705,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -706,7 +717,7 @@ function createContext() {
     // 持久化
     saveSpace, saveAccount, saveProfile, saveEntity, deleteEntity, saveStallRating, saveStatsToSpace,
     // 空间
-    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, createSpace, buildStalls, applyProfileToUser,
+    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, createSpace, buildStalls, applyProfileToUser,
     // 序列化
     roomPublic, reservationPublic, roomWaitlistPublic, toolsPublic, materialsPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
     // 广播

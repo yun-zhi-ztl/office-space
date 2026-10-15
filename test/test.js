@@ -214,6 +214,7 @@ async function runTests() {
   const bwPage = last(w2, 'page');
   assert(bwPage && bwPage.module === 'borrows' && bwPage.items.length === 1 && bwPage.items[0].toolName === '测试机', '借用记录分页返回设备名');
   assert(bwPage.items[0].status === 'returned' && bwPage.total === 1, '借用记录分页返回状态与总数');
+  assert('soonReminded' in bwPage.items[0], '借用记录携带到期提醒字段 soonReminded');
 
   // ========== 测试4b: 工具续借 ==========
   console.log('\n📋 测试4b: 工具续借');
@@ -221,6 +222,7 @@ async function runTests() {
   let tools4 = last(w2, 'tools');
   const bw = tools4.tools.find(t => t.id === toolId).activeBorrows[0];
   assert(bw && bw.dueAt && bw.dueAt - bw.borrowedAt === 7 * 86400000, '借用生成 7 天归还期限');
+  assert(bw.dueSoon === false, '新借用尚未进入到期提醒窗口');
   await sendMsg(w2, { type: 'toolExtend', borrowId: bw.id, days: 7 });
   tools4 = last(w2, 'tools');
   const bw2 = tools4.tools.find(t => t.id === toolId).activeBorrows[0];
