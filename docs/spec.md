@@ -167,10 +167,11 @@
   - 成就：「决策发起人」（发起 3 次）、「参与决策者」（参与 5 次）。
 
 ### 知识库（knowledge）
-- `knowledge`: `{ id, title, content, category, tags[], authorAccount, authorName, likes[], createdAt, updatedAt }`
+- `knowledge`: `{ id, title, content, category, tags[], authorAccount, authorName, likes[], comments[], createdAt, updatedAt }`
   - `category`: 规章制度 / 操作指引 / 设备说明 / 常见问题 / 其他；`tags[]` 最多 10 个、单标签 ≤12 字。
   - `likes[]`: 点赞账号数组（数组可 JSON 持久化）；按点赞数降序、再按时间降序排序。
-  - 权限：成员可发布；作者或管理员可编辑 / 删除；全员可点赞 / 取消点赞。
+  - `comments[]`: 评论数组（最多 50 条）；每条 `{ id, account, name, text, createdAt, parentId, parentName }`，`parentId` 为空表示顶级评论，否则为一级回复，回复不可继续嵌套。
+  - 权限：成员可发布；作者或管理员可编辑 / 删除；全员可点赞 / 取消点赞、发表评论与回复（回复仅针对顶级评论）。
   - 成就：「知识贡献者」（发布 3 篇）、「知识之星」（获得 10 赞，点赞计入文章作者）。
 
 ### 坑位看板（restroom / 原坑位雷达）
@@ -228,7 +229,7 @@
 | `pollClose` / `pollRemove` | 关闭自己的投票 / 删除投票 | owner / admin |
 | `knowledgeCreate` | 发布知识文章（`title` / `content` / `category` / `tags[]`） | member |
 | `knowledgeEdit` / `knowledgeDelete` | 编辑 / 删除文章 | author / admin |
-| `knowledgeLike` / `knowledgeComment` | 点赞 / 评论文章 | member |
+| `knowledgeLike` / `knowledgeComment` | 点赞 / 评论文章（`knowledgeComment` 可带 `parentId` 对顶级评论做一级回复） | member |
 | `attendCheckIn` / `attendCheckOut` | 上班 / 下班打卡 | member |
 | `attendConfig` | 配置工作时间与迟到宽限 | admin |
 | `profileUpdate` / `passwordChange` | 修改展示名、头像 / 修改密码 | member |

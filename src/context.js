@@ -1005,7 +1005,7 @@ function createContext() {
     }).map((k) => {
       const author = info.get(k.authorAccount);
       const likes = k.likes || [];
-      const comments = (k.comments || []).map((c) => ({ id: c.id, account: c.account, name: c.name, text: c.text || '', createdAt: c.createdAt || 0 })).reverse().slice(0, 20);
+      const comments = (k.comments || []).map((c) => ({ id: c.id, account: c.account, name: c.name, text: c.text || '', createdAt: c.createdAt || 0, parentId: c.parentId || null, parentName: c.parentName || null })).reverse().slice(0, 20);
       return {
         id: k.id, title: k.title, content: k.content || '', category: k.category, tags: k.tags || [],
         authorAccount: k.authorAccount, authorName: author ? author.display : k.authorName,

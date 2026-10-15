@@ -25,6 +25,7 @@ const S = {
   roomStats:null,
   deskStats:null,
   lastRoomBook:null,
+  _kbReply:null,
   favorites:[],
   weeklyReport:null,
   attendanceCalendar:null,
@@ -1141,11 +1142,35 @@ function renderKnowledge(){
       <div class="row"><span><span class="who">${esc(k.title)} <span class="badge">${esc(k.category)}</span> ${k.tags.map(t=>`<span class="badge grey">${esc(t)}</span>`).join('')} ${k.commentCount?`<span class="badge ok">💬 ${k.commentCount}</span>`:''}</span>
         <div class="desc">${esc((k.content||'').slice(0,120))}${(k.content||'').length>120?'…':''}</div>
         <div class="when">${esc(k.authorName||'')} · ${fmtTime(k.createdAt)} · 👍 ${k.likeCount} · 💬 ${k.commentCount||0}</div>
-        ${k.comments&&k.comments.length?`<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">${k.comments.map(c=>`<div style="font-size:12px;margin-bottom:4px"><b>${esc(c.name||'')}</b> <span style="color:var(--muted)">${fmtTime(c.createdAt)}</span><br>${esc(c.text||'')}</div>`).join('')}</div>`:''}
+        ${knowledgeCommentListHtml(k)}
         <div style="margin-top:6px"><input placeholder="发表评论…" maxlength="300" onkeydown="if(event.key==='Enter')knowledgeComment('${k.id}',this.value)"/></div>
       </span><span class="fs"><button class="btn sm ${k.liked?'green':''}" onclick="knowledgeLike('${k.id}')">${k.liked?'👍 已赞':'👍 点赞'}</button>${k.authorAccount===me||S.admin?`<button class="btn sm" onclick="openKnowledgeEdit('${k.id}')">编辑</button><button class="btn danger sm" onclick="knowledgeDelete('${k.id}')">删除</button>`:''}</span></div>`).join(''):(q?'<div class="empty">没有匹配的文章</div>':'<div class="empty">还没有知识文章</div>')}</div>
     ${(S.knowledgeOffset||0)<(S.knowledgeTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('knowledge')">加载更多（${S.knowledgeTotal-(S.knowledgeOffset||0)}）</button></div>`:''}`;
 }
+// 知识库评论列表：顶级评论 + 一级回复，支持就地回复输入
+function knowledgeCommentListHtml(k) {
+  const comments = (k.comments || []).slice().reverse();
+  const tops = comments.filter((c) => !c.parentId);
+  const replies = comments.filter((c) => c.parentId);
+  if (!tops.length && !replies.length) return '';
+  const replyOf = (id) => replies.filter((r) => r.parentId === id);
+  const body = tops.map((c) => {
+    const rs = replyOf(c.id);
+    const replyBlock = rs.map((r) => `<div style="margin:6px 0 0 28px;padding:6px 10px;background:var(--panel);border-left:3px solid var(--border)"><b>${esc(r.name||'')}</b> <span style="color:var(--muted)">回复 ${esc(r.parentName||'')} · ${fmtTime(r.createdAt)}</span><br>${esc(r.text||'')}</div>`).join('');
+    return `<div style="margin-bottom:8px"><b>${esc(c.name||'')}</b> <span style="color:var(--muted)">${fmtTime(c.createdAt)}</span><br>${esc(c.text||'')}</div>${replyBlock}${knowledgeReplyControl(k,c)}`;
+  }).join('');
+  return `<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">${body}</div>`;
+}
+function knowledgeReplyControl(k, c) {
+  const t = S._kbReply;
+  if (t && t.kId === k.id && t.cmId === c.id) {
+    return `<div style="margin-top:6px;display:flex;gap:6px"><input id="kbReplyInput" placeholder="回复 ${esc(t.name)}…" maxlength="300" autofocus onkeydown="if(event.key==='Enter')submitKnowledgeReply()"/><button class="btn sm pri" onclick="submitKnowledgeReply()">回复</button><button class="btn sm" onclick="cancelKnowledgeReply()">取消</button></div>`;
+  }
+  return `<button class="btn sm" onclick="knowledgeReplyTarget('${k.id}','${c.id}')">回复</button>`;
+}
+function knowledgeReplyTarget(kId, cmId){ const k=(S.DB.knowledge||[]).find(x=>x.id===kId); const c=(k&&k.comments||[]).find(x=>x.id===cmId); S._kbReply = { kId, cmId, name: c ? (c.name||'') : '' }; render(); setTimeout(()=>{ const el=$('#kbReplyInput'); if(el) el.focus(); },0); }
+function submitKnowledgeReply(){ const t=S._kbReply; if(!t) return; const input=$('#kbReplyInput'); if(!input) return; knowledgeComment(t.kId, input.value, t.cmId); S._kbReply=null; render(); }
+function cancelKnowledgeReply(){ S._kbReply=null; render(); }
 function openKnowledgeCreate(){
   openModal(`<span class="close" onclick="closeModal()">×</span><h2>发布文章</h2><div class="form">
     <div class="fld"><label>标题</label><input id="kbTitle" maxlength="50"></div>
@@ -1167,7 +1192,7 @@ function openKnowledgeEdit(id){
 function submitKnowledgeEdit(id){ wsSend({type:'knowledgeEdit',id,title:$('#kbTitle').value,content:$('#kbContent').value,category:$('#kbCat').value,tags:$('#kbTags').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)}); closeModal(); }
 function knowledgeDelete(id){ wsSend({type:'knowledgeDelete',id}); }
 function knowledgeLike(id){ wsSend({type:'knowledgeLike',id}); }
-function knowledgeComment(id, text){ wsSend({type:'knowledgeComment',id,text}); }
+function knowledgeComment(id, text, parentId){ wsSend({type:'knowledgeComment',id,text,parentId: parentId||null}); }
 
 /* ============ 待办任务 ============ */
 function taskBadge(t){

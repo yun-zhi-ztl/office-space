@@ -1,6 +1,6 @@
 'use strict';
 // 知识库模块：knowledgeCreate / knowledgeEdit / knowledgeDelete / knowledgeLike / knowledgeComment
-// 办公规章制度 / 操作指引 / 设备说明 / 常见问题，支持点赞、评论与检索。
+// 办公规章制度 / 操作指引 / 设备说明 / 常见问题，支持点赞、评论与一级回复、检索。
 module.exports = function knowledgeModule(api) {
   const { KNOWLEDGE_CATEGORIES, knowledgeBroadcast, sendTo, serError, genId, saveEntity, deleteEntity, isAdmin, pushNotice, checkAchievements, saveProfile, getUserByAccount } = api;
 
@@ -78,7 +78,20 @@ module.exports = function knowledgeModule(api) {
       if (!text) return sendTo(ws, serError('请输入评论内容'));
       const comments = rec.comments || [];
       if (comments.length >= 50) return sendTo(ws, serError('评论已达上限，请删除旧评论'));
-      const comment = { id: genId('cm', null), account: user.account, name: user.nickname, text, createdAt: Date.now() };
+      const parentId = msg.parentId ? String(msg.parentId) : null;
+      let parent = null;
+      if (parentId) {
+        parent = comments.find((c) => c.id === parentId);
+        if (!parent) return sendTo(ws, serError('回复的评论不存在'));
+        if (parent.parentId) return sendTo(ws, serError('回复不能继续嵌套'));
+      }
+      const comment = {
+        id: genId('cm', null), account: user.account, name: user.nickname, text,
+        createdAt: Date.now(),
+        parentId: parent ? parent.id : null,
+        parentAccount: parent ? parent.account : null,
+        parentName: parent ? parent.name : null,
+      };
       comments.push(comment);
       rec.comments = comments;
       rec.updatedAt = Date.now();

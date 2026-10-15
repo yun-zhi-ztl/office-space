@@ -1601,13 +1601,28 @@ async function runTests() {
     const kb1 = await waitFor(wB, 'knowledge', (k) => k.knowledge && k.knowledge.some((x) => x.id === kbId && x.commentCount === 1), 3000);
     assert(kb1 && kb1.knowledge.find((x) => x.id === kbId).commentCount === 1, '成员发表评论成功');
     assert(kb1 && kb1.knowledge.find((x) => x.id === kbId).comments[0].account === bK, '评论记录归属正确');
+    const cmId = kb1.knowledge.find((x) => x.id === kbId).comments[0].id;
+    // 作者回复该评论
+    await sendMsg(wA, { type: 'knowledgeComment', id: kbId, text: '不客气，有问题随时找我', parentId: cmId });
+    const kbReply = await waitFor(wB, 'knowledge', (k) => k.knowledge && k.knowledge.some((x) => x.id === kbId && x.commentCount === 2 && x.comments.some((c) => c.parentId === cmId)), 3000);
+    assert(kbReply && kbReply.knowledge.find((x) => x.id === kbId).commentCount === 2, '作者回复评论成功');
+    const replyItem = kbReply && kbReply.knowledge.find((x) => x.id === kbId).comments.find((c) => c.parentId === cmId);
+    assert(replyItem && replyItem.parentName === '评论成员', '回复记录父级评论信息');
+    // 二级回复被拒
+    await sendMsg(wB, { type: 'knowledgeComment', id: kbId, text: '再回一层', parentId: replyItem.id });
+    const errNested = mk(wB, 'error').pop();
+    assert(errNested && errNested.message.includes('回复不能继续嵌套'), '二级回复被拒');
+    // 回复不存在的评论被拒
+    await sendMsg(wA, { type: 'knowledgeComment', id: kbId, text: '回复不存在的评论', parentId: 'cm_not_exist' });
+    const errNotFound = mk(wA, 'error').pop();
+    assert(errNotFound && errNotFound.message.includes('回复的评论不存在'), '回复不存在的评论被拒');
     // 空评论被拒
     await sendMsg(wB, { type: 'knowledgeComment', id: kbId, text: '   ' });
     const errEmpty = mk(wB, 'error').pop();
     assert(errEmpty && errEmpty.message.includes('请输入评论内容'), '空评论被拒');
     // 文章作者收到通知（broadcast 广播）
-    const kb2 = await waitFor(wA, 'knowledge', (k) => k.knowledge && k.knowledge.some((x) => x.id === kbId && x.commentCount === 1), 3000);
-    assert(kb2 && kb2.knowledge.find((x) => x.id === kbId).commentCount === 1, '作者端收到评论广播');
+    const kb2 = await waitFor(wA, 'knowledge', (k) => k.knowledge && k.knowledge.some((x) => x.id === kbId && x.commentCount === 2), 3000);
+    assert(kb2 && kb2.knowledge.find((x) => x.id === kbId).commentCount === 2, '作者端收到评论广播');
     wA.close(); wB.close();
   }
 

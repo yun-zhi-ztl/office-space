@@ -768,7 +768,7 @@ assertEq(plSt.totalVotes, 3, 'pollStats 统计总投票');
 // ---------- 知识库序列化 + 统计 ----------
 console.log('\n📋 45. 知识库序列化 / 统计');
 const kbSp = api.createSpace('s47', '知识空间', 1, 0);
-kbSp.knowledge.set('kb1', { id: 'kb1', title: 'A4 纸在哪', content: '打印区右侧柜子', category: '操作指引', tags: ['打印'], authorAccount: 'alice', authorName: '甲', likes: ['alice', 'bob'], comments: [{ id: 'cm1', account: 'bob', name: '乙', text: '谢谢', createdAt: 5 }], createdAt: 1, updatedAt: 2 });
+kbSp.knowledge.set('kb1', { id: 'kb1', title: 'A4 纸在哪', content: '打印区右侧柜子', category: '操作指引', tags: ['打印'], authorAccount: 'alice', authorName: '甲', likes: ['alice', 'bob'], comments: [{ id: 'cm1', account: 'bob', name: '乙', text: '谢谢', createdAt: 5 }, { id: 'cm2', account: 'alice', name: '甲', text: '不客气', createdAt: 6, parentId: 'cm1', parentAccount: 'bob', parentName: '乙' }], createdAt: 1, updatedAt: 2 });
 kbSp.knowledge.set('kb2', { id: 'kb2', title: '会议室规则', content: '用完关灯', category: '规章制度', tags: [], authorAccount: 'bob', authorName: '乙', likes: [], comments: [], createdAt: 3, updatedAt: 4 });
 const kbPub = api.knowledgePublic(kbSp, api.spaceUserInfo(kbSp.id), { account: 'alice' });
 assertEq(kbPub.length, 2, 'knowledgePublic 返回全部文章');
@@ -776,13 +776,16 @@ assertEq(kbPub[0].title, 'A4 纸在哪', 'knowledgePublic 按点赞数排序');
 assertEq(kbPub[0].likeCount, 2, 'knowledgePublic 统计点赞数');
 assertEq(kbPub[0].liked, true, 'knowledgePublic 标记本人已赞');
 assertEq(kbPub[1].liked, false, 'knowledgePublic 未点赞为 false');
-assertEq(kbPub[0].commentCount, 1, 'knowledgePublic 统计评论数');
-assertEq(kbPub[0].comments[0].account, 'bob', 'knowledgePublic 暴露评论');
-assertEq(kbPub[0].comments[0].text, '谢谢', 'knowledgePublic 暴露评论内容');
+assertEq(kbPub[0].commentCount, 2, 'knowledgePublic 统计评论数');
+assertEq(kbPub[0].comments[0].account, 'alice', 'knowledgePublic 评论倒序最新在前');
+assertEq(kbPub[0].comments[0].parentId, 'cm1', 'knowledgePublic 暴露回复 parentId');
+assertEq(kbPub[0].comments[0].parentName, '乙', 'knowledgePublic 暴露回复 parentName');
+assertEq(kbPub[0].comments[1].account, 'bob', 'knowledgePublic 顶级评论无 parentId');
+assertEq(kbPub[0].comments[1].parentId, null, '顶级评论 parentId 为 null');
 const kbSt = api.knowledgeStats(kbSp);
 assertEq(kbSt.total, 2, 'knowledgeStats 统计文章数');
 assertEq(kbSt.liked, 2, 'knowledgeStats 统计点赞总数');
-assertEq(kbSt.comments, 1, 'knowledgeStats 统计评论总数');
+assertEq(kbSt.comments, 2, 'knowledgeStats 统计评论总数');
 
 // ---------- 扩展成就 ----------
 console.log('\n📋 46. 活动 / 投票 / 知识库成就');
