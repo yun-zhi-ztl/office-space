@@ -28,7 +28,7 @@ const S = {
   weeklyReport:null,
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -63,6 +63,7 @@ function dispatch(m){
     case 'deskStats': S.deskStats=m.stats; break;
     case 'ooo': S.DB.ooo={ records:m.records||[], stats:m.stats||{} }; break;
     case 'feedback': S.DB.feedback={ records:m.records||[], stats:m.stats||{} }; break;
+    case 'mood': S.DB.mood={ records:m.records||[], stats:m.stats||{} }; break;
     case 'materials': S.DB.requests=m.requests; S.DB.materialTemplates=m.templates||[]; S.DB.matTotal=m.total||0; S.DB.matOffset=S.DB.requests.length; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; break;
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
@@ -88,6 +89,7 @@ function dispatch(m){
     case 'attendanceCheckedIn': toast(m.isLate?'⏰ 上班打卡成功（已迟到）':'✔ 上班打卡成功', m.isLate?'warn':'success'); render(); break;
     case 'attendanceCheckedOut': toast('✔ 下班打卡成功，今日工作 '+Math.round((m.workedMinutes||0)/60)+'h'+((m.workedMinutes||0)%60?(m.workedMinutes%60)+'m':''),'success'); render(); break;
     case 'oooBacked': toast('✔ 已确认返回（'+(m.category||'外出')+'）','success'); render(); break;
+    case 'moodCheckedIn': toast('🌈 心情已记录：'+(m.emoji||''),'success'); render(); break;
     case 'oooReturnSoon': toast('🔔 外出预计 '+fmtTime(m.expectedReturnAt)+' 返回，请记得回来','warn'); render(); break;
     case 'borrowDueSoon': toast('🔔 你借的设备即将到期，请按时归还','warn'); render(); break;
     case 'roomReminder': { const rm=(S.DB.rooms||[]).find(r=>r.id===m.roomId); toast('🔔 '+(rm?rm.name:'会议室')+' 即将开始：'+fmtTime(m.startAt),'success'); break; }
@@ -126,10 +128,10 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','roomStats','users','leaderboard','achievements','myReminders','spaceTrend','notices','digest'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','roomStats','users','leaderboard','achievements','myReminders','spaceTrend','notices','digest'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
@@ -603,8 +605,8 @@ function renderMaterials(){
     <button class="btn pri" onclick="openMaterialRequest()">＋ 我要申领</button><button class="btn" onclick="exportModuleCsv('materials',MAT_COLS)">导出 CSV</button>${S.admin?'<button class="btn" onclick="openTemplateCreate()">＋ 常用模板</button>':''}</div>
     ${S.admin?`<h3 style="margin:14px 0 8px">📋 常用物资模板</h3><div class="list">${tplList||'<div class="empty">暂无模板</div>'}</div>`:''}
     <div class="list">${d.requests.map(r=>{ const st=r.status; const badge=st==='pending'?'warn':st==='fulfilled'?'ok':'grey'; const canAssign=r.requesterAccount===me||S.admin; const canFulfill=st==='pending'&&!(r.handlerAccount&&r.handlerAccount!==me&&!S.admin); const handled=r.handledAt?` · 处理 ${Math.max(0,Math.round((r.handledAt-r.createdAt)/60000))} 分钟`:''; return `<div class="row"><span><span class="who">${esc(r.requesterName)}</span> 申领 <b>${esc(r.name)}</b> ×${r.qty}${r.unit?' '+esc(r.unit):''}${r.handlerName?` · 负责人 ${esc(r.handlerName)}`:''}<div class="desc">${esc(r.reason||'')}</div><div class="when">${fmtTime(r.createdAt)}${handled}</div></span>
-      <span class="fs"><span class="badge ${badge}">${st==='pending'?'待处理':st==='fulfilled'?'已满足':'已取消'}</span>
-      ${st==='pending'?`${r.requesterAccount===me?`<button class="btn danger sm" onclick="cancelRequest('${r.id}')">取消</button>`:(canFulfill?`<button class="btn green sm" onclick="fulfillRequest('${r.id}')">已满足</button>`:'')}${canAssign?`<button class="btn sm" onclick="openAssign('material','${r.id}')">指派</button>`:''}`:''}
+      <span class="fs"><span class="badge ${badge}">${st==='pending'?'待处理':st==='fulfilled'?'已满足':'已取消'}</span><span class="badge ${r.priority==='high'?'danger':r.priority==='low'?'grey':''}">${r.priority==='high'?'高':r.priority==='low'?'低':'普通'}</span>
+      ${st==='pending'?`${r.requesterAccount===me?`<button class="btn danger sm" onclick="cancelRequest('${r.id}')">取消</button>`:(canFulfill?`<button class="btn green sm" onclick="fulfillRequest('${r.id}')">已满足</button>`:'')}${canAssign?`<button class="btn sm" onclick="openAssign('material','${r.id}')">指派</button><button class="btn sm" onclick="updateMaterialPriority('${r.id}','${r.priority}')">改优先级</button>`:''}`:''}
       </span></div>`; }).join('')||'<div class="empty">暂无申领记录</div>'}
     </div>
     ${(S.DB.matOffset||0)<(S.DB.matTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('materials')">加载更多（${S.DB.matTotal-(S.DB.matOffset||0)}）</button></div>`:''}`;
@@ -616,13 +618,14 @@ function openMaterialRequest(){
   <div class="fld"><label>物资名称</label><input id="mtName" placeholder="如：5号电池"></div>
   <div class="fld"><label>数量</label><div class="fs"><input id="mtQty" type="number" min="1" value="1" style="width:100px"><input id="mtUnit" placeholder="单位（个/节/盒）" style="flex:1"></div></div>
   <div class="fld"><label>说明</label><input id="mtReason" placeholder="为什么需要"></div>
+  <div class="fld"><label>优先级</label><select id="mtPri"><option value="normal">普通</option><option value="high">高</option><option value="low">低</option></select></div>
   <button class="btn pri" onclick="submitMaterial()">提交</button></div>`);
 }
 function applyTemplate(id){
   const t=(S.DB.materialTemplates||[]).find(x=>x.id===id); if(!t) return;
   $('#mtName').value=t.name; $('#mtQty').value=t.defaultQty; $('#mtUnit').value=t.defaultUnit||''; $('#mtReason').value=t.defaultReason||'';
 }
-function submitMaterial(){ wsSend({type:'materialRequest',templateId:$('#mtTpl').value,name:$('#mtName').value,qty:parseInt($('#mtQty').value,10),unit:$('#mtUnit').value,reason:$('#mtReason').value}); closeModal(); }
+function submitMaterial(){ wsSend({type:'materialRequest',templateId:$('#mtTpl').value,name:$('#mtName').value,qty:parseInt($('#mtQty').value,10),unit:$('#mtUnit').value,reason:$('#mtReason').value,priority:$('#mtPri').value}); closeModal(); }
 function openTemplateCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>新增常用物资模板</h2><div class="form">
   <div class="fld"><label>模板名称</label><input id="tplName" placeholder="如：5号电池"></div>
   <div class="fld"><label>默认数量</label><div class="fs"><input id="tplQty" type="number" min="1" value="1" style="width:100px"><input id="tplUnit" placeholder="单位" style="flex:1"></div></div>
@@ -632,6 +635,13 @@ function submitTemplate(){ wsSend({type:'materialTemplateCreate',name:$('#tplNam
 function deleteTemplate(id){ if(confirm('确认删除该常用模板？')) wsSend({type:'materialTemplateDelete',templateId:id}); }
 function cancelRequest(id){ wsSend({type:'materialCancel',requestId:id}); }
 function fulfillRequest(id){ wsSend({type:'materialFulfill',requestId:id}); }
+function updateMaterialPriority(id, current){
+  const opts=[['high','高'],['normal','普通'],['low','低']].map(([v,l])=>`<option value="${v}" ${v===current?'selected':''}>${l}</option>`).join('');
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>调整优先级</h2><div class="form">
+    <div class="fld"><label>优先级</label><select id="mtPri2">${opts}</select></div>
+    <button class="btn pri" onclick="submitMaterialPriority('${id}')">保存</button></div>`);
+}
+function submitMaterialPriority(id){ wsSend({type:'materialUpdate',requestId:id,priority:$('#mtPri2').value}); closeModal(); }
 
 /* ============ 物资库存台账 ============ */
 function renderInventory(){
@@ -960,6 +970,31 @@ function openFeedbackReply(id){ openModal(`<span class="close" onclick="closeMod
   <button class="btn pri" onclick="submitFeedbackReply('${id}')">回复</button></div>`); }
 function submitFeedbackReply(id){ wsSend({type:'feedbackReply',feedbackId:id,content:$('#fbReply').value}); closeModal(); }
 function feedbackClose(id){ wsSend({type:'feedbackClose',feedbackId:id}); }
+
+/* ============ 心情打卡 ============ */
+function renderMood(){
+  const d=S.DB.mood||{records:[],stats:{}};
+  const me=S.me.account;
+  const my=d.records.find(r=>r.account===me);
+  const emojis=['😊','😐','😴','😡','🤩','🥲'];
+  const st=d.stats||{};
+  $('#main').innerHTML = `<div class="topbar"><div><h1>心情打卡</h1><div class="sub">每天记录一下今天的心情，看看团队整体状态</div></div>
+    <button class="btn pri" onclick="openMoodPicker()">${my?'更改今日心情':'记录今日心情'}</button></div>
+    <div class="cards">
+      <div class="card"><h3>🌈 今日已记录</h3><div style="font-size:30px;font-weight:800">${st.total||0}</div><div class="meta">人 / 共 ${emojis.length} 种心情</div></div>
+      ${emojis.map(e=>`<div class="card"><h3>${e}</h3><div style="font-size:30px;font-weight:800">${(st.counts||{})[e]||0}</div><div class="meta">人</div></div>`).join('')}
+    </div>
+    <h3 style="margin:22px 0 10px">📊 今日心情</h3>
+    <div class="list">${d.records.length?d.records.map(r=>`
+      <div class="row"><span><span class="who">${esc(r.name||r.account)} ${r.account===me?'<span class="badge ok">我</span>':''}</span> <span style="font-size:22px">${esc(r.emoji)}</span></span>
+        <span class="fs">${fmtTime(r.createdAt)}</span></div>`).join(''):'<div class="empty">还没有人记录心情</div>'}</div>`;
+}
+function openMoodPicker(){
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>记录今日心情</h2><div class="form">
+    <div class="fld"><label>选择心情</label><div style="display:flex;gap:10px;justify-content:center">${['😊','😐','😴','😡','🤩','🥲'].map(e=>`<button class="btn pri sm mood-pick" onclick="pickMood('${e}')">${e}</button>`).join('')}</div></div>
+  </div>`);
+}
+function pickMood(e){ wsSend({type:'moodCheckIn',emoji:e}); closeModal(); }
 
 function renderAchievements(){
   const list = S.DB.achievements || [];

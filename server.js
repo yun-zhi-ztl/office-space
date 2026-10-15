@@ -26,6 +26,7 @@ const attendanceModule = require('./src/modules/attendance');
 const desksModule = require('./src/modules/desks');
 const oooModule = require('./src/modules/ooo');
 const feedbackModule = require('./src/modules/feedback');
+const moodModule = require('./src/modules/mood');
 
 // ---------- 上下文 ----------
 const api = createContext();
@@ -66,6 +67,7 @@ const attendance = attendanceModule(api);
 const desks = desksModule(api);
 const ooo = oooModule(api);
 const feedback = feedbackModule(api);
+const mood = moodModule(api);
 
 // ---------- 分页加载 ----------
 function handleFetchPage(ws, user, space, msg) {
@@ -117,7 +119,7 @@ wss.on('connection', (ws) => {
         rooms.handleRooms(ws, user, space, msg); break;
       case 'toolCreate': case 'toolDelete': case 'toolAdjust': case 'toolBorrow': case 'toolReturn': case 'toolExtend': case 'toolWaitlist': case 'remindOverdue':
         tools.handleTools(ws, user, space, msg); break;
-      case 'materialRequest': case 'materialCancel': case 'materialFulfill': case 'materialAssign': case 'materialTemplateCreate': case 'materialTemplateDelete':
+      case 'materialRequest': case 'materialCancel': case 'materialFulfill': case 'materialAssign': case 'materialUpdate': case 'materialTemplateCreate': case 'materialTemplateDelete':
         materials.handleMaterials(ws, user, space, msg); break;
       case 'inventoryCreate': case 'inventoryDelete': case 'inventoryAdjust': case 'inventoryIssue': case 'inventoryReturn':
         inventory.handleInventory(ws, user, space, msg); break;
@@ -137,6 +139,8 @@ wss.on('connection', (ws) => {
         ooo.handleOoo(ws, user, space, msg); break;
       case 'feedbackCreate': case 'feedbackReply': case 'feedbackClose': case 'feedbackRemove':
         feedback.handleFeedback(ws, user, space, msg); break;
+      case 'moodCheckIn':
+        mood.handleMood(ws, user, space, msg); break;
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
       case 'announce': extras.announce(ws, user, space, msg); break;
       case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;

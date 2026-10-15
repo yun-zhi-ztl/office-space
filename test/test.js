@@ -477,6 +477,21 @@ async function runTests() {
   mats5 = last(w3, 'materials');
   assert(mats5.requests.find(r => r.id === reqA.id).status === 'fulfilled', '负责人处理已指派申领成功');
 
+  // ========== 测试5c: 物资申领优先级 ==========
+  console.log('\n📋 测试5c: 物资申领优先级');
+  await sendMsg(w2, { type: 'materialRequest', name: '高优先电池', qty: 2, unit: '节', reason: '急需', priority: 'high' });
+  await sendMsg(w2, { type: 'materialRequest', name: '普通纸', qty: 1, unit: '包', reason: '常规', priority: 'low' });
+  mats5 = last(w2, 'materials');
+  assert(mats5.requests.some(r => r.name === '高优先电池' && r.priority === 'high'), '高优先级申领保留 priority');
+  const highReq = mats5.requests.find(r => r.name === '高优先电池');
+  await sendMsg(w2, { type: 'materialUpdate', requestId: highReq.id, priority: 'low' });
+  mats5 = last(w2, 'materials');
+  assert(mats5.requests.find(r => r.id === highReq.id).priority === 'low', '申请人可调整物资优先级');
+  const lowReq = mats5.requests.find(r => r.name === '普通纸');
+  await sendMsg(w4, { type: 'materialUpdate', requestId: lowReq.id, priority: 'high' });
+  const errUpd = mk(w4, 'error');
+  assert(errUpd.length > 0 && errUpd[errUpd.length - 1].message.includes('仅申请人或管理员'), '非申请人调整优先级被拒');
+
   // ========== 测试6: 报修 ==========
   console.log('\n📋 测试6: 报修（提交/状态流转/越权取消/优先级）');
   await sendMsg(w2, { type: 'repairCreate', category: '灯光', priority: 'high', location: '3F 走廊', description: '灯管闪烁' });
@@ -1343,6 +1358,31 @@ async function runTests() {
   }
 
   // ========== 总结 ==========
+
+  // ========== 测试32: 心情打卡 ==========
+  console.log('\n📋 测试32: 心情打卡');
+  {
+    const spM = (await httpJson('POST', '/api/spaces', { name: '心情办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aM = 'mood_' + runKey, bM = 'moody_' + runKey;
+    await reg(aM, 'pw', '心情管理员'); await reg(bM, 'pw', '心情成员');
+    const wA = await createWSClient(); await loginTo(wA, spM.id, aM, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spM.id, bM, 'pw');
+    // 成员选择心情
+    await sendMsg(wB, { type: 'moodCheckIn', emoji: '😊' });
+    const mood0 = await waitFor(wB, 'mood', (m) => m.records && m.records.length === 1, 3000);
+    assert(mood0 && mood0.records[0].emoji === '😊', '成员提交心情成功');
+    assert(mood0 && mood0.stats.total === 1, '心情统计今日人数为 1');
+    assert(mood0 && mood0.stats.counts['😊'] === 1, '心情统计计数正确');
+    // 同一账号再次打卡应更新而非新增
+    await sendMsg(wB, { type: 'moodCheckIn', emoji: '😡' });
+    const mood1 = await waitFor(wB, 'mood', (m) => m.records && m.records.length === 1 && m.records[0].emoji === '😡', 3000);
+    assert(mood1 && mood1.stats.total === 1, '同一账号每天只保留一条心情');
+    // 管理员也打卡，统计为 2
+    await sendMsg(wA, { type: 'moodCheckIn', emoji: '🤩' });
+    const mood2 = await waitFor(wA, 'mood', (m) => m.records && m.records.length === 2, 3000);
+    assert(mood2 && mood2.stats.total === 2, '多人心情统计累计');
+    wA.close(); wB.close();
+  }
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

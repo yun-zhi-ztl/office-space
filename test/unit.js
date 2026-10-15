@@ -702,6 +702,29 @@ assert(achUser3.achievements.includes('listener'), '回复反馈 3 条解锁倾�
 const achListener = api.achievementDefsPublic(achUser3).find((a) => a.id === 'listener');
 assertEq(achListener.target, 3, '倾听达人目标值 3');
 
+// ---------- 物资优先级 + 心情序列化 ----------
+console.log('\n📋 42. 物资优先级 / 心情序列化');
+const matSp = api.createSpace('s43', '物资空间', 1, 0);
+matSp.materialRequests.set('m1', { id: 'm1', name: '电池', qty: 1, unit: '节', reason: '', status: 'pending', requesterAccount: 'alice', requesterName: '甲', priority: 'normal', createdAt: 100, handledAt: null, slaRemindedAt: null });
+matSp.materialRequests.set('m2', { id: 'm2', name: '纸', qty: 1, unit: '包', reason: '', status: 'pending', requesterAccount: 'bob', requesterName: '乙', priority: 'high', createdAt: 200, handledAt: null, slaRemindedAt: null });
+matSp.materialRequests.set('m3', { id: 'm3', name: '笔', qty: 1, unit: '支', reason: '', status: 'pending', requesterAccount: 'carol', requesterName: '丙', priority: 'low', createdAt: 300, handledAt: null, slaRemindedAt: null });
+const matPub2 = api.materialsPublic(matSp, new Map());
+assertEq(matPub2[0].id, 'm2', 'materialsPublic 高优先级排在前面');
+assertEq(matPub2[2].id, 'm3', 'materialsPublic 低优先级排在后面');
+assertEq(matPub2[0].priority, 'high', 'materialsPublic 暴露 priority 字段');
+const moodSp = api.createSpace('s44', '心情空间', 1, 0);
+const moodToday = api.todayKey();
+moodSp.moods.set('md1', { id: 'md1', account: 'alice', name: '甲', date: moodToday, emoji: '😊', createdAt: 1 });
+moodSp.moods.set('md2', { id: 'md2', account: 'bob', name: '乙', date: moodToday, emoji: '😴', createdAt: 2 });
+moodSp.moods.set('md3', { id: 'md3', account: 'carol', name: '丙', date: '2020-01-01', emoji: '😊', createdAt: 3 });
+const moodPub = api.moodPublic(moodSp, api.spaceUserInfo(moodSp.id));
+assertEq(moodPub.length, 2, 'moodPublic 仅返回今日记录');
+assertEq(moodPub.find((r) => r.account === 'alice').emoji, '😊', 'moodPublic 保留心情表情');
+const moodSt = api.moodStats(moodSp);
+assertEq(moodSt.total, 2, 'moodStats 统计今日总人数');
+assertEq(moodSt.counts['😴'], 1, 'moodStats 统计单种表情数量');
+assertEq(moodSt.counts['😊'], 1, 'moodStats 统计多种表情数量');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

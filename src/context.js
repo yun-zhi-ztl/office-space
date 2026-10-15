@@ -17,6 +17,8 @@ function createContext() {
   const INVENTORY_CATEGORIES = ['办公文具', '打印耗材', '电池', '清洁用品', '食品饮料', '其它'];
   const OOO_CATEGORIES = ['外出', '请假', '出差', '调休', '其他'];
   const FEEDBACK_CATEGORIES = ['建议', '吐槽', '问题', '表扬'];
+  const MATERIAL_PRIORITIES = ['high', 'normal', 'low'];
+  const MOOD_EMOJIS = ['😊', '😐', '😴', '😡', '🤩', '🥲'];
   const LIST_PAGE = 30;
   const PERSIST_DEBOUNCE_MS = 500;
   const WS_PING_MS = 30000;
@@ -207,6 +209,7 @@ function createContext() {
       else if (r.kind === 'desk_reservation') sp.deskReservations.set(data.id, data);
       else if (r.kind === 'ooo') sp.ooo.set(data.id, data);
       else if (r.kind === 'feedback') sp.feedbacks.set(data.id, data);
+      else if (r.kind === 'mood') sp.moods.set(data.id, data);
       else if (r.kind === 'notice') { sp.notices.push(data); sp.notices.sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
       else if (r.kind === 'stall') { const st = sp.stalls.find((s) => s.id === data.id); if (st) st.ratings = (data.ratings || []).slice(-60); }
     }
@@ -445,7 +448,7 @@ function createContext() {
       rooms: [], roomReservations: new Map(), roomWaitlist: new Map(), reservations: new Map(),
       tools: [], borrows: new Map(), toolWaitlist: new Map(), materialRequests: new Map(), materialTemplates: new Map(), repairs: new Map(), visitors: new Map(), urges: new Map(), inventory: [], inventoryIssues: new Map(),
       attendanceConfig: newAttendanceConfig(), attendance: new Map(),
-      desks: [], deskReservations: new Map(), ooo: new Map(), feedbacks: new Map(),
+      desks: [], deskReservations: new Map(), ooo: new Map(), feedbacks: new Map(), moods: new Map(),
     };
     sp.weeklyReportDate = null;
     sp.stalls = buildStalls(squat == null ? 4 : squat, urinal == null ? 3 : urinal);
@@ -677,8 +680,9 @@ function createContext() {
     return [...sp.materialTemplates.values()].map(materialTemplatePublic).sort((a, b) => a.createdAt - b.createdAt);
   }
   function materialsPublic(sp, info) {
+    const weight = { high: 0, normal: 1, low: 2 };
     return [...sp.materialRequests.values()].map((m) => ({
-      id: m.id, name: m.name, qty: m.qty, unit: m.unit, reason: m.reason, status: m.status,
+      id: m.id, name: m.name, qty: m.qty, unit: m.unit, reason: m.reason, status: m.status, priority: m.priority || 'normal',
       requesterAccount: m.requesterAccount,
       requesterName: info.get(m.requesterAccount) ? info.get(m.requesterAccount).display : m.requesterName,
       handlerAccount: m.handlerAccount || null,
@@ -686,7 +690,7 @@ function createContext() {
       createdAt: m.createdAt, handledAt: m.handledAt,
       handleDurationMinutes: m.handledAt ? Math.max(0, Math.round((m.handledAt - m.createdAt) / 60000)) : null,
       slaReminded: !!m.slaRemindedAt,
-    })).sort((a, b) => (b.createdAt - a.createdAt));
+    })).sort((a, b) => ((weight[a.priority] ?? 2) - (weight[b.priority] ?? 2)) || (b.createdAt - a.createdAt));
   }
   function repairsPublic(sp, info) {
     return [...sp.repairs.values()].map((r) => ({
@@ -878,6 +882,25 @@ function createContext() {
     const recs = [...space.feedbacks.values()];
     return { open: recs.filter((r) => r.status === 'open').length, answered: recs.filter((r) => r.status === 'answered').length, closed: recs.filter((r) => r.status === 'closed').length };
   }
+  // ---------- 每日心情序列化 ----------
+  function moodPublic(space, info, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const key = todayKey(nowMs);
+    return [...space.moods.values()].filter((r) => r.date === key).map((r) => {
+      const who = info.get(r.account);
+      return { id: r.id, account: r.account, name: who ? who.display : r.name, emoji: r.emoji, createdAt: r.createdAt };
+    }).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+  }
+  function moodStats(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const key = todayKey(nowMs);
+    const counts = {};
+    for (const e of MOOD_EMOJIS) counts[e] = 0;
+    for (const r of space.moods.values()) {
+      if (r.date === key) counts[r.emoji] = (counts[r.emoji] || 0) + 1;
+    }
+    return { total: [...space.moods.values()].filter((r) => r.date === key).length, counts };
+  }
 
   // ---------- 广播 ----------
   function broadcast(spaceId, type, payload) { broadcastTo(spaceId, Object.assign({ type }, payload)); }
@@ -930,6 +953,10 @@ function createContext() {
     const info = spaceUserInfo(sp.id);
     broadcast(sp.id, 'feedback', { records: feedbackPublic(sp, info), stats: feedbackStats(sp) });
   }
+  function moodBroadcast(sp) {
+    const info = spaceUserInfo(sp.id);
+    broadcast(sp.id, 'mood', { records: moodPublic(sp, info), stats: moodStats(sp) });
+  }
   function broadcastAll(sp) {
     const info = spaceUserInfo(sp.id);
     const reservations = roomReservationsPublic(sp, info);
@@ -951,6 +978,7 @@ function createContext() {
     deskStatsBroadcast(sp);
     oooBroadcast(sp);
     feedbackBroadcast(sp);
+    moodBroadcast(sp);
     broadcastUsers(sp);
     broadcastLeaderboard(sp);
   }
@@ -1144,7 +1172,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, FEEDBACK_CATEGORIES, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -1158,9 +1186,9 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats,
     // 广播
-    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, noticesBroadcast, pushNotice, visitorsBroadcast,
+    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, noticesBroadcast, pushNotice, visitorsBroadcast,
     // 坑位辅助
     activeStallCount, checkAchievements, notifyUrge, ACHIEVEMENT_DEFS,
     achievementProgress, achievementDefsPublic,

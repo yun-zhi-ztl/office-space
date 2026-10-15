@@ -1,7 +1,7 @@
 'use strict';
 // 物资申领模块：materialRequest / materialCancel / materialFulfill
 module.exports = function materialsModule(api) {
-  const { spaceUserInfo, materialsPublic, materialsTemplatesPublic, materialTemplatePublic, broadcast, LIST_PAGE, sendTo, serError, genId, saveEntity, deleteEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToAccount, sendToUser, checkAchievements, isAdmin } = api;
+  const { MATERIAL_PRIORITIES, spaceUserInfo, materialsPublic, materialsTemplatesPublic, materialTemplatePublic, broadcast, LIST_PAGE, sendTo, serError, genId, saveEntity, deleteEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToAccount, sendToUser, checkAchievements, isAdmin } = api;
 
   function materialsBroadcast(space) {
     const info = spaceUserInfo(space.id);
@@ -17,7 +17,7 @@ module.exports = function materialsModule(api) {
       const qty = parseInt(msg.qty || template?.defaultQty, 10);
       if (!name) return sendTo(ws, serError('请输入物资名称'));
       if (!Number.isInteger(qty) || qty < 1) return sendTo(ws, serError('请输入有效数量'));
-      const req = { id: genId('mt', null), requesterAccount: user.account, requesterName: user.nickname, name, qty, unit: (msg.unit || template?.defaultUnit || '个').trim().slice(0, 10), reason: (msg.reason || template?.defaultReason || '').trim().slice(0, 120), status: 'pending', createdAt: Date.now(), handledAt: null, slaRemindedAt: null };
+      const req = { id: genId('mt', null), requesterAccount: user.account, requesterName: user.nickname, name, qty, unit: (msg.unit || template?.defaultUnit || '个').trim().slice(0, 10), reason: (msg.reason || template?.defaultReason || '').trim().slice(0, 120), priority: MATERIAL_PRIORITIES.includes(msg.priority) ? msg.priority : 'normal', status: 'pending', createdAt: Date.now(), handledAt: null, slaRemindedAt: null };
       space.materialRequests.set(req.id, req);
       user.stats.requestCount = (user.stats.requestCount || 0) + 1;
       recordWeekly(user, 'requests');
@@ -25,6 +25,14 @@ module.exports = function materialsModule(api) {
       saveEntity(space.id, 'material', req.id, req);
       materialsBroadcast(space);
       broadcastLeaderboard(space);
+    } else if (msg.type === 'materialUpdate') {
+      const req = space.materialRequests.get(msg.requestId);
+      if (!req) return sendTo(ws, serError('申领记录不存在'));
+      if (req.requesterAccount !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('仅申请人或管理员可调整优先级'));
+      if (!MATERIAL_PRIORITIES.includes(msg.priority)) return sendTo(ws, serError('优先级无效'));
+      req.priority = msg.priority;
+      saveEntity(space.id, 'material', req.id, req);
+      materialsBroadcast(space);
     } else if (msg.type === 'materialTemplateCreate') {
       if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可维护物资模板'));
       const name = (msg.name || '').trim().slice(0, 30);
