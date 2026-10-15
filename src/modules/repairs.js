@@ -71,6 +71,7 @@ module.exports = function repairsModule(api) {
       }
       rep.status = to;
       rep.updatedAt = Date.now();
+      if (to === 'resolved') rep.handledAt = Date.now();
       saveEntity(space.id, 'repair', rep.id, rep);
       if (to === 'in_progress') sendToAccount(rep.reporterAccount, { type: 'repairInProgress', repairId: rep.id, category: rep.category, location: rep.location });
       if (to === 'resolved') {

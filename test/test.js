@@ -683,6 +683,30 @@ async function runTests() {
     wA.close(); wB.close();
   }
 
+  // ========== 测试14c: 成员移除 ==========
+  console.log('\n📋 测试14c: 成员移除');
+  {
+    const spK = (await httpJson('POST', '/api/spaces', { name: '移除办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aK = 'kick_' + runKey, bK = 'kickm_' + runKey, cK = 'kickc_' + runKey;
+    await reg(aK, 'pw', '踢人管理员'); await reg(bK, 'pw', '被踢成员'); await reg(cK, 'pw', '普通成员');
+    const wA = await createWSClient(); await loginTo(wA, spK.id, aK, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spK.id, bK, 'pw');
+    const wC = await createWSClient(); await loginTo(wC, spK.id, cK, 'pw');
+    await sendMsg(wC, { type: 'spaceKick', account: bK });
+    const errKick = mk(wC, 'error').pop();
+    assert(errKick && errKick.message.includes('仅管理员'), '非管理员移除成员被拒');
+    await sendMsg(wA, { type: 'spaceKick', account: aK });
+    const errSelf = mk(wA, 'error').pop();
+    assert(errSelf && errSelf.message.includes('不能移除自己'), '不能移除自己');
+    await sendMsg(wA, { type: 'spaceKick', account: bK });
+    const kicked = mk(wB, 'spaceKicked');
+    assert(kicked.length >= 1, '被踢成员收到 spaceKicked');
+    assert(last(wA, 'spaceKicked').account === bK, '管理员收到移除结果');
+    assert(!last(wA, 'users').users.some((u) => u.account === bK), '被踢成员从在线列表移除');
+    assert(last(wA, 'notices').notices.some((n) => n.text.includes('移除了成员')), '移除成员写入公告留痕');
+    wA.close(); wB.close(); wC.close();
+  }
+
   // ========== 测试15: 紧急模式 ==========
   console.log('\n📋 测试15: 紧急模式');
   {

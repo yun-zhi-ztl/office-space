@@ -1,7 +1,7 @@
 'use strict';
 // 扩展功能：setStatus / announce / suggestRoom / remindReturn + 公告推送
 module.exports = function extrasModule(api) {
-  const { users, broadcastUsers, sendTo, serError, roomPublic, noticesBroadcast, isAdmin, saveSpace, deleteEntity, broadcast, getUserByAccount, sendToUser, pushNotice } = api;
+  const { users, broadcastUsers, sendTo, serError, roomPublic, noticesBroadcast, isAdmin, saveSpace, deleteEntity, broadcast, getUserByAccount, sendToUser, pushNotice, broadcastStalls, broadcastLeaderboard } = api;
 
   function handleSetStatus(ws, user, space, msg) {
     const label = (msg.label || '').trim().slice(0, 8) || '在岗';
@@ -66,6 +66,47 @@ module.exports = function extrasModule(api) {
     sendToUser(target.id, { type: 'adminSet', account, admin: makeAdmin, adminCount: space.admins.size });
   }
 
+  // 移除成员：清理坑位占用后强制下线；管理员被移除时同步移除其管理员角色
+  function handleKick(ws, user, space, msg) {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可移除成员'));
+    const account = (msg.account || '').trim().slice(0, 40);
+    if (!account) return sendTo(ws, serError('请选择成员'));
+    const target = getUserByAccount(account);
+    if (!target || target.currentSpace !== space.id) return sendTo(ws, serError('成员必须为空间内在线成员'));
+    if (target.account === user.account) return sendTo(ws, serError('不能移除自己'));
+    if (isAdmin(space, target.account) && space.admins.size <= 1) return sendTo(ws, serError('至少保留一名管理员'));
+    if (target.currentStall !== null) {
+      const stall = space.stalls.find((s) => s.id === target.currentStall && s.reservation && s.reservation.account === target.account);
+      if (stall) {
+        const rr = stall.reservation.reservationId ? space.reservations.get(stall.reservation.reservationId) : null;
+        stall.status = 'free'; stall.currentUser = null; stall.reservation = null;
+        if (rr) space.reservations.delete(rr.id);
+        space.urges.delete(stall.id);
+        broadcastStalls(space);
+      }
+      target.currentStall = null;
+    }
+    for (const [rid, r] of [...space.reservations]) {
+      if (r.account === target.account && r.status === 'pending') {
+        const stall = space.stalls.find((s) => s.id === r.stallId);
+        if (stall && stall.reservation && stall.reservation.reservationId === rid) { stall.status = 'free'; stall.reservation = null; }
+        space.reservations.delete(rid);
+      }
+    }
+    if (isAdmin(space, target.account)) space.admins.delete(target.account);
+    space.clients.delete(target.ws);
+    users.delete(target.id);
+    saveSpace(space);
+    broadcastUsers(space);
+    broadcastLeaderboard(space);
+    pushNotice(space, `管理员 ${user.nickname} 移除了成员 ${target.nickname}`, user.account, user.nickname);
+    if (target.ws && target.ws.readyState === 1) {
+      target.ws.send(JSON.stringify({ type: 'spaceKicked', reason: '被管理员移除' }));
+      target.ws.close();
+    }
+    sendTo(ws, { type: 'spaceKicked', account, accountName: target.nickname });
+  }
+
   function handleRemindReturn(ws, user, space, msg) {
     const b = space.borrows.get(msg.borrowId);
     if (!b || b.status !== 'borrowed') return sendTo(ws, serError('借用记录不存在或已归还'));
@@ -87,5 +128,5 @@ module.exports = function extrasModule(api) {
     sendTo(ws, { type: 'noticeRemoved', noticeId: notice.id });
   }
 
-  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace, adminSet: handleAdminSet, pause: handlePause, removeNotice: handleRemoveNotice };
+  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace, adminSet: handleAdminSet, kick: handleKick, pause: handlePause, removeNotice: handleRemoveNotice };
 };

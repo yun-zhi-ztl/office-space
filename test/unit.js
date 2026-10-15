@@ -484,6 +484,25 @@ api.pushNotice(spN, '第二条', 'bob', '乙');
 assertEq(spN.notices.length, 2, 'pushNotice 第二条公告');
 assertEq(spN.notices[0].text, '第二条', 'pushNotice 新公告置顶');
 
+// ---------- 报修处理时长统计 ----------
+console.log('\n📋 31. 报修处理时长统计');
+const nowH = Date.now() - 30 * 60000;
+const spHandle = api.createSpace('s23', '处理时长空间', 1, 0);
+spHandle.repairs.set('h1', { id: 'h1', category: '灯光', location: '走廊', reporterAccount: 'alice', reporterName: '甲', priority: 'normal', description: '闪烁', status: 'resolved', createdAt: nowH, updatedAt: nowH, handledAt: nowH + 60 * 60000 });
+spHandle.repairs.set('h2', { id: 'h2', category: '空调', location: '会议室', reporterAccount: 'bob', reporterName: '乙', priority: 'normal', description: '不制冷', status: 'reported', createdAt: nowH, updatedAt: nowH });
+const repHandle = api.repairsPublic(spHandle, new Map());
+assertEq(repHandle.find((r) => r.id === 'h1').handledAt, nowH + 60 * 60000, 'resolved 报修暴露 handledAt');
+assertEq(repHandle.find((r) => r.id === 'h1').handleDurationMinutes, 60, 'resolved 报修处理时长 60 分钟');
+assertEq(repHandle.find((r) => r.id === 'h2').handledAt, null, '未解决报修 handledAt 为 null');
+assertEq(repHandle.find((r) => r.id === 'h2').handleDurationMinutes, null, '未解决报修处理时长为 null');
+spHandle.materialRequests.set('mh1', { id: 'mh1', name: '电池', qty: 4, unit: '节', reason: 'r', status: 'fulfilled', requesterAccount: 'alice', requesterName: '甲', createdAt: nowH, handledAt: nowH + 60000, slaRemindedAt: null });
+const matHandle = api.materialsPublic(spHandle, new Map());
+assertEq(matHandle.find((m) => m.id === 'mh1').handleDurationMinutes, 1, '已满足申领暴露处理时长');
+const duHandle = { account: 'alice', stats: api.newStats(), achievements: [] };
+const dig = api.buildDigest(spHandle, duHandle);
+assertEq(dig.resolvedRepairsCount, 1, 'digest 统计今日已解决报修');
+assertEq(dig.resolvedMaterialsCount, 1, 'digest 统计今日已满足申领');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

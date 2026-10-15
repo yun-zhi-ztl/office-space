@@ -498,6 +498,7 @@ function createContext() {
       handlerAccount: m.handlerAccount || null,
       handlerName: info.get(m.handlerAccount) ? info.get(m.handlerAccount).display : (m.handlerName || ''),
       createdAt: m.createdAt, handledAt: m.handledAt,
+      handleDurationMinutes: m.handledAt ? Math.max(0, Math.round((m.handledAt - m.createdAt) / 60000)) : null,
       slaReminded: !!m.slaRemindedAt,
     })).sort((a, b) => (b.createdAt - a.createdAt));
   }
@@ -509,6 +510,8 @@ function createContext() {
       handlerAccount: r.handlerAccount || null,
       handlerName: info.get(r.handlerAccount) ? info.get(r.handlerAccount).display : (r.handlerName || ''),
       createdAt: r.createdAt, updatedAt: r.updatedAt,
+      handledAt: r.handledAt || null,
+      handleDurationMinutes: r.handledAt ? Math.max(0, Math.round((r.handledAt - r.createdAt) / 60000)) : null,
        slaReminded: !!r.slaRemindedAt,
     })).sort((a, b) => (b.createdAt - a.createdAt));
   }
@@ -722,11 +725,13 @@ function createContext() {
     const myBorrows = [...space.borrows.values()].filter((b) => b.borrowerAccount === user.account && b.status === 'borrowed');
     const pendingMaterials = [...space.materialRequests.values()].filter((r) => r.status === 'pending');
     const openRepairs = [...space.repairs.values()].filter((r) => r.status === 'reported' || r.status === 'in_progress');
+    const resolvedRepairs = [...space.repairs.values()].filter((r) => r.status === 'resolved' && r.handledAt && r.handledAt >= today0 && r.handledAt < todayEnd);
+    const resolvedMaterials = [...space.materialRequests.values()].filter((r) => r.status === 'fulfilled' && r.handledAt && r.handledAt >= today0 && r.handledAt < todayEnd);
     const pendingVisitors = [...space.visitors.values()].filter((v) => v.status === 'pending' || v.status === 'arrived');
     const todayMeetingMinutes = todayMeetings.reduce((s, r) => s + Math.max(0, Math.round((Math.min(r.endAt, todayEnd) - r.startAt) / 60000)), 0);
     const todayBorrowMinutes = [...space.borrows.values()].filter((b) => b.returnedAt && b.returnedAt >= today0 && b.returnedAt < todayEnd).reduce((s, b) => s + Math.max(0, Math.round((b.returnedAt - b.borrowedAt) / 60000)), 0);
     const mvp = leaderboardPublic(space).rankings.find((r) => r.mvp) || null;
-    return { todayMeetingCount: todayMeetings.length, todayMeetings: todayMeetings.slice(0, 5), todayMeetingMinutes, todayBorrowMinutes, overdueCount: overdue.length, myBorrows: myBorrows.length, pendingMaterialsCount: pendingMaterials.length, openRepairsCount: openRepairs.length, pendingVisitorsCount: pendingVisitors.length, pendingVisitors: pendingVisitors.slice(0, 5).map((v) => ({ visitorName: v.visitorName, hostName: v.hostName, status: v.status })), mvp };
+    return { todayMeetingCount: todayMeetings.length, todayMeetings: todayMeetings.slice(0, 5), todayMeetingMinutes, todayBorrowMinutes, overdueCount: overdue.length, myBorrows: myBorrows.length, pendingMaterialsCount: pendingMaterials.length, openRepairsCount: openRepairs.length, resolvedRepairsCount: resolvedRepairs.length, resolvedMaterialsCount: resolvedMaterials.length, pendingVisitorsCount: pendingVisitors.length, pendingVisitors: pendingVisitors.slice(0, 5).map((v) => ({ visitorName: v.visitorName, hostName: v.hostName, status: v.status })), mvp };
   }
 
   // ---------- 我的待办 ----------

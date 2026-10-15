@@ -120,6 +120,7 @@ wss.on('connection', (ws) => {
       case 'announce': extras.announce(ws, user, space, msg); break;
       case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;
       case 'spaceAdminSet': extras.adminSet(ws, user, space, msg); break;
+      case 'spaceKick': extras.kick(ws, user, space, msg); break;
       case 'spacePause': extras.pause(ws, user, space, msg); break;
       case 'suggestRoom': extras.suggestRoom(ws, user, space, msg); break;
       case 'remindReturn': extras.remindReturn(ws, user, space, msg); break;
