@@ -27,6 +27,9 @@ function createContext() {
   const MATERIAL_SLA_MS = 2 * 24 * 3600 * 1000;
   const REPAIR_ESCALATE_MS = 8 * 3600 * 1000;
   const VISIT_TOKEN_TTL_MS = 24 * 3600 * 1000;
+  const ATTEND_DEFAULT_WORK_START = '09:00';
+  const ATTEND_DEFAULT_WORK_END = '18:00';
+  const ATTEND_DEFAULT_LATE_MINUTES = 15;
 
   // ---------- 内存状态 ----------
   const spaces = new Map();
@@ -189,6 +192,8 @@ function createContext() {
       else if (r.kind === 'inventory_issue') sp.inventoryIssues.set(data.id, data);
       else if (r.kind === 'repair') sp.repairs.set(data.id, data);
       else if (r.kind === 'visitor') sp.visitors.set(data.id, data);
+      else if (r.kind === 'attendance') sp.attendanceConfig = Object.assign(newAttendanceConfig(), data || {});
+      else if (r.kind === 'attendance_record') sp.attendance.set(`${data.account}::${data.date}`, data);
       else if (r.kind === 'notice') { sp.notices.push(data); sp.notices.sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
       else if (r.kind === 'stall') { const st = sp.stalls.find((s) => s.id === data.id); if (st) st.ratings = (data.ratings || []).slice(-60); }
     }
@@ -311,10 +316,10 @@ function createContext() {
 
   // ---------- 空间 ----------
   function weekKey(ts) { const d = new Date(ts || Date.now()); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
-  function newWeekly() { return { key: weekKey(), visits: 0, borrows: 0, requests: 0, repairs: 0, meetings: 0 }; }
-  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, meetingActualDuration: 0, helperCount: 0, favoriteRooms: [], roomRatesGiven: 0, favoriteCount: 0, weekly: newWeekly() }; }
+  function newWeekly() { return { key: weekKey(), visits: 0, borrows: 0, requests: 0, repairs: 0, meetings: 0, attends: 0 }; }
+  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, meetingActualDuration: 0, helperCount: 0, favoriteRooms: [], roomRatesGiven: 0, favoriteCount: 0, attendanceCount: 0, earlyCount: 0, weekly: newWeekly() }; }
   function recordWeekly(user, field) { if (!user.stats.weekly || user.stats.weekly.key !== weekKey()) user.stats.weekly = newWeekly(); user.stats.weekly[field] = (user.stats.weekly[field] || 0) + 1; }
-  function weeklyScore(stats) { const w = stats.weekly; if (!w || w.key !== weekKey()) return 0; return (w.visits || 0) + (w.borrows || 0) + (w.requests || 0) + (w.repairs || 0) + (w.meetings || 0); }
+  function weeklyScore(stats) { const w = stats.weekly; if (!w || w.key !== weekKey()) return 0; return (w.visits || 0) + (w.borrows || 0) + (w.requests || 0) + (w.repairs || 0) + (w.meetings || 0) + (w.attends || 0); }
   function borrowOverdue(b, now) {
     if (!b || b.status !== 'borrowed') return false;
     const nowMs = now == null ? Date.now() : now;
@@ -416,6 +421,7 @@ function createContext() {
       paused: false, pausedReason: '',
       rooms: [], roomReservations: new Map(), roomWaitlist: new Map(), reservations: new Map(),
       tools: [], borrows: new Map(), toolWaitlist: new Map(), materialRequests: new Map(), materialTemplates: new Map(), repairs: new Map(), visitors: new Map(), urges: new Map(), inventory: [], inventoryIssues: new Map(),
+      attendanceConfig: newAttendanceConfig(), attendance: new Map(),
     };
     sp.weeklyReportDate = null;
     sp.stalls = buildStalls(squat == null ? 4 : squat, urinal == null ? 3 : urinal);
@@ -477,6 +483,70 @@ function createContext() {
     return { rooms, totalTodayMinutes: totalToday, totalActualMinutes: totalActual, capacityMinutes: capacity, utilizationPct: capacity ? Math.round(totalToday / capacity * 100) : 0, workStart: workStart.getTime(), workEnd: workEnd.getTime() };
   }
 
+  // ---------- 考勤打卡 ----------
+  // 考勤规则 + 今日打卡记录；按「账号::日期」存 Map，支持多人同一天各有一条记录
+  function todayKey(ts) {
+    const d = new Date(ts == null ? Date.now() : ts);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  function newAttendanceConfig() {
+    return { workStart: ATTEND_DEFAULT_WORK_START, workEnd: ATTEND_DEFAULT_WORK_END, lateMinutes: ATTEND_DEFAULT_LATE_MINUTES };
+  }
+  function parseTime(t) {
+    const m = String(t == null ? '' : t).trim().match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  }
+  function minutesOfDay(ts) {
+    const d = new Date(ts == null ? Date.now() : ts);
+    return d.getHours() * 60 + d.getMinutes();
+  }
+  // 判断某时刻是否迟到：到点时间 + 宽限分钟之后（含）视为迟到
+  function isLateAt(ts, cfg) {
+    const start = parseTime(cfg && cfg.workStart);
+    if (start == null) return false;
+    const grace = Math.max(0, parseInt(cfg && cfg.lateMinutes, 10) || 0);
+    return minutesOfDay(ts) - start >= grace;
+  }
+  // 今日打卡记录（按打卡时间升序），name 优先取在线展示名、其次账号注册名
+  function attendancePublic(sp, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const today = todayKey(nowMs);
+    const info = spaceUserInfo(sp.id);
+    const out = [];
+    for (const [key, r] of sp.attendance) {
+      const [account, date] = key.split('::');
+      if (date !== today) continue;
+      const who = info.get(account);
+      const acc = accounts.get(account);
+      out.push({
+        id: r.id, account, name: who ? who.display : (acc ? acc.username : account),
+        date, checkInAt: r.checkInAt || null, checkOutAt: r.checkOutAt || null,
+        isLate: !!r.isLate, status: r.status || 'checked_in',
+        workedMinutes: r.workedMinutes || 0,
+      });
+    }
+    return out.sort((a, b) => (a.checkInAt || 0) - (b.checkInAt || 0));
+  }
+  // 今日考勤汇总：打卡人数 / 迟到 / 已下班 / 最早打卡 / 最晚下班 / 完成率
+  function attendanceStats(sp, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const today = todayKey(nowMs);
+    const recs = [];
+    for (const r of sp.attendance.values()) if (r.date === today) recs.push(r);
+    const checkedIn = recs.length;
+    const late = recs.filter((r) => r.isLate).length;
+    const checkedOut = recs.filter((r) => r.checkOutAt).length;
+    const checkins = recs.map((r) => r.checkInAt || 0).filter((x) => x > 0);
+    const checkouts = recs.map((r) => r.checkOutAt || 0).filter((x) => x > 0);
+    return {
+      date: today, checkedIn, late, checkedOut,
+      earliestCheckIn: checkins.length ? Math.min(...checkins) : null,
+      latestCheckOut: checkouts.length ? Math.max(...checkouts) : null,
+      completeRate: checkedIn ? Math.round((checkedOut / checkedIn) * 100) : 0,
+      lateRate: checkedIn ? Math.round((late / checkedIn) * 100) : 0,
+    };
+  }
   // ---------- 序列化 ----------
   // 会议室评分：扫描该会议室已完成预约上的评分，聚合平均分、评分数与最近评分
   function roomRatingSummary(space, roomId) {
@@ -732,6 +802,7 @@ function createContext() {
     broadcast(sp.id, 'stalls', { squat_count: sp.squatCount, urinal_count: sp.urinalCount, stalls: stallsPublic(sp, info) });
   }
   function roomStatsBroadcast(sp) { broadcast(sp.id, 'roomStats', roomUsageStats(sp)); }
+  function attendanceBroadcast(sp) { broadcast(sp.id, 'attendance', { records: attendancePublic(sp), stats: attendanceStats(sp), config: sp.attendanceConfig || newAttendanceConfig() }); }
   function broadcastAll(sp) {
     const info = spaceUserInfo(sp.id);
     const reservations = roomReservationsPublic(sp, info);
@@ -748,6 +819,7 @@ function createContext() {
     broadcast(sp.id, 'stalls', { squat_count: sp.squatCount, urinal_count: sp.urinalCount, stalls: stallsPublic(sp, info) });
     broadcast(sp.id, 'notices', { notices: sp.notices });
     roomStatsBroadcast(sp);
+    attendanceBroadcast(sp);
     broadcastUsers(sp);
     broadcastLeaderboard(sp);
   }
@@ -772,6 +844,8 @@ function createContext() {
     { id: 'logistician', name: '后勤达人', desc: '处理申领或解决报修累计5次', icon: '🛎️', check: (u) => (u.stats.helperCount || 0) >= 5 },
     { id: 'roomGuide', name: '会议室向导', desc: '给会议室评分3次', icon: '📝', check: (u) => (u.stats.roomRatesGiven || 0) >= 3 },
     { id: 'collector', name: '收藏家', desc: '收藏3个会议室', icon: '⭐', check: (u) => (u.stats.favoriteCount || 0) >= 3 },
+    { id: 'earlyBird', name: '早到达人', desc: '累计3天在9点前打卡', icon: '🐦', check: (u) => (u.stats.earlyCount || 0) >= 3 },
+    { id: 'attendanceKing', name: '打卡达人', desc: '累计打卡10次', icon: '🕒', check: (u) => (u.stats.attendanceCount || 0) >= 10 },
   ];
   function checkAchievements(user) {
     let changed = false;
@@ -795,6 +869,8 @@ function createContext() {
     logistician: { field: 'helperCount', target: 5 },
     roomGuide: { field: 'roomRatesGiven', target: 3 },
     collector: { field: 'favoriteCount', target: 3 },
+    earlyBird: { field: 'earlyCount', target: 3 },
+    attendanceKing: { field: 'attendanceCount', target: 10 },
   };
   function achievementProgress(user, def) {
     const t = ACH_TARGETS[def.id] || { field: 'totalVisits', target: 1 };
@@ -826,10 +902,11 @@ function createContext() {
     const resolvedRepairs = [...space.repairs.values()].filter((r) => r.status === 'resolved' && r.handledAt && r.handledAt >= today0 && r.handledAt < todayEnd);
     const resolvedMaterials = [...space.materialRequests.values()].filter((r) => r.status === 'fulfilled' && r.handledAt && r.handledAt >= today0 && r.handledAt < todayEnd);
     const pendingVisitors = [...space.visitors.values()].filter((v) => v.status === 'pending' || v.status === 'arrived');
+    const todayAttendance = attendanceStats(space, now);
     const todayMeetingMinutes = todayMeetings.reduce((s, r) => s + Math.max(0, Math.round((Math.min(r.endAt, todayEnd) - r.startAt) / 60000)), 0);
     const todayBorrowMinutes = [...space.borrows.values()].filter((b) => b.returnedAt && b.returnedAt >= today0 && b.returnedAt < todayEnd).reduce((s, b) => s + Math.max(0, Math.round((b.returnedAt - b.borrowedAt) / 60000)), 0);
     const mvp = leaderboardPublic(space).rankings.find((r) => r.mvp) || null;
-    return { todayMeetingCount: todayMeetings.length, todayMeetings: todayMeetings.slice(0, 5), todayMeetingMinutes, todayBorrowMinutes, overdueCount: overdue.length, myBorrows: myBorrows.length, pendingMaterialsCount: pendingMaterials.length, openRepairsCount: openRepairs.length, resolvedRepairsCount: resolvedRepairs.length, resolvedMaterialsCount: resolvedMaterials.length, pendingVisitorsCount: pendingVisitors.length, pendingVisitors: pendingVisitors.slice(0, 5).map((v) => ({ visitorName: v.visitorName, hostName: v.hostName, status: v.status })), mvp };
+    return { todayMeetingCount: todayMeetings.length, todayMeetings: todayMeetings.slice(0, 5), todayMeetingMinutes, todayBorrowMinutes, overdueCount: overdue.length, myBorrows: myBorrows.length, pendingMaterialsCount: pendingMaterials.length, openRepairsCount: openRepairs.length, resolvedRepairsCount: resolvedRepairs.length, resolvedMaterialsCount: resolvedMaterials.length, pendingVisitorsCount: pendingVisitors.length, pendingVisitors: pendingVisitors.slice(0, 5).map((v) => ({ visitorName: v.visitorName, hostName: v.hostName, status: v.status })), attendanceCheckedIn: todayAttendance.checkedIn, attendanceLate: todayAttendance.late, attendanceCompleteRate: todayAttendance.completeRate, mvp };
   }
 
   // ---------- 我的待办 ----------
@@ -862,7 +939,7 @@ function createContext() {
     const today0 = new Date(); today0.setHours(0, 0, 0, 0);
     const dayStart = today0.getTime() - (n - 1) * 86400000;
     const buckets = [];
-    for (let i = 0; i < n; i++) buckets.push({ date: dayStart + i * 86400000, meetings: 0, borrows: 0, requests: 0, repairs: 0, visitors: 0 });
+    for (let i = 0; i < n; i++) buckets.push({ date: dayStart + i * 86400000, meetings: 0, borrows: 0, requests: 0, repairs: 0, visitors: 0, attends: 0 });
     const idxOf = (ts) => Math.floor((ts - dayStart) / 86400000);
     const bump = (b, k) => { if (b >= 0 && b < n) buckets[b][k]++; };
     for (const r of space.roomReservations.values()) {
@@ -873,7 +950,8 @@ function createContext() {
     for (const m of space.materialRequests.values()) { bump(idxOf(m.createdAt), 'requests'); }
     for (const r of space.repairs.values()) { bump(idxOf(r.createdAt), 'repairs'); }
     for (const v of space.visitors.values()) { bump(idxOf(v.createdAt), 'visitors'); }
-    return buckets.map((b) => ({ date: b.date, meetings: b.meetings, borrows: b.borrows, requests: b.requests, repairs: b.repairs, visitors: b.visitors }));
+    for (const r of space.attendance.values()) { if (r.checkInAt) bump(idxOf(r.checkInAt), 'attends'); }
+    return buckets.map((b) => ({ date: b.date, meetings: b.meetings, borrows: b.borrows, requests: b.requests, repairs: b.repairs, visitors: b.visitors, attends: b.attends }));
   }
 
   // ---------- 空间周报 ----------
@@ -888,6 +966,7 @@ function createContext() {
     const requests = [...space.materialRequests.values()].filter((m) => inWeek(m.createdAt));
     const repairs = [...space.repairs.values()].filter((r) => inWeek(r.createdAt));
     const visitors = [...space.visitors.values()].filter((v) => inWeek(v.createdAt));
+    const attendance = [...space.attendance.values()].filter((r) => r.checkInAt && inWeek(r.checkInAt));
     const resolvedRepairs = [...space.repairs.values()].filter((r) => r.status === 'resolved' && r.handledAt && inWeek(r.handledAt));
     const fulfilledMaterials = [...space.materialRequests.values()].filter((m) => m.status === 'fulfilled' && m.handledAt && inWeek(m.handledAt));
     const lowStock = space.tools.filter((t) => isToolLowStock(t)).map((t) => ({ id: t.id, name: t.name, available: t.available, minAvailable: t.minAvailable || 1 }));
@@ -901,6 +980,7 @@ function createContext() {
       requests: requests.length, fulfilledMaterials: fulfilledMaterials.length,
       repairs: repairs.length, resolvedRepairs: resolvedRepairs.length,
       visitors: visitors.length,
+      attendance: attendance.length,
       openRepairsCount: openRepairs.length,
       pendingMaterialsCount: pendingMaterials.length,
       lowStockTools: lowStock,
@@ -911,7 +991,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -925,9 +1005,9 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, inventoryPublic, inventoryIssuesPublic,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats,
     // 广播
-    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, noticesBroadcast, pushNotice, visitorsBroadcast,
+    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, noticesBroadcast, pushNotice, visitorsBroadcast,
     // 坑位辅助
     activeStallCount, checkAchievements, notifyUrge, ACHIEVEMENT_DEFS,
     achievementProgress, achievementDefsPublic,

@@ -18,7 +18,7 @@ const S = {
   lastSpace: localStorage.getItem('os_space')||'',
   ws: null, me:null, space:null, module:'rooms',
   pendingLogin:null,
-  DB:{ rooms:[], reservations:[], waitlist:[], waitlistTotal:0, tools:[], requests:[], materialTemplates:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[], inventory:{items:[],issues:[]} },
+  DB:{ rooms:[], reservations:[], waitlist:[], waitlistTotal:0, tools:[], requests:[], materialTemplates:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[], inventory:{items:[],issues:[]}, attendance:{records:[],stats:{},config:{workStart:'09:00',workEnd:'18:00',lateMinutes:15}} },
   visitorTotal:0, visitorOffset:0,
   borrowTotal:0, borrowOffset:0,
   roomStats:null,
@@ -27,7 +27,7 @@ const S = {
   weeklyReport:null,
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['stalls','坑位看板','🚻'],['attend','考勤打卡','🕒'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -57,6 +57,7 @@ function dispatch(m){
     case 'rooms': S.DB.rooms=m.rooms; S.DB.reservations=m.reservations; S.DB.revTotal=m.reservationTotal||0; S.DB.revOffset=S.DB.reservations.length; S.DB.waitlist=m.waitlist||[]; S.DB.waitlistTotal=m.waitlistTotal||0; break;
     case 'tools': S.DB.tools=m.tools; S.DB.toolWaitlist=m.waitlist||[]; break;
     case 'inventory': S.DB.inventory={ items:m.items||[], issues:m.issues||[] }; break;
+    case 'attendance': S.DB.attendance={ records:m.records||[], stats:m.stats||{}, config:m.config||{workStart:'09:00',workEnd:'18:00',lateMinutes:15} }; break;
     case 'materials': S.DB.requests=m.requests; S.DB.materialTemplates=m.templates||[]; S.DB.matTotal=m.total||0; S.DB.matOffset=S.DB.requests.length; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; break;
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
@@ -79,6 +80,8 @@ function dispatch(m){
     case 'overdueReminder': toast('⏰ 你借的设备已逾期，请尽快归还','urge'); break;
     case 'toolLowStock': toast('⚠️ 设备库存告急：'+(m.toolName||'')+' 可用 '+m.available+'（阈值 '+m.minAvailable+'）','warn'); render(); break;
     case 'inventoryLowStock': toast('⚠️ 物资库存告急：'+(m.itemName||'')+' 可用 '+m.available+'（阈值 '+m.minAvailable+'）','warn'); render(); break;
+    case 'attendanceCheckedIn': toast(m.isLate?'⏰ 上班打卡成功（已迟到）':'✔ 上班打卡成功', m.isLate?'warn':'success'); render(); break;
+    case 'attendanceCheckedOut': toast('✔ 下班打卡成功，今日工作 '+Math.round((m.workedMinutes||0)/60)+'h'+((m.workedMinutes||0)%60?(m.workedMinutes%60)+'m':''),'success'); render(); break;
     case 'borrowDueSoon': toast('🔔 你借的设备即将到期，请按时归还','warn'); render(); break;
     case 'roomReminder': { const rm=(S.DB.rooms||[]).find(r=>r.id===m.roomId); toast('🔔 '+(rm?rm.name:'会议室')+' 即将开始：'+fmtTime(m.startAt),'success'); break; }
     case 'materialAssigned': toast('📌 物资申领已指派给你：'+(m.name||''),'info'); render(); break;
@@ -116,10 +119,10 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','roomStats','users','leaderboard','achievements','myReminders','spaceTrend','notices','digest'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','roomStats','users','leaderboard','achievements','myReminders','spaceTrend','notices','digest'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
@@ -214,7 +217,7 @@ async function renderGate(){
   const g=$('#gate'); g.style.display='block'; g.style.cssText='';
   const spaces = await http('GET','/api/spaces');
   g.innerHTML = `<div class="gate">
-    <div class="head"><h2>🏢 OfficeSpace · 办公空间管理</h2><div class="hint">办公室 / 楼层 / 组织共用的空间管理看板：会议室、工具借用、物资申领、报修、坑位看板</div></div>
+    <div class="head"><h2>🏢 OfficeSpace · 办公空间管理</h2><div class="hint">办公室 / 楼层 / 组织共用的空间管理看板：会议室、工具借用、物资申领、报修、访客登记、考勤打卡、坑位看板</div></div>
     <div class="tabs"><button class="active" id="tab-space" onclick="gateTab('space')">选择空间</button><button id="tab-acct" onclick="gateTab('acct')" style="display:none">账号</button></div>
     <div id="gate-space">
       <div class="form">
@@ -303,6 +306,7 @@ function renderDash(){
     ['累计会议时长', fmtMin(myMeetingMin), '⏱️'],
     ['访客登记', S.visitorTotal||0, '🚶'],
     ['坑位占用', occupied+'/'+st.length, '🚻'],
+    ['今日打卡', ((S.DB.attendance&&S.DB.attendance.stats&&S.DB.attendance.stats.checkedIn)||0), '🕒'],
   ];
   $('#main').innerHTML = `<div class="topbar"><div><h1>概览 <span class="view-tag">${esc(S.space?S.space.name:'')}</span></h1><div class="sub">空间内的公共资源使用概览</div></div></div>
     ${mvp?`<div class="row" style="border-color:var(--yellow)"><span><span class="who">👑 本周之星</span> <b>${esc(mvp.username)}</b> · 本周活跃 ${mvp.weekly} 次</span><span class="badge ok">MVP</span></div>`:''}
@@ -316,6 +320,7 @@ function renderDash(){
       ${dig.pendingMaterialsCount?`<div class="row"><span>待处理申领 ${dig.pendingMaterialsCount}</span></div>`:''}
       ${dig.openRepairsCount?`<div class="row"><span>未办结报修 ${dig.openRepairsCount}</span></div>`:''}
       ${dig.pendingVisitorsCount?`<div class="row"><span>🚶 待接待访客 ${dig.pendingVisitorsCount}${dig.pendingVisitors&&dig.pendingVisitors.length?`（${dig.pendingVisitors.map(v=>esc(v.visitorName)).join('、')}）`:''}</span></div>`:''}
+      ${dig.attendanceCheckedIn?`<div class="row"><span>🕒 今日打卡 ${dig.attendanceCheckedIn} 人${dig.attendanceLate?`（迟到 ${dig.attendanceLate} 人）`:''}</span></div>`:''}
       ${dig.todayBorrowMinutes?`<div class="row"><span>📅 今日归还借用累计 ${Math.round(dig.todayBorrowMinutes/60)} 小时</span></div>`:''}
     </div>`:''}
     <h3 style="margin:22px 0 10px">🟢 在线状态</h3>
@@ -762,6 +767,48 @@ function renderStalls(){
     ${S.admin?`<button class="btn" onclick="openStallConfig()">⚙️ 配置坑位</button>`:''}</div>
     <div class="grid">${d.stalls.map(stallCard).join('')}</div>`;
 }
+/* ============ 考勤打卡 ============ */
+function myAttendanceRecord(){ const me=S.me?S.me.account:''; return (S.DB.attendance&&S.DB.attendance.records||[]).find(r=>r.account===me)||null; }
+function attendBadge(st){ return st==='checked_out'?'<span class="badge ok">已下班</span>':'<span class="badge warn">上班中</span>'; }
+function renderAttendance(){
+  const d=S.DB.attendance||{records:[],stats:{},config:{}};
+  const st=d.stats||{}, cfg=d.config||{};
+  const me=S.me.account;
+  const mine=myAttendanceRecord();
+  const checkedIn = mine ? (mine.status==='checked_out'?'已下班':'上班中') : '未打卡';
+  $('#main').innerHTML = `<div class="topbar"><div><h1>考勤打卡</h1><div class="sub">上班/下班打卡 · 规则 ${esc(cfg.workStart||'09:00')}-${esc(cfg.workEnd||'18:00')} · 迟到宽限 ${cfg.lateMinutes||15} 分钟</div></div>
+    ${S.admin?`<button class="btn" onclick="openAttendConfig()">⚙️ 考勤规则</button>`:''}</div>
+    <div class="cards">
+      <div class="card"><h3>🕒 今日打卡</h3><div style="font-size:30px;font-weight:800">${st.checkedIn||0}</div><div class="meta">人已打卡上班</div></div>
+      <div class="card"><h3>⏰ 今日迟到</h3><div style="font-size:30px;font-weight:800">${st.late||0}</div><div class="meta">人迟到</div></div>
+      <div class="card"><h3>🌙 已下班</h3><div style="font-size:30px;font-weight:800">${st.checkedOut||0}</div><div class="meta">人已打下班卡</div></div>
+      <div class="card"><h3>✅ 下班完成率</h3><div style="font-size:30px;font-weight:800">${st.completeRate||0}%</div><div class="meta">打卡 ${st.checkedIn||0} · 迟到率 ${st.lateRate||0}%</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">🔖 我的打卡</h3>
+    <div class="list">${mine?`<div class="row"><span><span class="who">${esc(mine.name||me)}</span> ${attendBadge(mine.status)}
+        <div class="when">上班 ${mine.checkInAt?fmtTime(mine.checkInAt):'--'}${mine.isLate?' <span class="badge bad">迟到</span>':''}
+        ${mine.checkOutAt?' · 下班 '+fmtTime(mine.checkOutAt)+'（工作 '+Math.round((mine.workedMinutes||0)/60)+'h'+((mine.workedMinutes||0)%60?(mine.workedMinutes%60)+'m':'')+'）':''}</div>
+      </span><span class="fs">${mine.checkOutAt?'<span class="hint">今日已完成打卡</span>':`<button class="btn pri sm" onclick="attendCheckOut()">打下班卡</button>`}</span></div>`
+      :`<div class="row"><span><span class="who">${esc(S.me.nickname||me)}</span> <span class="badge grey">未打卡</span></span>
+        <span class="fs"><button class="btn pri sm" onclick="attendCheckIn()">打上班卡</button></span></div>`}</div>
+    <h3 style="margin:22px 0 10px">📋 今日记录</h3>
+    <div class="list">${(d.records||[]).length?d.records.map(r=>`<div class="row"><span><span class="who">${esc(r.name||r.account)}</span> ${attendBadge(r.status)}
+        <div class="when">上班 ${r.checkInAt?fmtTime(r.checkInAt):'--'}${r.isLate?' <span class="badge bad">迟到</span>':''}
+        ${r.checkOutAt?' · 下班 '+fmtTime(r.checkOutAt)+'（工作 '+Math.round((r.workedMinutes||0)/60)+'h'+((r.workedMinutes||0)%60?(r.workedMinutes%60)+'m':'')+'）':''}</div>
+      </span></div>`).join(''):'<div class="empty">今日还没有人打卡</div>'}</div>`;
+}
+function attendCheckIn(){ wsSend({type:'attendCheckIn'}); }
+function attendCheckOut(){ wsSend({type:'attendCheckOut'}); }
+function openAttendConfig(){
+  const c=S.DB.attendance&&S.DB.attendance.config||{};
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>考勤规则</h2><div class="form">
+    <div class="fld"><label>上班时间（HH:MM）</label><input id="acStart" value="${esc(c.workStart||'09:00')}"></div>
+    <div class="fld"><label>下班时间（HH:MM）</label><input id="acEnd" value="${esc(c.workEnd||'18:00')}"></div>
+    <div class="fld"><label>迟到宽限（分钟）</label><input id="acLate" type="number" min="0" max="600" value="${c.lateMinutes||15}"></div>
+    <button class="btn pri" onclick="submitAttendConfig()">保存规则</button></div>`);
+}
+function submitAttendConfig(){ wsSend({type:'attendConfig',workStart:$('#acStart').value,workEnd:$('#acEnd').value,lateMinutes:parseInt($('#acLate').value,10)}); closeModal(); }
+
 function renderAchievements(){
   const list = S.DB.achievements || [];
   $('#main').innerHTML = `<div class="topbar"><div><h1>成就墙</h1><div class="sub">办公冒险进度 · 达成条件即可解锁专属徽章</div></div></div>
@@ -793,8 +840,8 @@ function renderReminders(){
 }
 function renderTrend(){
   const list = S.DB.trend || [];
-  const metrics = [['meetings','🏢 会议'],['borrows','🔧 借用'],['requests','📦 申领'],['repairs','🛠️ 报修'],['visitors','🚶 访客']];
-  const maxVal = Math.max(1, ...list.map((b) => Math.max(b.meetings, b.borrows, b.requests, b.repairs, b.visitors)));
+  const metrics = [['meetings','🏢 会议'],['borrows','🔧 借用'],['requests','📦 申领'],['repairs','🛠️ 报修'],['visitors','🚶 访客'],['attends','🕒 打卡']];
+  const maxVal = Math.max(1, ...list.map((b) => Math.max(b.meetings, b.borrows, b.requests, b.repairs, b.visitors, b.attends)));
   $('#main').innerHTML = `<div class="topbar"><div><h1>空间趋势</h1><div class="sub">近 ${list.length} 天各模块活动量</div></div>
     <div class="btn grp"><button class="btn" onclick="loadTrend(7)">近7天</button><button class="btn pri" onclick="loadTrend(14)">近14天</button><button class="btn" onclick="loadTrend(30)">近30天</button></div></div>
     ${list.length?metrics.map(([k,label])=>`

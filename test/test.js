@@ -955,7 +955,7 @@ async function runTests() {
     await sendMsg(wA, { type: 'getAchievements' });
     const ach = last(wA, 'achievements');
     assert(ach && Array.isArray(ach.achievements), '成就墙返回 achievements 数组');
-    assert(ach.achievements.length === 13, '成就墙含 13 个成就');
+    assert(ach.achievements.length === 15, '成就墙含 15 个成就');
     assert(ach.achievements.every((a) => a.id && a.name && a.desc && a.icon), '每项成就含 id/name/desc/icon');
     assert(ach.achievements.every((a) => a.current != null && a.target != null && a.pct != null && typeof a.unlocked === 'boolean'), '每项成就含进度字段');
     assert(ach.achievements.find((a) => a.id === 'punctual').target === 3, '守时达人目标值为 3');
@@ -1218,6 +1218,40 @@ async function runTests() {
     await sendMsg(wA, { type: 'inventoryDelete', itemId: item2.id });
     const inv3 = last(wA, 'inventory');
     assert(inv3 && inv3.items && inv3.items.length === 0, '管理员删除物资成功');
+    wA.close(); wB.close();
+  }
+
+  // ========== 测试29: 考勤打卡 ==========
+  console.log('\n📋 测试29: 考勤打卡');
+  {
+    const spA = (await httpJson('POST', '/api/spaces', { name: '考勤办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aA = 'att_' + runKey, bA = 'attm_' + runKey;
+    await reg(aA, 'pw', '考勤管理员'); await reg(bA, 'pw', '考勤成员');
+    const wA = await createWSClient(); await loginTo(wA, spA.id, aA, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spA.id, bA, 'pw');
+    // 管理员配置考勤规则：00:00 上班、宽限 0 分钟，任何打卡都判定迟到
+    await sendMsg(wA, { type: 'attendConfig', workStart: '00:00', workEnd: '18:00', lateMinutes: 0 });
+    const cfg = last(wA, 'attendance');
+    assert(cfg && cfg.config && cfg.config.workStart === '00:00' && cfg.config.lateMinutes === 0, '管理员配置考勤规则并广播');
+    // 成员上班打卡
+    await sendMsg(wB, { type: 'attendCheckIn' });
+    const attIn = last(wB, 'attendance');
+    assert(attIn && attIn.records.length === 1 && attIn.records[0].status === 'checked_in', '成员上班打卡成功');
+    assert(attIn && attIn.records[0].isLate === true, '超过上班时间判定迟到');
+    assert(attIn && attIn.stats.checkedIn === 1 && attIn.stats.late === 1, '考勤统计反映迟到人数');
+    // 重复打卡被拒
+    await sendMsg(wB, { type: 'attendCheckIn' });
+    const errRe = mk(wB, 'error');
+    assert(errRe.length > 0 && errRe[errRe.length - 1].message.includes('已经打过上班卡'), '重复上班打卡被拒');
+    // 成员下班打卡
+    await sendMsg(wB, { type: 'attendCheckOut' });
+    const attOut = last(wB, 'attendance');
+    assert(attOut && attOut.records[0].status === 'checked_out' && attOut.records[0].checkOutAt, '成员下班打卡成功');
+    assert(attOut && attOut.stats.checkedOut === 1, '考勤统计已下班人数');
+    // 成员不能配置规则
+    await sendMsg(wB, { type: 'attendConfig', workStart: '08:00', workEnd: '17:00', lateMinutes: 30 });
+    const errCfg = mk(wB, 'error');
+    assert(errCfg.length > 0 && errCfg[errCfg.length - 1].message.includes('仅管理员'), '成员配置考勤规则被拒');
     wA.close(); wB.close();
   }
 

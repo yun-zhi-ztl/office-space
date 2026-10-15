@@ -79,7 +79,7 @@ const p3 = api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id =
 assert(p3.unlocked === true, '累计 10 次解锁蹲坑之王');
 assertEq(p3.pct, 100, '蹲坑之王达成后进度 100');
 const pub = api.achievementDefsPublic(user);
-assertEq(pub.length, 13, '成就公开列表含 13 项');
+assertEq(pub.length, 15, '成就公开列表含 15 项');
 assert(pub.every((a) => a.id && a.name && a.desc && a.icon), '公开成就含 id/name/desc/icon');
 user.stats.borrowCount = 3;
 assert(api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'borrower')).unlocked === true, '借用 3 次解锁借阅达人');
@@ -615,6 +615,57 @@ assertEq(invPub.find((i) => i.id === 'inv2').lowStock, false, '库存充足物�
 const invIssues = api.inventoryIssuesPublic(spInv, new Map());
 assertEq(invIssues.length, 1, '库存领用记录仅返回在领状态');
 assertEq(invIssues[0].itemName, '5号电池', '库存领用记录关联物资名称');
+
+// ---------- 考勤打卡 ----------
+console.log('\n📋 39. 考勤打卡');
+const todayD = new Date('2026-10-16T09:05:00+08:00');
+assertEq(api.todayKey(todayD.getTime()), '2026-10-16', 'todayKey 返回 YYYY-MM-DD');
+const cfgA = api.newAttendanceConfig();
+assertEq(cfgA.workStart, '09:00', '考勤默认上班时间 09:00');
+assertEq(cfgA.workEnd, '18:00', '考勤默认下班时间 18:00');
+assertEq(cfgA.lateMinutes, 15, '考勤默认迟到宽限 15 分钟');
+assertEq(api.parseTime('09:05'), 545, 'parseTime 解析 HH:MM 为分钟');
+assertEq(api.parseTime('bad'), null, 'parseTime 非法格式返回 null');
+// 09:00 上班、宽限 15 分钟：09:15 已迟到（>= 宽限）
+const nine = new Date('2026-10-16T09:00:00+08:00').getTime();
+const at9 = new Date('2026-10-16T09:00:00+08:00').getTime();
+const at915 = new Date('2026-10-16T09:15:00+08:00').getTime();
+const at916 = new Date('2026-10-16T09:16:00+08:00').getTime();
+assertEq(api.isLateAt(at9, cfgA), false, '09:00 打卡不迟到');
+assertEq(api.isLateAt(at915, cfgA), true, '09:15 打卡已迟到（宽限 15 分钟）');
+assertEq(api.isLateAt(at916, cfgA), true, '09:16 打卡已迟到');
+const spA = api.createSpace('s29', '考勤空间', 1, 0);
+const nowA = new Date('2026-10-16T12:00:00+08:00').getTime();
+spA.attendance.set('alice::2026-10-16', { id: 'a1', account: 'alice', name: '甲', date: '2026-10-16', checkInAt: nine, checkOutAt: nine + 3 * 60 * 60000, isLate: false, status: 'checked_out', workedMinutes: 180 });
+spA.attendance.set('bob::2026-10-16', { id: 'a2', account: 'bob', name: '乙', date: '2026-10-16', checkInAt: at915, checkOutAt: null, isLate: true, status: 'checked_in', workedMinutes: 0 });
+spA.attendance.set('carol::2026-10-15', { id: 'a3', account: 'carol', name: '丙', date: '2026-10-15', checkInAt: nine, checkOutAt: null, isLate: false, status: 'checked_in', workedMinutes: 0 });
+const ap = api.attendancePublic(spA, nowA);
+assertEq(ap.length, 2, 'attendancePublic 仅返回今日记录');
+assertEq(ap[0].account, 'alice', 'attendancePublic 按打卡时间升序');
+assertEq(ap[1].isLate, true, 'attendancePublic 保留迟到标记');
+const as = api.attendanceStats(spA, nowA);
+assertEq(as.checkedIn, 2, '考勤统计今日打卡人数');
+assertEq(as.late, 1, '考勤统计迟到人数');
+assertEq(as.checkedOut, 1, '考勤统计已下班人数');
+assertEq(as.completeRate, 50, '考勤统计下班完成率 50%');
+assertEq(as.earliestCheckIn, nine, '考勤统计最早打卡时间');
+assertEq(as.latestCheckOut, nine + 3 * 60 * 60000, '考勤统计最晚下班时间');
+// 空空间不崩溃
+assertEq(api.attendanceStats(api.createSpace('s30', '空考勤空间', 1, 0), nowA).checkedIn, 0, '无记录时考勤统计为 0');
+
+// ---------- 成就扩展（早鸟/打卡达人） ----------
+console.log('\n📋 40. 成就扩展（早到达人 / 打卡达人）');
+const achUser2 = { stats: api.newStats(), achievements: [] };
+achUser2.stats.earlyCount = 3;
+api.checkAchievements(achUser2);
+assert(achUser2.achievements.includes('earlyBird'), '9 点前打卡 3 天解锁早到达人');
+achUser2.stats.attendanceCount = 10;
+api.checkAchievements(achUser2);
+assert(achUser2.achievements.includes('attendanceKing'), '累计打卡 10 次解锁打卡达人');
+const achEarly = api.achievementDefsPublic(achUser2).find((a) => a.id === 'earlyBird');
+assertEq(achEarly.target, 3, '早到达人目标值 3');
+const achKing = api.achievementDefsPublic(achUser2).find((a) => a.id === 'attendanceKing');
+assertEq(achKing.target, 10, '打卡达人目标值 10');
 
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);

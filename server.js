@@ -22,6 +22,7 @@ const visitorsModule = require('./src/modules/visitors');
 const profileModule = require('./src/modules/profile');
 const stallsModule = require('./src/modules/stalls');
 const extrasModule = require('./src/modules/extras');
+const attendanceModule = require('./src/modules/attendance');
 
 // ---------- 上下文 ----------
 const api = createContext();
@@ -58,6 +59,7 @@ const visitors = visitorsModule(api);
 const profile = profileModule(api);
 const stalls = stallsModule(api);
 const extras = extrasModule(api);
+const attendance = attendanceModule(api);
 
 // ---------- 分页加载 ----------
 function handleFetchPage(ws, user, space, msg) {
@@ -120,6 +122,8 @@ wss.on('connection', (ws) => {
         profile.handleProfile(ws, user, space, msg); break;
       case 'reserve': case 'cancel': case 'grab': case 'startUse': case 'finish': case 'release': case 'urge': case 'rate': case 'toggleEmergency': case 'stallConfig':
         stalls.handleStalls(ws, user, space, msg); break;
+      case 'attendConfig': case 'attendCheckIn': case 'attendCheckOut':
+        attendance.handleAttendance(ws, user, space, msg); break;
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
       case 'announce': extras.announce(ws, user, space, msg); break;
       case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;
