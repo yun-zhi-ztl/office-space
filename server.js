@@ -102,7 +102,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }
 
     switch (msg.type) {
-      case 'roomCreate': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'reservationCancelSeries': case 'reservationReschedule': case 'roomWaitlist': case 'roomWaitlistCancel': case 'roomStart': case 'roomEnd':
+      case 'roomCreate': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'reservationCancelSeries': case 'reservationReschedule': case 'roomWaitlist': case 'roomWaitlistCancel': case 'roomStart': case 'roomEnd': case 'roomRate': case 'roomFavorite':
         rooms.handleRooms(ws, user, space, msg); break;
       case 'toolCreate': case 'toolDelete': case 'toolAdjust': case 'toolBorrow': case 'toolReturn': case 'toolExtend': case 'toolWaitlist': case 'remindOverdue':
         tools.handleTools(ws, user, space, msg); break;
@@ -308,6 +308,17 @@ setInterval(() => {
         for (const acc of sp.admins) api.sendToAccount(acc, { type: 'materialSla', requestId: m.id, name: m.name, qty: m.qty });
       }
       materials.materialsBroadcast(sp);
+    }
+    // 高优先级报修升级：超过阈值仍未解决时升级提醒一次
+    const repairEscalations = api.dueRepairEscalations(sp, now);
+    if (repairEscalations.length) {
+      for (const r of repairEscalations) {
+        r.escalatedAt = now;
+        api.saveEntity(sp.id, 'repair', r.id, r);
+        api.sendToAccount(r.reporterAccount, { type: 'repairEscalated', repairId: r.id, category: r.category, location: r.location });
+        for (const acc of sp.admins) api.sendToAccount(acc, { type: 'repairEscalated', repairId: r.id, category: r.category, location: r.location });
+      }
+      repairs.repairsBroadcast(sp);
     }
   }
 }, 15000);

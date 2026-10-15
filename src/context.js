@@ -24,6 +24,7 @@ function createContext() {
   const VISIT_REMIND_WINDOW_MS = 15 * 60000;
   const REPAIR_SLA_MS = 4 * 3600 * 1000;
   const MATERIAL_SLA_MS = 2 * 24 * 3600 * 1000;
+  const REPAIR_ESCALATE_MS = 8 * 3600 * 1000;
   const VISIT_TOKEN_TTL_MS = 24 * 3600 * 1000;
 
   // ---------- 内存状态 ----------
@@ -308,7 +309,7 @@ function createContext() {
   // ---------- 空间 ----------
   function weekKey(ts) { const d = new Date(ts || Date.now()); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
   function newWeekly() { return { key: weekKey(), visits: 0, borrows: 0, requests: 0, repairs: 0, meetings: 0 }; }
-  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, meetingActualDuration: 0, helperCount: 0, weekly: newWeekly() }; }
+  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, meetingActualDuration: 0, helperCount: 0, favoriteRooms: [], weekly: newWeekly() }; }
   function recordWeekly(user, field) { if (!user.stats.weekly || user.stats.weekly.key !== weekKey()) user.stats.weekly = newWeekly(); user.stats.weekly[field] = (user.stats.weekly[field] || 0) + 1; }
   function weeklyScore(stats) { const w = stats.weekly; if (!w || w.key !== weekKey()) return 0; return (w.visits || 0) + (w.borrows || 0) + (w.requests || 0) + (w.repairs || 0) + (w.meetings || 0); }
   function borrowOverdue(b, now) {
@@ -372,6 +373,17 @@ function createContext() {
       if (!m || m.status !== 'pending') return false;
       if (m.slaRemindedAt) return false;
       return nowMs >= (m.createdAt || 0) + MATERIAL_SLA_MS;
+    });
+  }
+  // 高优先级报修超过升级阈值仍未解决（reported/in_progress），升级一次提醒上报人与所有管理员
+  function dueRepairEscalations(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    return [...space.repairs.values()].filter((r) => {
+      if (!r) return false;
+      if (r.status !== 'reported' && r.status !== 'in_progress') return false;
+      if (r.priority !== 'high') return false;
+      if (r.escalatedAt) return false;
+      return nowMs >= (r.createdAt || 0) + REPAIR_ESCALATE_MS;
     });
   }
   // 报修重复检测：同一空间下相同类型 + 相同位置、且仍未解决/取消的报修视为重复
@@ -445,7 +457,8 @@ function createContext() {
         if (!x.actualStartAt || !x.actualEndAt) return s;
         return s + Math.max(0, Math.round((x.actualEndAt - x.actualStartAt) / 60000));
       }, 0);
-      return { roomId: r.id, name: r.name, capacity: r.capacity, todayCount: today.length, todayMinutes, actualMinutes, upcomingCount: upcoming.length };
+      const rsum = roomRatingSummary(space, r.id);
+      return { roomId: r.id, name: r.name, capacity: r.capacity, todayCount: today.length, todayMinutes, actualMinutes, upcomingCount: upcoming.length, ratingAvg: rsum.avg, ratingCount: rsum.count };
     });
     const totalToday = rooms.reduce((s, r) => s + r.todayMinutes, 0);
     const totalActual = rooms.reduce((s, r) => s + r.actualMinutes, 0);
@@ -454,10 +467,24 @@ function createContext() {
   }
 
   // ---------- 序列化 ----------
-  function roomPublic(r) { return { id: r.id, name: r.name, capacity: r.capacity, location: r.location, description: r.description }; }
+  // 会议室评分：扫描该会议室已完成预约上的评分，聚合平均分、评分数与最近评分
+  function roomRatingSummary(space, roomId) {
+    const list = [];
+    for (const r of space.roomReservations.values()) {
+      if (r.roomId !== roomId) continue;
+      if (r.status !== 'completed') continue;
+      if (!r.rating) continue;
+      list.push({ account: r.ownerAccount, ownerName: r.ownerName, score: r.rating, comment: r.ratingComment || '', createdAt: r.ratedAt || 0 });
+    }
+    const count = list.length;
+    const sum = list.reduce((s, x) => s + (x.score || 0), 0);
+    const avg = count ? +(sum / count).toFixed(1) : 0;
+    return { avg, count, ratings: list.slice(-8).reverse() };
+  }
+  function roomPublic(space, r) { return { id: r.id, name: r.name, capacity: r.capacity, location: r.location, description: r.description, rating: roomRatingSummary(space, r.id) }; }
   function reservationPublic(res, info) {
     const who = info.get(res.ownerAccount);
-    return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status, repeat: res.repeat || null, seriesId: res.seriesId || null, remindAt: res.remindAt || null, participants: res.participants || null, actualStartAt: res.actualStartAt || null, actualEndAt: res.actualEndAt || null };
+    return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status, repeat: res.repeat || null, seriesId: res.seriesId || null, remindAt: res.remindAt || null, participants: res.participants || null, actualStartAt: res.actualStartAt || null, actualEndAt: res.actualEndAt || null, rating: res.rating || null, ratedAt: res.ratedAt || null, ratingComment: res.ratingComment || '' };
   }
   function roomWaitlistPublic(space, info) {
     if (!info) info = spaceUserInfo(space.id);
@@ -525,6 +552,7 @@ function createContext() {
       handledAt: r.handledAt || null,
       handleDurationMinutes: r.handledAt ? Math.max(0, Math.round((r.handledAt - r.createdAt) / 60000)) : null,
        slaReminded: !!r.slaRemindedAt,
+       escalated: !!r.escalatedAt,
     })).sort((a, b) => (b.createdAt - a.createdAt));
   }
   function borrowsPublic(sp, info) {
@@ -658,7 +686,7 @@ function createContext() {
     const materials = materialsPublic(sp, info);
     const repairs = repairsPublic(sp, info);
     const visitors = visitorsPublic(sp, info);
-    broadcast(sp.id, 'rooms', { rooms: sp.rooms.map(roomPublic), reservations: reservations.slice(0, LIST_PAGE), reservationTotal: reservations.length, waitlist: waitlist.slice(0, LIST_PAGE), waitlistTotal: waitlist.length });
+    broadcast(sp.id, 'rooms', { rooms: sp.rooms.map((r) => roomPublic(sp, r)), reservations: reservations.slice(0, LIST_PAGE), reservationTotal: reservations.length, waitlist: waitlist.slice(0, LIST_PAGE), waitlistTotal: waitlist.length });
     broadcast(sp.id, 'tools', { tools: toolsPublic(sp, info) });
     broadcast(sp.id, 'materials', { requests: materials.slice(0, LIST_PAGE), total: materials.length });
     broadcast(sp.id, 'repairs', { repairs: repairs.slice(0, LIST_PAGE), total: repairs.length });
@@ -794,7 +822,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -806,9 +834,9 @@ function createContext() {
     // 持久化
     saveSpace, saveAccount, saveProfile, saveEntity, deleteEntity, saveStallRating, saveStatsToSpace,
     // 空间
-    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
+    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats,
     // 广播
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, noticesBroadcast, pushNotice, visitorsBroadcast,
     // 坑位辅助

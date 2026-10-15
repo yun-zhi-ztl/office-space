@@ -34,11 +34,13 @@
 
 ### 会议室（conference rooms）
 - `room`: `{ id, name, capacity, location, description }`
-- `room_reservation`: `{ id, roomId, ownerAccount, title, startAt, endAt, note, status, repeat?, seriesId?, seriesIndex?, participants?, actualStartAt?, actualEndAt? }`
+- `room_reservation`: `{ id, roomId, ownerAccount, title, startAt, endAt, note, status, repeat?, seriesId?, seriesIndex?, participants?, actualStartAt?, actualEndAt?, rating?, ratingComment?, ratedAt? }`
   - 状态：`pending`(已约) / `active`(进行中) / `completed` / `cancelled` / `expired`
   - 约束：同一房间在 `[startAt, endAt)` 内不得与他人预约重叠（冲突检测）。
+  - 评分：会议结束（`completed`）后，预约人或管理员可对会议室评分 1-5 分（可选评价 ≤60 字），同一会议只评一次；会议室平均分与评分数由 `roomRatingSummary` 聚合，随 `rooms` 广播（`room.rating = { avg, count, ratings }`）。
   - 周期预约：`repeat` 为 `daily` / `weekly`（或省略表示单次），`repeatCount` 限制场次（每天 ≤ 90、每周 ≤ 52）；
     创建时按天 / 周展开为多条独立预约，共用 `seriesId`，可整体取消待开始场次。
+  - 收藏：成员可收藏会议室，`profiles.stats.favoriteRooms` 记录收藏房间 id，前端「我的收藏」快捷过滤。
   - 占用率统计：按「今日会议场次 / 今日会议分钟数 / 待开始场次」计算，占用率以工作时段（09:00–21:00）总容量分钟为分母，随 `rooms` 广播以 `roomStats` 类型下发。
   - 实际到场时长：预约开始（手动 `roomStart` 或定时器自动开始）时记录 `actualStartAt`，结束（手动 `roomEnd` 或定时器自动结束）时记录 `actualEndAt`；两者差值即实际到场时长，累计计入 `stats.meetingActualDuration`，`roomStats` 按「今日到场分钟数」展示，序列化时对外暴露 `actualStartAt` / `actualEndAt`。
   - 改期：待开始（`pending`）预约可调整时段（`reservationReschedule`），校验所有权（本人或管理员）、时段合法性（≥5 分钟且开始时间在当前之后）与冲突（排除自身）；成功后更新时段并广播。
@@ -55,6 +57,7 @@
   - 状态：`borrowed` / `returned`
   - 借出时 `available -= qty`，归还时 `available += qty`；`available < qty` 不可借。
   - 默认归还期限为借出后 7 天（`dueAt`），借用人可「续借」延长 1-30 天；`extensions` 记录已续借次数，最多 2 次，逾期由 `dueAt` 判定。
+  - 自定义归还期限：借用时可带 `dueAt`（至少晚于当前时间 30 分钟、最长 90 天），用于特殊设备临时借用。
 - `tool_waitlist`: `{ id, toolId, account, name, qty, status, createdAt, promotedAt?, borrowId? }`
   - 状态：`waiting`（排队中）/ `promoted`（已晋升为借用）。
   - 库存不足（`qty > available`）时可加入排队；归还或调整库存释放库存后，按先来先服务把第一位晋升为真实借用，并向该成员推送 `toolWaitlistPromoted` 通知，同一人对同一设备只保留一条排队。
@@ -68,12 +71,13 @@
   - 管理员可维护常用物资模板；成员提交申领时可选模板自动填充名称、数量、单位与说明。
 
 ### 报修（repairs）
-- `repair`: `{ id, code, reporterAccount, reporterName, category, priority, location, description, status, handlerAccount?, handlerName?, createdAt, updatedAt }`
+- `repair`: `{ id, code, reporterAccount, reporterName, category, priority, location, description, status, handlerAccount?, handlerName?, createdAt, updatedAt, escalatedAt? }`
   - `category`: 厕所 / 灯光 / 空调 / 其它
   - `priority`: `high` / `normal` / `low`（默认 `normal`），上报人或管理员可调整。
   - 上报人或管理员可指派 `handlerAccount`（负责人）。
   - 状态流转：`reported` → `in_progress` → `resolved`；上报人可取消 `reported`。
   - `code`：提交时生成的 `RP-YYYYMMDD-XXXX` 工单号，列表、导出 CSV 与重复报修提示中均可引用。
+  - 升级：高优先级（`high`）报修超过 8 小时仍未解决（`reported` / `in_progress`）时自动升级一次，向上报人与所有管理员发送 `repairEscalated` 提醒，避免关键工单被漏掉。
 
 ### 访客登记（visitors）
 - `visitor`: `{ id, hostAccount, hostName, visitorName, purpose, contact, expectedAt, arrivedAt, leftAt, status, createdAt, code }`
@@ -107,8 +111,10 @@
 | `reservationReschedule` | 改期自己的（或管理员代改）待开始预约 | owner / admin |
 | `reservationCancelSeries` | 取消自己的周期预约全部待开始场次 | owner |
 | `roomWaitlist` / `roomWaitlistCancel` | 时段冲突时加入候补 / 取消自己的候补 | member / owner |
+| `roomRate` | 给已结束的会议给会议室评分（1-5 分 + 可选评价） | owner / admin |
+| `roomFavorite` | 收藏 / 取消收藏会议室 | member |
 | `toolCreate` / `toolDelete` / `toolAdjust` | 增删设备 / 调整库存 | admin |
-| `toolBorrow` / `toolReturn` / `toolExtend` / `toolWaitlist` | 借用 / 归还 / 续借设备 / 库存不足时排队 | member |
+| `toolBorrow` / `toolReturn` / `toolExtend` / `toolWaitlist` | 借用（可带 `dueAt` 自定义归还时间） / 归还 / 续借设备 / 库存不足时排队 | member |
 | `materialRequest` / `materialCancel` | 提交 / 取消申领（提交可带 `templateId` 使用模板） | member / owner |
 | `materialTemplateCreate` / `materialTemplateDelete` | 管理员维护常用物资模板 | admin |
 | `materialAssign` | 指派申领负责人 | member / admin |
@@ -127,7 +133,7 @@
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，
 以及 `rooms`（含 `rooms` / `reservations` / `waitlist` / `waitlistTotal`）、`tools`、`materials`（含 `requests` / `templates`）、`repairs`、`visitors`、`stalls`、`users`、`leaderboard`（含 `account`、`role`、`display`），
-另有 `roomStats`、`spacePaused`、`roomWaitlistPromoted`、`noticeReactionUpdated` 等即时广播；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows`）。
+另有 `roomStats`、`spacePaused`、`roomWaitlistPromoted`、`roomRated`、`roomFavorites`、`repairEscalated` 等即时广播；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows`）。
 
 ## 5. 前端
 
@@ -136,7 +142,8 @@
 会议室预约支持每天 / 每周周期预约（列表按 `seriesId` 聚合展示并整组取消）；
 报修列表展示工单号 `RP-日期-编号` 并可调整高 / 中 / 低优先级；空间暂停时顶部展示暂停横幅并限制对应创建操作；
 物资申领支持管理员维护常用模板、成员选模板快捷提交；公告支持 👍 / 🎉 / 😮 / 🤝 / 🔥 回应并可取消；
-物资 / 报修 / 访客 / 会议室预约 / 借用记录列表支持一键导出 CSV（自动拉取全部分页）。
+物资 / 报修 / 访客 / 会议室预约 / 借用记录列表支持一键导出 CSV（自动拉取全部分页）；
+会议室卡片展示平均评分，成员可收藏会议室并在「我的收藏」中过滤；已结束的会议可一键评分（1-5 星 + 评价）；报修列表展示「已升级」标记。
 
 ## 6. 非目标（本版本暂不实现）
 - 复杂审批流、权限细粒度分级、通知系统、文件上传、消息私聊。
@@ -182,6 +189,12 @@
 - 输入边界：HTTP JSON 解析限制为 1MB，WebSocket 单帧上限 64KB；解析失败返回 400，超大请求体返回 413。
 - 登录限流：同一账号 60 秒内失败 5 次后短暂拒绝，成功登录清除失败计数。
 
+### SQL 查询审计（本版本）
+- 权威运行状态保存在进程内存，SQL 只做「持久化透写」与「启动装载」，没有按单条业务查询分页的需求；业务列表分页（`fetchPage`）在内存完成 offset/limit。
+- 写路径已按主键合并、去抖批量 upsert（默认 500ms），单批 500/1000 行分块，避免单条 SQL 参数数超过 PostgreSQL 的 65535 上限。
+- 启动装载一次性 `SELECT` 全量 `entities` / `spaces` / `accounts` / `profiles` / `stall_ratings`，对办公室/楼层规模可接受；若未来实体规模增长，可改为按空间/时间分页装载。
+- 并发一致性：工具库存扣减、坑位 `activeStallCount`、会议室时段冲突检测均在单线程事件循环内完成「检查-执行」，无竞态丢更新；写失败静默降级为内存，不影响可用性。
+
 ### 运维
 - 优雅停机：SIGTERM/SIGINT 触发 flush 待写、等待在途写、关闭连接与连接池。
 
@@ -217,6 +230,10 @@
 | 访客重复登记 | 同一接待人对同一访客当天已有待到访/已到访记录时拒绝重复登记，避免同一访客重复占用接待资源 | `visitorCreate`(返回 `duplicateVisitor` 错误) |
 | 工具排队 | 库存不足时加入排队，归还或调整库存释放库存后按先来先服务自动晋升为借用并通知排队人 | `toolWaitlist` / `toolWaitlistPromoted` |
 | 借用归还通知 | 归还设备后自动向空间公告一条「已归还设备 ×数量」通知，资产归还留痕、全员可见 | 复用 `pushNotice`（服务端下发 `notices`） |
+| 会议室评分 | 会议结束后给会议室打 1-5 分并留一句评价，会议室聚合平均分与评分数 | `roomRate` / `rooms`(含 `room.rating`) |
+| 收藏会议室 | 成员收藏常用会议室，前端「我的收藏」快捷过滤，收藏随个人资料持久化 | `roomFavorite` / `roomFavorites` |
+| 报修升级 | 高优先级报修超过 8 小时未解决自动升级一次，提醒上报人与管理员，避免漏单 | `repairEscalated` |
+| 自定义归还期限 | 借用设备时可指定特殊归还时间（≥30 分钟、≤90 天），默认 7 天不变 | `toolBorrow`(dueAt) |
 | 访客登记 | 登记访客姓名、事由、预计到访，负责人/管理员推进到访与离开，实时同步 | `visitorCreate` / `visitorArrived` / `visitorLeft` / `visitorCancel` / `visitorRemove` |
 | 访客签到码 | 登记访客时自动生成 6 位签到码，访客到访时报码由空间成员核销为已到访，并向接待人推送通知 | `visitorCheckin` / `visitorCheckinNotification` |
 | 访客到访/离开通知 | 管理员或接待人推进访客到访 / 离开时，向登记接待人单发通知，闭环反馈 | 服务端下发 `visitorArrived` / `visitorLeft` |
@@ -237,8 +254,8 @@
 | 会议室实际到场时长 | 开始/结束时记录实际到场起止时间，累计个人到场时长并纳入会议室统计 | `roomStart` / `roomEnd`（复用 `stats` + `roomStats` + `leaderboard`） |
 
 ### 客户端→服务端新增消息
-`setStatus`、`announce`、`spaceRename`、`spacePause`、`spaceAdminSet`、`spaceKick`、`suggestRoom`、`remindReturn`、`toolExtend`、`roomBook`(周期 `repeat`/`repeatCount`)、`reservationCancelSeries`、`reservationReschedule`、`roomWaitlist`、`roomWaitlistCancel`、`materialAssign`、`repairAssign`、`repairUpdate`(优先级)、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`visitorCheckin`、`profileUpdate`、`passwordChange`、`toggleEmergency`、`fetchPage`(`borrows` 等分页模块)；服务端相应广播/单发
-`users`(含 `status`、`emergencyMode`、`role`) 、`notices`、`suggestRooms`、`borrowReminder`、`roomReminder`、`borrowDueSoon`、`materialAssigned`、`materialFulfilled`、`materialSla`、`repairAssigned`、`repairInProgress`、`repairResolved`、`repairSla`、`adminSet`、`spaceKicked`、`digest`、`visitors`、`spaceRenamed`、`spacePaused`、`roomWaitlistPromoted`、`reservationRescheduled`、`rooms`(含 `waitlist`)、`visitorCheckinNotification`、`visitorArrived`、`visitorLeft`、`visitorReminder`。
+`setStatus`、`announce`、`spaceRename`、`spacePause`、`spaceAdminSet`、`spaceKick`、`suggestRoom`、`remindReturn`、`toolExtend`、`toolBorrow`(`dueAt` 自定义归还时间)、`roomBook`(周期 `repeat`/`repeatCount`)、`reservationCancelSeries`、`reservationReschedule`、`roomRate`、`roomFavorite`、`roomWaitlist`、`roomWaitlistCancel`、`materialAssign`、`repairAssign`、`repairUpdate`(优先级)、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`visitorCheckin`、`profileUpdate`、`passwordChange`、`toggleEmergency`、`fetchPage`(`borrows` 等分页模块)；服务端相应广播/单发
+`users`(含 `status`、`emergencyMode`、`role`) 、`notices`、`suggestRooms`、`borrowReminder`、`roomReminder`、`borrowDueSoon`、`materialAssigned`、`materialFulfilled`、`materialSla`、`repairAssigned`、`repairInProgress`、`repairResolved`、`repairSla`、`repairEscalated`、`adminSet`、`spaceKicked`、`digest`、`visitors`、`spaceRenamed`、`spacePaused`、`roomWaitlistPromoted`、`reservationRescheduled`、`rooms`(含 `waitlist`)、`roomRated`、`roomFavorites`、`visitorCheckinNotification`、`visitorArrived`、`visitorLeft`、`visitorReminder`。
 
 ## 9. 代码架构（多模块拆分）
 

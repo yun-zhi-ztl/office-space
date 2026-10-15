@@ -23,6 +23,7 @@ const S = {
   borrowTotal:0, borrowOffset:0,
   roomStats:null,
   lastRoomBook:null,
+  favorites:[],
   admin:false, sockOpen:false,
 };
 const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
@@ -48,6 +49,7 @@ function dispatch(m){
       S.me={account:m.account,nickname:m.nickname,avatar:m.avatar,role:m.role,token:m.token};
       if(m.stats) S.me.stats=m.stats;
       if(m.achievements) S.me.achievements=m.achievements;
+      if(S.me.stats && Array.isArray(S.me.stats.favoriteRooms)) S.favorites=S.me.stats.favoriteRooms;
       S.admin = m.role==='admin'; S.token=m.token;
       localStorage.setItem('os_token',m.token); localStorage.setItem('os_space',S.space?S.space.id:S.lastSpace);
       $('#gate').style.display='none'; $('#app').style.display='flex'; renderAll(); break;
@@ -80,6 +82,7 @@ function dispatch(m){
     case 'repairInProgress': toast('🔧 报修处理中：'+(m.category||'')+' · '+(m.location||''),'info'); render(); break;
     case 'repairResolved': toast('✅ 报修已解决：'+(m.category||'')+' · '+(m.location||''),'success'); render(); break;
     case 'repairSla': toast('⚠️ 报修超时未处理：'+(m.category||'')+' · '+(m.location||''),'warn'); render(); break;
+    case 'repairEscalated': toast('🚨 高优先报修已升级：'+(m.category||'')+' · '+(m.location||'')+'，请尽快处理','warn'); render(); break;
     case 'materialSla': toast('⚠️ 申领超时未处理：'+(m.name||'')+' ×'+(m.qty||1),'warn'); render(); break;
     case 'stats': if(S.me && m.stats){ S.me.stats = m.stats; if(m.achievements) S.me.achievements = m.achievements; render(); } break;
     case 'urgeNotification': toast('📣 有人催促你了（'+m.count+' 人）','urge'); break;
@@ -87,6 +90,8 @@ function dispatch(m){
     case 'cancelSuccess': toast('✔ 已取消','success'); break;
     case 'roomWaitlistPromoted': toast('🎉 候补已晋升：预约已自动创建（'+fmtTime(m.startAt)+'）','success'); render(); break;
     case 'reservationRescheduled': toast('✔ 改期成功：'+fmtTime(m.startAt)+' → '+fmtTime(m.endAt),'success'); render(); break;
+    case 'roomRated': toast('✔ 会议室评分已提交：'+m.score+' 分','success'); render(); break;
+    case 'roomFavorites': S.favorites=m.favorites||[]; if(S.me && S.me.stats) S.me.stats.favoriteRooms=S.favorites; render(); break;
     case 'toolWaitlistJoined': toast('✔ 已加入排队，轮到你时会自动借用','success'); render(); break;
     case 'toolWaitlistPromoted': toast('🎉 排队已晋升：'+(m.toolName||'设备')+' 已为你自动借用','success'); render(); break;
     case 'visitorCreated': toast('✔ 访客已登记，签到码：'+m.code,'success'); render(); break;
@@ -353,7 +358,7 @@ function roomReservationListHtml(d, me){
   return roomReservationGroups(list).map(g=>{
     if(g.single){
       const r=g.single; const rm=d.rooms.find(x=>x.id===r.roomId);
-      return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(r.title)} <span class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}</span>${r.actualStartAt&&r.actualEndAt?` <span class="hint">⏱️ 到场 ${Math.max(0,Math.round((r.actualEndAt-r.actualStartAt)/60000))} 分钟</span>`:''}</span><span class="fs">${roomResBadge(r.status)}${(r.ownerAccount===me||S.admin)&&r.status==='pending'?`<button class="btn sm" onclick="openReschedule('${r.id}')">改期</button>${r.ownerAccount===me?`<button class="btn danger sm" onclick="cancelReservation('${r.id}')">取消</button>`:''}`:''}</span></div>`;
+      return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(r.title)} <span class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}</span>${r.actualStartAt&&r.actualEndAt?` <span class="hint">⏱️ 到场 ${Math.max(0,Math.round((r.actualEndAt-r.actualStartAt)/60000))} 分钟</span>`:''}</span><span class="fs">${roomResBadge(r.status)}${(r.ownerAccount===me||S.admin)&&r.status==='pending'?`<button class="btn sm" onclick="openReschedule('${r.id}')">改期</button>${r.ownerAccount===me?`<button class="btn danger sm" onclick="cancelReservation('${r.id}')">取消</button>`:''}`:''}${(r.ownerAccount===me||S.admin)&&r.status==='completed'&&!r.rating?`<button class="btn sm" onclick="openRoomRate('${r.id}')">评分</button>`:''}${r.rating?`<span class="badge ok">已评 ${r.rating}⭐</span>`:''}</span></div>`;
     }
     const first=g.items[0]; const rm=d.rooms.find(x=>x.id===first.roomId);
     const pat=repeatLabel(g.repeat, first);
@@ -363,9 +368,12 @@ function roomReservationListHtml(d, me){
 }
 function renderRooms(){
   const d=S.DB, me=S.me.account, now=Date.now();
+  const favFilter = S.favFilter || 'all';
+  const favIds = S.favorites || [];
+  const rooms = favFilter==='fav' ? d.rooms.filter(r=>favIds.includes(r.id)) : d.rooms;
   $('#main').innerHTML = `<div class="topbar"><div><h1>会议室预约</h1><div class="sub">预约时段、冲突自动检测、实时同步</div></div>
-    <div class="btn grp"><button class="btn" onclick="openSuggest()">✨ 智能选房</button><button class="btn" onclick="exportModuleCsv('rooms',ROOM_COLS)">导出 CSV</button>${S.admin?'<button class="btn pri" onclick="openRoomCreate()">＋ 新增会议室</button>':''}</div></div>
-    <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))">${d.rooms.map(r=>roomCard(r)).join('')||'<div class="empty">还没有会议室，管理员可新增</div>'}</div>
+    <div class="btn grp"><button class="btn ${favFilter==='all'?'pri':''}" onclick="setRoomFavFilter('all')">全部</button><button class="btn ${favFilter==='fav'?'pri':''}" onclick="setRoomFavFilter('fav')">⭐ 我的收藏 (${favIds.length})</button><button class="btn" onclick="openSuggest()">✨ 智能选房</button><button class="btn" onclick="exportModuleCsv('rooms',ROOM_COLS)">导出 CSV</button>${S.admin?'<button class="btn pri" onclick="openRoomCreate()">＋ 新增会议室</button>':''}</div></div>
+    <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))">${rooms.map(r=>roomCard(r)).join('')||'<div class="empty">还没有会议室，管理员可新增</div>'}</div>
     <h3 style="margin:22px 0 10px">📅 全部预约</h3>
     <div class="list">${roomReservationListHtml(d, me)}</div>
     <h3 style="margin:22px 0 10px">⏳ 候补队列 <span class="badge info">${d.waitlistTotal||0}</span></h3>
@@ -376,8 +384,11 @@ function renderRooms(){
 function roomCard(r){
   const d=S.DB, me=S.me.account;
   const upcoming=d.reservations.filter(x=>x.roomId===r.id&&x.status==='pending').sort((a,b)=>a.startAt-b.startAt).slice(0,3);
-  return `<div class="card"><h3>${esc(r.name)} ${S.admin?`<span></span><button class="btn danger sm" onclick="removeRoom('${r.id}')">删</button>`:''}</h3>
+  const fav = (S.favorites||[]).includes(r.id);
+  const rate = r.rating ? `<div class="meta">评分 ${'⭐'.repeat(Math.round(r.rating.avg))}${'☆'.repeat(5-Math.round(r.rating.avg))} ${r.rating.avg} (${r.rating.count})</div>` : '';
+  return `<div class="card"><h3>${esc(r.name)} <button class="btn sm ${fav?'pri':''}" title="收藏" onclick="toggleFavorite('${r.id}')">${fav?'⭐':'☆'}</button> ${S.admin?`<span></span><button class="btn danger sm" onclick="removeRoom('${r.id}')">删</button>`:''}</h3>
     <div class="meta">容量 ${r.capacity} 人${r.location?' · '+esc(r.location):''}${r.description?'<div>'+esc(r.description)+'</div>':''}</div>
+    ${rate}
     <div class="meta">${upcoming.length?upcoming.map(u=>`· ${fmtTime(u.startAt)} → ${fmtTime(u.endAt)} <b>${esc(u.title)}</b>${u.ownerAccount===me?'（你）':''}`).join('<br>'):'今日暂无预约'}</div>
     <div class="foot"><button class="btn pri sm" onclick="openBook('${r.id}')">预约</button></div></div>`;
 }
@@ -389,6 +400,8 @@ function openRoomCreate(){ openModal(`<span class="close" onclick="closeModal()"
   <button class="btn pri" onclick="submitRoomCreate()">创建</button></div>`); }
 function submitRoomCreate(){ wsSend({type:'roomCreate',name:$('#mrName').value,capacity:parseInt($('#mrCap').value,10),location:$('#mrLoc').value,description:$('#mrDesc').value}); closeModal(); }
 function removeRoom(id){ if(confirm('确认删除该会议室？')) wsSend({type:'roomRemove',roomId:id}); }
+function toggleFavorite(id){ wsSend({type:'roomFavorite',roomId:id}); }
+function setRoomFavFilter(v){ S.favFilter=v; render(); }
 function openBook(roomId){
   const now=Date.now(), start=now+10*60000, end=start+60*60000;
   openModal(`<span class="close" onclick="closeModal()">×</span><h2>预约会议室</h2><div class="form">
@@ -438,6 +451,20 @@ function submitReschedule(){
   wsSend({type:'reservationReschedule',reservationId:a.id,startAt:st,endAt:en});
   closeModal();
 }
+/* 会议室评分：结束的会议可给会议室打 1-5 分并留一句评价 */
+function openRoomRate(id){
+  const r=(S.DB.reservations||[]).find(x=>x.id===id); if(!r) return;
+  const rm=(S.DB.rooms||[]).find(x=>x.id===r.roomId);
+  S.lastRateId=id;
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>会议室评分 · ${esc(rm?rm.name:'会议室')}</h2><div class="form">
+    <div class="fld"><label>评分（1-5）</label>${[1,2,3,4,5].map(n=>`<button class="btn ${n===5?'pri':''}" onclick="setRate(${n})">${'⭐'.repeat(n)}</button>`).join('')}</div>
+    <div class="fld"><label>评价（可选，最多 60 字）</label><input id="rtComment" placeholder="如：隔音一般，投影清晰"></div>
+    <button class="btn pri" onclick="submitRoomRate()">提交评分</button></div>`);
+  S._rateScore=3;
+  setRate(3);
+}
+function setRate(n){ S._rateScore=n; document.querySelectorAll('.modal .fld button').forEach((b,i)=>b.classList.toggle('pri', (i+1)===n)); }
+function submitRoomRate(){ wsSend({type:'roomRate',reservationId:S.lastRateId,score:S._rateScore||3,comment:$('#rtComment').value||''}); closeModal(); }
 /* 会议室候补：时段冲突时加入队列，他人取消后自动晋升 */
 function openWaitlistModal(attempt){
   const room=(S.DB.rooms||[]).find(r=>r.id===attempt.roomId);
@@ -498,10 +525,23 @@ function openAdjust(id,name,total,borrowed){ openModal(`<span class="close" oncl
   <div class="fld"><label>在借 ${borrowed} · 当前总库存 ${total}</label><input id="adTotal" type="number" min="1" value="${total}"></div>
   <button class="btn pri" onclick="submitAdjust('${id}')">保存</button></div>`); }
 function submitAdjust(id){ wsSend({type:'toolAdjust',toolId:id,total:parseInt($('#adTotal').value,10)}); closeModal(); }
-function openBorrow(id,name,avail){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>借用 · ${esc(name)}</h2><div class="form">
-  <div class="fld"><label>数量（可用 ${avail}）</label><input id="bwQty" type="number" min="1" max="${avail}" value="1"></div>
-  <button class="btn pri" onclick="submitBorrow('${id}')">借用</button></div>`); }
-function submitBorrow(id){ wsSend({type:'toolBorrow',toolId:id,qty:parseInt($('#bwQty').value,10)}); closeModal(); }
+function openBorrow(id,name,avail){
+  const d=(ms)=>{ const x=new Date(ms), off=x.getTimezoneOffset(); return new Date(ms-off).toISOString().slice(0,16); };
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>借用 · ${esc(name)}</h2><div class="form">
+   <div class="fld"><label>数量（可用 ${avail}）</label><input id="bwQty" type="number" min="1" max="${avail}" value="1"></div>
+   <div class="fld"><label>自定义归还时间（可选，默认 7 天）</label><input id="bwDue" type="datetime-local"></div>
+   <div class="hint">默认借出后 7 天归还，可续借最多 2 次</div>
+   <button class="btn pri" onclick="submitBorrow('${id}')">借用</button></div>`);
+  $('#bwDue').value=d(Date.now()+7*86400000);
+}
+function submitBorrow(id){
+  const qty=parseInt($('#bwQty').value,10);
+  let dueAt=0;
+  const v=$('#bwDue').value;
+  if(v){ const t=new Date(v).getTime(); if(t>0) dueAt=t; }
+  wsSend({type:'toolBorrow',toolId:id,qty,dueAt:dueAt||0});
+  closeModal();
+}
 function openToolWaitlist(id,name,total){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>加入排队 · ${esc(name)}</h2><div class="form">
   <div class="fld"><label>数量（库存 ${total}，当前无可用）</label><input id="wlQty" type="number" min="1" max="${total}" value="1"></div>
   <div class="hint">轮到你时会自动借用，并在归还后优先分配给你</div>
@@ -574,6 +614,7 @@ function renderRepairs(){
       <span class="fs">
       <span class="badge ${badge(r.status)}">${label(r.status)}</span>
       <span class="badge ${pBadge(r.priority)}">${pLabel(r.priority)}优先</span>
+      ${r.escalated?'<span class="badge bad">已升级</span>':''}
       ${r.status==='reported'?`<button class="btn sm" onclick="setRepair('${r.id}','in_progress')">开始处理</button>`:''}
       ${(r.status==='reported'||r.status==='in_progress')?`<button class="btn green sm" onclick="setRepair('${r.id}','resolved')">已解决</button>`:''}
       ${r.status==='reported'||r.status==='in_progress'?`${r.reporterAccount===me||S.admin?`<button class="btn sm" onclick="openPriority('${r.id}','${esc(r.priority||'normal')}')">改优先级</button>`:''}`:''}

@@ -27,7 +27,7 @@ module.exports = function extrasModule(api) {
   function handleSuggestRoom(ws, user, space, msg) {
     const capacity = parseInt(msg.capacity, 10);
     const list = suggestRooms(space, msg.startAt, msg.endAt, capacity);
-    sendTo(ws, { type: 'suggestRooms', suggestions: list.map(roomPublic) });
+    sendTo(ws, { type: 'suggestRooms', suggestions: list.map((r) => roomPublic(space, r)) });
   }
 
   function handlePause(ws, user, space, msg) {

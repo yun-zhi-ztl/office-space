@@ -7,7 +7,7 @@ module.exports = function roomsModule(api) {
   function roomsBroadcast(space) {
     const reservations = roomReservationsPublic(space);
     const waitlist = roomWaitlistPublic(space);
-    broadcast(space.id, 'rooms', { rooms: space.rooms.map(roomPublic), reservations: reservations.slice(0, LIST_PAGE), reservationTotal: reservations.length, waitlist: waitlist.slice(0, LIST_PAGE), waitlistTotal: waitlist.length });
+    broadcast(space.id, 'rooms', { rooms: space.rooms.map((r) => roomPublic(space, r)), reservations: reservations.slice(0, LIST_PAGE), reservationTotal: reservations.length, waitlist: waitlist.slice(0, LIST_PAGE), waitlistTotal: waitlist.length });
     roomStatsBroadcast(space);
   }
 
@@ -78,7 +78,7 @@ module.exports = function roomsModule(api) {
       if (clash) {
         const first = slots[0];
         const free = space.rooms.filter((r) => r.id !== room.id && !slotClash(space, r.id, first.startAt, first.endAt));
-        const suggest = free.slice(0, 5).map(roomPublic);
+        const suggest = free.slice(0, 5).map((r) => roomPublic(space, r));
         return sendTo(ws, { type: 'error', message: '该时段已被预约，可加入候补或另选时间' + (suggest.length ? '；空闲：' + suggest.map((r) => r.name).join('、') : ''), code: 'roomConflict', suggestions: suggest });
       }
       slots.forEach((slot, i) => {
@@ -120,7 +120,7 @@ module.exports = function roomsModule(api) {
       const clash = [...space.roomReservations.values()].some((r) => r.id !== res.id && r.roomId === room.id && (r.status === 'pending' || r.status === 'active') && startAt < r.endAt && endAt > r.startAt);
       if (clash) {
         const free = space.rooms.filter((r) => r.id !== room.id && !slotClash(space, r.id, startAt, endAt));
-        const suggest = free.slice(0, 5).map(roomPublic);
+        const suggest = free.slice(0, 5).map((r) => roomPublic(space, r));
         return sendTo(ws, { type: 'error', message: '该时段已被预约，可另选时间' + (suggest.length ? '；空闲：' + suggest.map((r) => r.name).join('、') : ''), code: 'roomConflict', suggestions: suggest });
       }
       res.startAt = startAt;
@@ -183,6 +183,31 @@ module.exports = function roomsModule(api) {
       saveEntity(space.id, 'room_reservation', res.id, res);
       roomsBroadcast(space);
       broadcastLeaderboard(space);
+    } else if (msg.type === 'roomRate') {
+      const res = space.roomReservations.get(msg.reservationId);
+      if (!res) return sendTo(ws, serError('预约不存在'));
+      if (res.ownerAccount !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('只能给结束的会议评分'));
+      if (res.status !== 'completed') return sendTo(ws, serError('只有已结束的会议可以评分'));
+      if (res.rating) return sendTo(ws, serError('该会议已评分'));
+      const score = parseInt(msg.score, 10);
+      if (!Number.isInteger(score) || score < 1 || score > 5) return sendTo(ws, serError('评分需为 1-5 分'));
+      const comment = (msg.comment || '').trim().slice(0, 60);
+      res.rating = score;
+      res.ratedAt = Date.now();
+      res.ratingComment = comment;
+      saveEntity(space.id, 'room_reservation', res.id, res);
+      roomsBroadcast(space);
+      sendTo(ws, { type: 'roomRated', reservationId: res.id, roomId: res.roomId, score });
+    } else if (msg.type === 'roomFavorite') {
+      const room = space.rooms.find((r) => r.id === msg.roomId);
+      if (!room) return sendTo(ws, serError('会议室不存在'));
+      if (!Array.isArray(user.stats.favoriteRooms)) user.stats.favoriteRooms = [];
+      const idx = user.stats.favoriteRooms.indexOf(room.id);
+      const add = idx < 0;
+      if (add) user.stats.favoriteRooms.push(room.id); else user.stats.favoriteRooms.splice(idx, 1);
+      saveProfile(user);
+      sendTo(ws, { type: 'roomFavorites', favorites: user.stats.favoriteRooms || [] });
+      roomsBroadcast(space);
     }
   }
 

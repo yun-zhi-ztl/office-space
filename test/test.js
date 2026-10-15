@@ -1054,6 +1054,91 @@ async function runTests() {
     wVis.close();
   }
 
+  // ========== 测试23: 会议室评分与收藏 ==========
+  console.log('\n📋 测试23: 会议室评分与收藏');
+  {
+    const spRate = (await httpJson('POST', '/api/spaces', { name: '评分办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aRate = 'rate_' + runKey;
+    await reg(aRate, 'pw', '评分用户');
+    const wRate = await createWSClient(); await loginTo(wRate, spRate.id, aRate, 'pw');
+    await sendMsg(wRate, { type: 'roomCreate', name: '评分会议室', capacity: 6 });
+    const roomsList = last(wRate, 'rooms');
+    const roomId = roomsList && roomsList.rooms[0].id;
+    assert(roomId, '评分测试会议室创建成功');
+    // 收藏会议室
+    await sendMsg(wRate, { type: 'roomFavorite', roomId });
+    const fav = last(wRate, 'roomFavorites');
+    assert(fav && Array.isArray(fav.favorites) && fav.favorites.includes(roomId), '收藏会议室返回收藏列表');
+    // 预约一个很快就会开始的会议，等定时器自动置为进行中后结束
+    const startAt = Date.now() + 2000;
+    await sendMsg(wRate, { type: 'roomBook', roomId, startAt, endAt: startAt + 5 * 60000, title: '评分会' });
+    await new Promise((r) => setTimeout(r, 18000));
+    let resList = last(wRate, 'rooms');
+    let res = resList && resList.reservations[0];
+    assert(res && res.status === 'active', '预约自动开始为 active');
+    await sendMsg(wRate, { type: 'roomEnd', reservationId: res.id });
+    resList = last(wRate, 'rooms');
+    res = resList && resList.reservations[0];
+    assert(res && res.status === 'completed', '会议结束为 completed');
+    // 评分 5 分
+    await sendMsg(wRate, { type: 'roomRate', reservationId: res.id, score: 5, comment: '很好' });
+    const rated = last(wRate, 'roomRated');
+    assert(rated && rated.score === 5, '会议室评分成功返回');
+    const roomsFinal = last(wRate, 'rooms');
+    const room = roomsFinal && roomsFinal.rooms.find((r) => r.id === roomId);
+    assert(room && room.rating && room.rating.count === 1 && room.rating.avg === 5, '会议室聚合评分 5 分');
+    // 重复评分被拒
+    await sendMsg(wRate, { type: 'roomRate', reservationId: res.id, score: 1 });
+    const errRate = mk(wRate, 'error');
+    assert(errRate.length > 0 && errRate[errRate.length - 1].message.includes('已评分'), '重复评分被拒');
+    wRate.close();
+  }
+
+  // ========== 测试24: 工具借用自定义归还期限 ==========
+  console.log('\n📋 测试24: 工具借用自定义归还期限');
+  {
+    const spB = (await httpJson('POST', '/api/spaces', { name: '自定义归还办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aB = 'bdue_' + runKey;
+    await reg(aB, 'pw', '归还用户');
+    const wB = await createWSClient(); await loginTo(wB, spB.id, aB, 'pw');
+    await sendMsg(wB, { type: 'toolCreate', name: '测试手机X', category: '测试手机', total: 2 });
+    const tools0 = last(wB, 'tools');
+    const toolId = tools0 && tools0.tools[0].id;
+    assert(toolId, '自定义归还测试设备创建成功');
+    const customDue = Date.now() + 3 * 86400000;
+    await sendMsg(wB, { type: 'toolBorrow', toolId, qty: 1, dueAt: customDue });
+    const tools1 = last(wB, 'tools');
+    const borrow = tools1 && tools1.tools[0].activeBorrows && tools1.tools[0].activeBorrows[0];
+    assert(borrow && borrow.dueAt === customDue, '自定义归还期限生效');
+    // 过近的自定义时间被拒
+    await sendMsg(wB, { type: 'toolBorrow', toolId, qty: 1, dueAt: Date.now() + 60000 });
+    const errDue = mk(wB, 'error');
+    assert(errDue.length > 0 && errDue[errDue.length - 1].message.includes('至少晚于当前时间 30 分钟'), '过近的自定义归还时间被拒');
+    // 归还后库存恢复
+    await sendMsg(wB, { type: 'toolReturn', borrowId: borrow.id, condition: 'intact' });
+    const toolsReturn = last(wB, 'tools');
+    assert(toolsReturn && toolsReturn.tools[0].available === 2, '归还后库存恢复');
+    wB.close();
+  }
+
+  // ========== 测试25: 报修升级序列化 ==========
+  console.log('\n📋 测试25: 报修升级');
+  {
+    const spE = (await httpJson('POST', '/api/spaces', { name: '报修升级办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aE = 'esc_' + runKey;
+    await reg(aE, 'pw', '升级用户');
+    const wE = await createWSClient(); await loginTo(wE, spE.id, aE, 'pw');
+    await sendMsg(wE, { type: 'repairCreate', category: '空调', location: '机房', description: '不制冷', priority: 'high' });
+    const repList = last(wE, 'repairs');
+    const rep = repList && repList.repairs[0];
+    assert(rep && rep.priority === 'high' && rep.escalated === false, '高优先级报修初始 escalated=false');
+    await sendMsg(wE, { type: 'repairCreate', category: '灯光', location: '走廊', description: '闪烁', priority: 'normal' });
+    const repList2 = last(wE, 'repairs');
+    const repNormal = repList2 && repList2.repairs.find((r) => r.priority === 'normal');
+    assert(repNormal && repNormal.escalated === false, '普通优先级报修不进入升级队列');
+    wE.close();
+  }
+
   // ========== 总结 ==========
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);

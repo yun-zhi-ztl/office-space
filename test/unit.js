@@ -511,6 +511,47 @@ const dig = api.buildDigest(spHandle, duHandle, nowDigest);
 assertEq(dig.resolvedRepairsCount, 1, 'digest 统计今日已解决报修');
 assertEq(dig.resolvedMaterialsCount, 1, 'digest 统计今日已满足申领');
 
+// ---------- 会议室评分聚合 ----------
+console.log('\n📋 32. 会议室评分聚合');
+const spRoomRate = api.createSpace('s24', '评分空间', 1, 0);
+spRoomRate.rooms.push({ id: 'rm1', name: '会议室A', capacity: 8, location: '3F', description: '' });
+const nowRate = 1000000000;
+spRoomRate.roomReservations.set('rr1', { id: 'rr1', roomId: 'rm1', ownerAccount: 'alice', ownerName: '甲', title: '评审', startAt: nowRate - 120000, endAt: nowRate - 60000, status: 'completed', rating: 5, ratingComment: '很好', ratedAt: nowRate - 50000 });
+spRoomRate.roomReservations.set('rr2', { id: 'rr2', roomId: 'rm1', ownerAccount: 'bob', ownerName: '乙', title: '周会', startAt: nowRate - 240000, endAt: nowRate - 180000, status: 'completed', rating: 3, ratingComment: '', ratedAt: nowRate - 170000 });
+spRoomRate.roomReservations.set('rr3', { id: 'rr3', roomId: 'rm1', ownerAccount: 'carol', ownerName: '丙', title: '讨论', startAt: nowRate - 300000, endAt: nowRate - 240000, status: 'completed', rating: 0, ratingComment: '', ratedAt: 0 });
+spRoomRate.roomReservations.set('rr4', { id: 'rr4', roomId: 'rm1', ownerAccount: 'dave', ownerName: '丁', title: '未评', startAt: nowRate, endAt: nowRate + 60000, status: 'active', rating: 0, ratingComment: '', ratedAt: 0 });
+const roomRateSum = api.roomRatingSummary(spRoomRate, 'rm1');
+assertEq(roomRateSum.count, 2, '仅统计已评分的已完成会议');
+assertEq(roomRateSum.avg, 4, '会议室平均评分 4 分');
+assertEq(roomRateSum.ratings.length, 2, '评分明细返回 2 条');
+assertEq(api.roomPublic(spRoomRate, spRoomRate.rooms[0]).rating.avg, 4, 'roomPublic 暴露会议室平均评分');
+const resRatePub = api.reservationPublic(spRoomRate.roomReservations.get('rr1'), new Map());
+assertEq(resRatePub.rating, 5, 'reservationPublic 暴露评分');
+assertEq(resRatePub.ratedAt, nowRate - 50000, 'reservationPublic 暴露评分时间');
+
+// ---------- 报修升级 ----------
+console.log('\n📋 33. 报修升级');
+const spEsc = api.createSpace('s25', '升级空间', 1, 0);
+const nowEsc = 1000000000;
+const esc = api.REPAIR_ESCALATE_MS;
+spEsc.repairs.set('e1', { id: 'e1', category: '厕所', location: '男厕', reporterAccount: 'alice', reporterName: '甲', priority: 'high', status: 'reported', createdAt: nowEsc - esc, updatedAt: nowEsc - esc, slaRemindedAt: null, escalatedAt: null });
+spEsc.repairs.set('e2', { id: 'e2', category: '灯光', location: '走廊', reporterAccount: 'bob', reporterName: '乙', priority: 'normal', status: 'reported', createdAt: nowEsc - esc, updatedAt: nowEsc - esc, slaRemindedAt: null, escalatedAt: null });
+spEsc.repairs.set('e3', { id: 'e3', category: '空调', location: '会议室', reporterAccount: 'carol', reporterName: '丙', priority: 'high', status: 'reported', createdAt: nowEsc - esc, updatedAt: nowEsc - esc, slaRemindedAt: null, escalatedAt: nowEsc - 1000 });
+spEsc.repairs.set('e4', { id: 'e4', category: '其它', location: '茶水间', reporterAccount: 'dave', reporterName: '丁', priority: 'high', status: 'resolved', createdAt: nowEsc - esc, updatedAt: nowEsc - esc, slaRemindedAt: null, escalatedAt: null });
+const escList = api.dueRepairEscalations(spEsc, nowEsc);
+assertEq(escList.map((r) => r.id), ['e1'], '仅高优先级且未解决、未升级的报修进入升级队列');
+assertEq(api.REPAIR_ESCALATE_MS, 8 * 3600 * 1000, '报修升级阈值为 8 小时');
+const repEscPub = api.repairsPublic(spEsc, new Map());
+assertEq(repEscPub.find((r) => r.id === 'e1').escalated, false, '未升级报修 escalated=false');
+spEsc.repairs.get('e1').escalatedAt = nowEsc;
+assertEq(api.repairsPublic(spEsc, new Map()).find((r) => r.id === 'e1').escalated, true, '升级后 escalated=true');
+
+// ---------- 收藏会议室 ----------
+console.log('\n📋 34. 收藏会议室');
+const favStats = api.newStats();
+assert(Array.isArray(favStats.favoriteRooms), 'newStats 初始化 favoriteRooms 数组');
+assertEq(favStats.favoriteRooms.length, 0, '默认无收藏会议室');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);
