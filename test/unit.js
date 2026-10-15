@@ -79,7 +79,7 @@ const p3 = api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id =
 assert(p3.unlocked === true, '累计 10 次解锁蹲坑之王');
 assertEq(p3.pct, 100, '蹲坑之王达成后进度 100');
 const pub = api.achievementDefsPublic(user);
-assertEq(pub.length, 15, '成就公开列表含 15 项');
+assertEq(pub.length, 18, '成就公开列表含 18 项');
 assert(pub.every((a) => a.id && a.name && a.desc && a.icon), '公开成就含 id/name/desc/icon');
 user.stats.borrowCount = 3;
 assert(api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'borrower')).unlocked === true, '借用 3 次解锁借阅达人');
@@ -666,6 +666,41 @@ const achEarly = api.achievementDefsPublic(achUser2).find((a) => a.id === 'early
 assertEq(achEarly.target, 3, '早到达人目标值 3');
 const achKing = api.achievementDefsPublic(achUser2).find((a) => a.id === 'attendanceKing');
 assertEq(achKing.target, 10, '打卡达人目标值 10');
+
+// ---------- 意见反馈序列化 + 工位签到字段 + 扩展成就 ----------
+console.log('\n📋 41. 意见反馈 / 工位签到 / 扩展成就');
+const fbSp = api.createSpace('s41', '反馈空间', 1, 0);
+fbSp.feedbacks.set('fb1', { id: 'fb1', account: 'alice', name: '甲', anonymous: false, category: '建议', content: '希望加一个意见反馈模块', status: 'answered', replies: [{ account: 'admin', name: '管理员', content: '收到，已加入排期', createdAt: 1 }], createdAt: 2, handledAt: 3 });
+fbSp.feedbacks.set('fb2', { id: 'fb2', account: 'bob', name: '乙', anonymous: true, category: '吐槽', content: '咖啡机经常没咖啡', status: 'open', replies: [], createdAt: 4, handledAt: null });
+const fbPub = api.feedbackPublic(fbSp, api.spaceUserInfo(fbSp.id));
+assertEq(fbPub.length, 2, 'feedbackPublic 返回全部反馈');
+assertEq(fbPub[0].author, '匿名成员', '匿名反馈隐藏真实作者');
+assertEq(fbPub[0].replies.length, 0, '匿名反馈回复列表为空');
+const fbPub1 = fbPub.find((f) => f.id === 'fb1');
+assertEq(fbPub1.author, '甲', '实名反馈显示作者');
+assertEq(fbPub1.replies[0].content, '收到，已加入排期', 'feedbackPublic 暴露管理员回复');
+const fbStats = api.feedbackStats(fbSp);
+assertEq(fbStats.open, 1, 'feedbackStats 统计待处理');
+assertEq(fbStats.answered, 1, 'feedbackStats 统计已回复');
+assertEq(fbStats.closed, 0, 'feedbackStats 统计已关闭');
+const deskSp = api.createSpace('s42', '工位空间', 1, 0);
+deskSp.desks.push({ id: 'd1', name: '3F工位A', location: '3F', description: '' });
+deskSp.deskReservations.set('drv1', { id: 'drv1', deskId: 'd1', account: 'alice', name: '甲', startAt: 1, endAt: 2, note: '', status: 'active', actualStartAt: 1, actualEndAt: null });
+const deskResPub = api.deskReservationsPublic(deskSp, api.spaceUserInfo(deskSp.id));
+assertEq(deskResPub[0].actualStartAt, 1, '工位预约序列化暴露实际签到时间');
+assertEq(deskResPub[0].actualEndAt, null, '未签退时实际签退时间为空');
+const achUser3 = { stats: api.newStats(), achievements: [] };
+achUser3.stats.deskCount = 5;
+api.checkAchievements(achUser3);
+assert(achUser3.achievements.includes('deskKnight'), '工位预约 5 次解锁工位达人');
+achUser3.stats.oooCount = 5;
+api.checkAchievements(achUser3);
+assert(achUser3.achievements.includes('awayReporter'), '外出登记 5 次解锁外出报备达人');
+achUser3.stats.feedbackReplyCount = 3;
+api.checkAchievements(achUser3);
+assert(achUser3.achievements.includes('listener'), '回复反馈 3 条解锁倾听达人');
+const achListener = api.achievementDefsPublic(achUser3).find((a) => a.id === 'listener');
+assertEq(achListener.target, 3, '倾听达人目标值 3');
 
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);

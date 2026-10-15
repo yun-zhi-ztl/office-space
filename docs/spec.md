@@ -6,7 +6,7 @@
 ## 1. 产品定位
 
 办公室 / 部门 / 楼层 **共用一个空间** 的内部管理看板，多人在同一局域网或集群内实时共用。
-一个 `space` 即代表一个办公室（或一层楼、一个组织）的公共资源单元。围绕六类高频需求：
+一个 `space` 即代表一个办公室（或一层楼、一个组织）的公共资源单元。围绕九类高频需求：
 
 1. **会议室预约** —— 预约时段、冲突检测、取消，并提供会议室占用率统计。
 2. **测试工具借用** —— 登记在库设备（测试电脑 / 测试机器 / 测试手机等）的借出与归还。
@@ -14,6 +14,9 @@
 4. **报修** —— 上报厕所、灯光、空调等设施故障，支持优先级并推进状态。
 5. **坑位看板**（原「坑位雷达」）—— 卫生间坑位实时占用 / 预约 / 抢位 / 催促 / 评分。
 6. **考勤打卡** —— 上下班打卡，管理员可配置工作时间与迟到宽限，自动判定迟到并统计。
+7. **工位预约** —— 开放工位 / 共享座位的时段预约，签到签退并记录实际到场时长。
+8. **外出登记** —— 外出 / 请假 / 出差 / 调休登记，同步在线状态与预计返回提醒。
+9. **意见反馈** —— 匿名 / 实名提交建议、吐槽、问题、表扬，管理员回复后闭环。
 
 ## 2. 关键设计原则
 
@@ -110,6 +113,33 @@
   - 战绩：打卡计入 `stats.attendanceCount`（累计打卡次数）、非迟到打卡计入 `stats.earlyCount`；周报与空间趋势新增 `attends` 指标。
   - 成就：「早到达人」（9 点前打卡累计 3 天）与「打卡达人」（累计打卡 10 次）。
 
+### 工位预约（desks）
+- `desk`: `{ id, name, location, description }`，管理员增删。
+- `desk_reservation`: `{ id, deskId, account, name, startAt, endAt, note, status, actualStartAt?, actualEndAt? }`
+  - 状态：`pending`(待开始) / `active`(进行中) / `completed` / `cancelled` / `expired`
+  - 约束：同一工位在 `[startAt, endAt)` 内不得重叠（冲突检测）；开始时间须晚于当前时间；时长 ≥ 10 分钟。
+  - 签到 / 签退：`deskStart` 把 `pending` 流转为 `active` 并记录 `actualStartAt`；`deskEnd` 把 `active` 流转为 `completed` 并记录 `actualEndAt`；二者均仅预约人或管理员可操作。
+  - 自动流转：到点后（`now >= endAt`）定时器把过期的 `pending` 预约标记为 `completed`，避免「进行中」悬挂；超过 7 天的历史预约由 `pruneDeskReservations` 清理。
+  - 统计：`deskUsageStats` 计算今日预约场次、今日分钟数、待开始数与占用率（以工作时段 09:00–21:00 总容量分钟为分母），随 `deskStats` 广播下发；序列化暴露 `todayCount` / `upcomingCount` / `todayMinutes`。
+  - 战绩与成就：预约计入 `stats.deskCount` 与周报 `desks`；「工位达人」（预约工位累计 5 次）。
+
+### 外出登记（ooo）
+- `ooo`: `{ id, account, name, category, reason, startAt, expectedReturnAt?, endAt?, status, returnRemindedAt? }`
+  - `category`: 外出 / 请假 / 出差 / 调休 / 其他。
+  - 状态：`active`（外出中）/ `back`（已返回）/ `cancelled`（已取消）；管理员可删除任意记录。
+  - 约束：同一账号同时只能有一条 `active` 记录；预计返回时间须晚于当前时间。
+  - 在线状态同步：`active` 期间把成员在线状态标签覆盖为外出类别（出差 ✈️ / 请假 📅 / 其他 🚶），返回 / 取消后恢复 `prevStatus`。
+  - 预计返回提醒：填写 `expectedReturnAt` 后，到点前 30 分钟内单发提醒一次（`oooReturnSoon`），避免漏回。
+  - 战绩与成就：登记计入 `stats.oooCount` 与周报 `ooo`；「外出报备达人」（外出登记累计 5 次）。
+
+### 意见反馈（feedback）
+- `feedback`: `{ id, account, name, anonymous, category, content, status, replies[], createdAt, handledAt? }`
+  - `category`: 建议 / 吐槽 / 问题 / 表扬；`anonymous` 为真时对外作者显示「匿名成员」。
+  - 状态：`open`（待处理）/ `answered`（已回复）/ `closed`（已关闭）。
+  - `replies[]`: 管理员回复 `{ id, account, name, content, createdAt }`；回复后状态置为 `answered` 并记录 `handledAt`；已关闭不可继续回复。
+  - 权限：成员提交，仅管理员回复 / 关闭 / 删除。
+  - 成就：「倾听达人」（回复反馈累计 3 条）。
+
 ### 坑位看板（restroom / 原坑位雷达）
 - 每个空间独立配置 `squat_count`（蹲坑）、`urinal_count`（尿槽）。
 - `stall`: `{ id, type: squat|urinal, name, status: free|reserved|waiting|occupied, ratings, reservation }`
@@ -149,6 +179,12 @@
 | `repairAssign` | 指派报修负责人 | reporter / admin |
 | `repairUpdate` | 推进 / 取消报修状态，或调整 `priority` | member / owner / admin |
 | `visitorCreate` / `visitorArrived` / `visitorLeft` / `visitorCancel` / `visitorRemove` / `visitorCheckin` | 访客登记与状态流转 / 删除 / 凭签到码核销 | member / host / admin |
+| `deskCreate` / `deskDelete` | 新增 / 删除工位 | admin |
+| `deskReserve` / `deskCancel` | 预约工位（含冲突检测）/ 取消自己的预约 | member / owner |
+| `deskStart` / `deskEnd` | 工位签到 / 签退，记录实际到场起止 | owner / admin |
+| `oooCreate` / `oooBack` / `oooCancel` / `oooRemove` | 外出登记 / 返回 / 取消 / 删除 | member / owner / admin |
+| `feedbackCreate` | 提交反馈（可匿名） | member |
+| `feedbackReply` / `feedbackClose` / `feedbackRemove` | 回复 / 关闭 / 删除反馈 | admin |
 | `attendCheckIn` / `attendCheckOut` | 上班 / 下班打卡 | member |
 | `attendConfig` | 配置工作时间与迟到宽限 | admin |
 | `profileUpdate` / `passwordChange` | 修改展示名、头像 / 修改密码 | member |
@@ -160,18 +196,19 @@
 
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，
-以及 `rooms`（含 `rooms` / `reservations` / `waitlist` / `waitlistTotal`）、`tools`、`materials`（含 `requests` / `templates`）、`repairs`、`visitors`、`stalls`、`attendance`（含 `records` / `stats` / `config`）、`users`、`leaderboard`（含 `account`、`role`、`display`），
-另有 `roomStats`、`spacePaused`、`roomWaitlistPromoted`、`roomRated`、`roomFavorites`、`repairEscalated`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendanceCheckedIn`、`attendanceCheckedOut` 等即时广播；全量广播含 `inventory`（物资库存台账，随 `broadcastAll` 下发）；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows`）。
+以及 `rooms`（含 `rooms` / `reservations` / `waitlist` / `waitlistTotal`）、`tools`、`materials`（含 `requests` / `templates`）、`repairs`、`visitors`、`stalls`、`attendance`（含 `records` / `stats` / `config`）、`desks`（含 `desks` / `reservations` / `reservationTotal`）、`deskStats`、`ooo`（含 `records` / `stats`）、`feedback`（含 `records` / `stats`）、`users`、`leaderboard`（含 `account`、`role`、`display`），
+另有 `roomStats`、`spacePaused`、`roomWaitlistPromoted`、`roomRated`、`roomFavorites`、`repairEscalated`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendanceCheckedIn`、`attendanceCheckedOut` 等即时广播，另有 `oooBacked`、`oooReturnSoon`；全量广播含 `inventory`（物资库存台账，随 `broadcastAll` 下发）；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows` / `feedback`）。
 
 ## 5. 前端
 
-单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 物资库存 / 报修 / 访客登记 / 考勤打卡 / 坑位看板），
+单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 物资库存 / 报修 / 访客登记 / 考勤打卡 / 工位预约 / 外出登记 / 意见反馈 / 坑位看板），
 个人资料入口位于侧栏底部；桌面与移动端响应式，原生 HTML/CSS/JS，无构建步骤；静态文件由 Express 托管；
 会议室预约支持每天 / 每周周期预约（列表按 `seriesId` 聚合展示并整组取消）；
 报修列表展示工单号 `RP-日期-编号` 并可调整高 / 中 / 低优先级；空间暂停时顶部展示暂停横幅并限制对应创建操作；
 物资申领支持管理员维护常用模板、成员选模板快捷提交；物资库存支持管理员维护台账、成员领用/归还与库存告急标记；公告支持 👍 / 🎉 / 😮 / 🤝 / 🔥 回应并可取消；
 物资 / 报修 / 访客 / 会议室预约 / 借用记录列表支持一键导出 CSV（自动拉取全部分页）；
-会议室卡片展示平均评分，成员可收藏会议室并在「我的收藏」中过滤；已结束的会议可一键评分（1-5 星 + 评价）；报修列表展示「已升级」标记。
+会议室卡片展示平均评分，成员可收藏会议室并在「我的收藏」中过滤；已结束的会议可一键评分（1-5 星 + 评价）；报修列表展示「已升级」标记；
+工位预约支持热力时间轴与「签到 / 签退」按钮，成员可查看今日工位占用与占用率；外出登记同步在线状态、同事可见外出中与预计返回时间；意见反馈支持匿名 / 实名提交与管理员回复闭环。
 
 ## 6. 非目标（本版本暂不实现）
 - 复杂审批流、权限细粒度分级、通知系统、文件上传、消息私聊。
@@ -190,7 +227,7 @@
 - 可增长的列表（会议室预约、物资申领、报修）**实时广播只推最近 `LIST_PAGE` 条**并附带 `total`，
   前端按需「加载更多」；工具库存列表在广播中内联「当前在借」明细，规模可控。
 - 新增 `fetchPage` 消息：`{type:'fetchPage', module, offset, limit}`，服务端返回
-  `{type:'page', module, offset, items, total}`，当前支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows` 五个分页模块，
+  `{type:'page', module, offset, items, total}`，当前支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows` / `feedback` 六个分页模块，
   实现 offset/limit 分页，避免每次全量下发。
 - 排行榜保留 TopN（30）；坑位评分保留最近 60 条。
 
@@ -281,16 +318,19 @@
 | 会议室改期 | 待开始预约可调整时段，校验所有权、时段合法性与冲突（排除自身），成功后更新并广播 | `reservationReschedule` / `reservationRescheduled` |
 | 会议室实际到场时长 | 开始/结束时记录实际到场起止时间，累计个人到场时长并纳入会议室统计 | `roomStart` / `roomEnd`（复用 `stats` + `roomStats` + `leaderboard`） |
 | 低库存预警 | 设备可设置库存告急阈值，借用 / 归还 / 调整库存后自动判定 `lowStock`；首次跌破阈值时向管理员下发 `toolLowStock` 并写入公告，恢复后重置提醒标记 | `toolCreate` / `toolAdjust`(`minAvailable`)、服务端下发 `toolLowStock` |
-| 空间周报 | 每周一 09:00 自动汇总本周活动量（会议数 / 会议分钟数、借用、申领（含已满足）、报修（含已解决）、访客、待处理报修 / 申领、库存告急设备），广播全员并写入公告，当天只发一次 | 服务端下发 `weeklyReport` + 公告 |
+| 空间周报 | 每周一 09:00 自动汇总本周活动量（会议数 / 会议分钟数、借用、申领（含已满足）、报修（含已解决）、访客、考勤、工位、外出、待处理报修 / 申领、库存告急设备），广播全员并写入公告，当天只发一次 | 服务端下发 `weeklyReport` + 公告 |
 | 会议室向导成就 | 给会议室评分累计 3 次解锁「会议室向导」徽章 | 复用 `stats.roomRatesGiven` + `achievements` |
 | 收藏家成就 | 收藏会议室累计 3 个解锁「收藏家」徽章 | 复用 `stats.favoriteCount` + `achievements` |
 | 物资库存台账 | 登记办公文具、耗材等公共物资库存，成员按需领用并归还；库存跌破阈值自动标记「库存告急」并通知管理员，阈值恢复后可再次提醒 | `inventoryCreate` / `inventoryAdjust`(`minAvailable`) / `inventoryIssue` / `inventoryReturn`、服务端下发 `inventoryLowStock` |
 | 考勤打卡 | 上下班打卡；管理员可配置工作时间与迟到宽限，迟到自动标记；统计今日打卡 / 迟到 / 已下班人数与下班完成率，并计入个人战绩 | `attendCheckIn` / `attendCheckOut` / `attendConfig`、服务端下发 `attendance` |
 | 考勤战绩与成就 | 打卡计入累计打卡次数与非迟到打卡次数，周报与空间趋势新增打卡指标；解锁「早到达人」与「打卡达人」徽章 | 复用 `stats`(`attendanceCount` / `earlyCount`) + `achievements` |
+| 工位达人成就 | 预约工位累计 5 次解锁「工位达人」徽章 | 复用 `stats.deskCount` + `achievements` |
+| 外出报备达人 | 外出登记累计 5 次解锁「外出报备达人」徽章 | 复用 `stats.oooCount` + `achievements` |
+| 倾听达人 | 回复意见反馈累计 3 条解锁「倾听达人」徽章 | 复用 `stats.feedbackReplyCount` + `achievements` |
 
 ### 客户端→服务端新增消息
-`setStatus`、`announce`、`spaceRename`、`spacePause`、`spaceAdminSet`、`spaceKick`、`suggestRoom`、`remindReturn`、`toolExtend`、`toolBorrow`(`dueAt` 自定义归还时间)、`toolCreate` / `toolAdjust`(`minAvailable` 库存告急阈值)、`inventoryCreate` / `inventoryAdjust`(`minAvailable` 物资库存告急阈值) / `inventoryIssue` / `inventoryReturn`、`roomBook`(周期 `repeat`/`repeatCount`)、`reservationCancelSeries`、`reservationReschedule`、`roomRate`、`roomFavorite`、`roomWaitlist`、`roomWaitlistCancel`、`materialAssign`、`repairAssign`、`repairUpdate`(优先级)、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`visitorCheckin`、`attendCheckIn` / `attendCheckOut` / `attendConfig`、`profileUpdate`、`passwordChange`、`toggleEmergency`、`fetchPage`(`borrows` 等分页模块)；服务端相应广播/单发
-`users`(含 `status`、`emergencyMode`、`role`) 、`notices`、`suggestRooms`、`borrowReminder`、`roomReminder`、`borrowDueSoon`、`materialAssigned`、`materialFulfilled`、`materialSla`、`repairAssigned`、`repairInProgress`、`repairResolved`、`repairSla`、`repairEscalated`、`adminSet`、`spaceKicked`、`digest`、`visitors`、`spaceRenamed`、`spacePaused`、`roomWaitlistPromoted`、`reservationRescheduled`、`rooms`(含 `waitlist`)、`roomRated`、`roomFavorites`、`visitorCheckinNotification`、`visitorArrived`、`visitorLeft`、`visitorReminder`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendance`、`attendanceCheckedIn`、`attendanceCheckedOut`。
+`setStatus`、`announce`、`spaceRename`、`spacePause`、`spaceAdminSet`、`spaceKick`、`suggestRoom`、`remindReturn`、`toolExtend`、`toolBorrow`(`dueAt` 自定义归还时间)、`toolCreate` / `toolAdjust`(`minAvailable` 库存告急阈值)、`inventoryCreate` / `inventoryAdjust`(`minAvailable` 物资库存告急阈值) / `inventoryIssue` / `inventoryReturn`、`roomBook`(周期 `repeat`/`repeatCount`)、`reservationCancelSeries`、`reservationReschedule`、`roomRate`、`roomFavorite`、`roomWaitlist`、`roomWaitlistCancel`、`materialAssign`、`repairAssign`、`repairUpdate`(优先级)、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`visitorCheckin`、`attendCheckIn` / `attendCheckOut` / `attendConfig`、`deskCreate` / `deskDelete` / `deskReserve` / `deskCancel` / `deskStart` / `deskEnd`、`oooCreate` / `oooBack` / `oooCancel` / `oooRemove`、`feedbackCreate` / `feedbackReply` / `feedbackClose` / `feedbackRemove`、`profileUpdate`、`passwordChange`、`toggleEmergency`、`fetchPage`(`borrows` 等分页模块)；服务端相应广播/单发
+`users`(含 `status`、`emergencyMode`、`role`) 、`notices`、`suggestRooms`、`borrowReminder`、`roomReminder`、`borrowDueSoon`、`materialAssigned`、`materialFulfilled`、`materialSla`、`repairAssigned`、`repairInProgress`、`repairResolved`、`repairSla`、`repairEscalated`、`adminSet`、`spaceKicked`、`digest`、`visitors`、`spaceRenamed`、`spacePaused`、`roomWaitlistPromoted`、`reservationRescheduled`、`rooms`(含 `waitlist`)、`roomRated`、`roomFavorites`、`visitorCheckinNotification`、`visitorArrived`、`visitorLeft`、`visitorReminder`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendance`、`attendanceCheckedIn`、`attendanceCheckedOut`、`desks`、`deskStats`、`ooo`、`feedback`、`oooBacked`、`oooReturnSoon`。
 
 ## 9. 代码架构（多模块拆分）
 
@@ -301,12 +341,12 @@ server.js        入口：Express + WS 分发 + 定时器 + 心跳 + 优雅停�
 src/context.js   共享上下文：状态 + 常量 + 基础工具 + 持久化(写合并) + 认证 + 序列化 + 广播 + 坑位成就 + 每日看点 + 空间周报
 src/http.js      HTTP 路由：/api/spaces、/api/register
 src/session.js   会话：进入/切换空间、登录（含 digest）
-src/modules/     rooms / tools / materials / inventory / repairs / visitors / profile / stalls / extras / attendance（各领域处理函数）
+src/modules/     rooms / tools / materials / inventory / repairs / visitors / attendance / desks / ooo / feedback / profile / stalls / extras（各领域处理函数）
 ```
 
 - 各领域模块是纯函数工厂 `module.exports = (api)=>({...})`，由 `server.js` 注入共享上下文 `api`，无全局状态、便于单测。
 - 定时器、心跳、优雅停机属于进程级关注点，保留在入口。
-- 该拆分不改变任何对外协议与行为，e2e（253 项）在内存与 PostgreSQL 双模式下均通过。
+- 该拆分不改变任何对外协议与行为，e2e（270 项）在内存与 PostgreSQL 双模式下均通过。
 
 ## 10. 健康检查、自测与 CI（本版本新增）
 
@@ -314,9 +354,9 @@ src/modules/     rooms / tools / materials / inventory / repairs / visitors / pr
 - **npm 脚本**：
   - `npm start`：启动服务
   - `npm run lint`：对 `server.js` / `public` / `src/` / `test/` 全部 JS 执行 `node --check` 语法检查（`scripts/lint.js`）
-  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁与进度、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化、每日看点、我的待办、空间活跃趋势、用户广播、会议室时长累计 / 实际到场时长、周期预约展开、借用逾期判定、会议室占用率统计、报修优先级序列化、借用记录序列化、工具在借明细序列化、工具排队序列化、会议室候补序列化、访客签到码序列化、借用逾期提醒、会议室开始前提醒、借用到期前提醒、访客预计到访提醒、报修 SLA 超时提醒、申领 SLA 超时提醒、报修重复检测、管理员成员管理、通知统一入口、报修处理时长统计、成员移除、低库存预警、空间周报、成就扩展、物资库存台账、考勤打卡，214 项）
+  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁与进度、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化、每日看点、我的待办、空间活跃趋势、用户广播、会议室时长累计 / 实际到场时长、周期预约展开、借用逾期判定、会议室占用率统计、报修优先级序列化、借用记录序列化、工具在借明细序列化、工具排队序列化、会议室候补序列化、访客签到码序列化、借用逾期提醒、会议室开始前提醒、借用到期前提醒、访客预计到访提醒、报修 SLA 超时提醒、申领 SLA 超时提醒、报修重复检测、管理员成员管理、通知统一入口、报修处理时长统计、成员移除、低库存预警、空间周报、成就扩展、物资库存台账、考勤打卡、意见反馈序列化、工位签到字段与扩展成就，228 项）
   - `npm run test:restore`：前端「自动恢复会话」回归测试（`test/restore.js`，vm stub 加载内联脚本，无需服务）
   - `npm run smoke`：快速冒烟（`test/smoke.js`）——健康检查、首页与大屏可达、WS 连接、登录、收到广播
-  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，253 项）
+  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，270 项）
 - **CI**：`.github/workflows/ci.yml` 在 push 到 `main` 或 pull_request 时自动：`npm ci` → `npm run lint` → `docker compose config` 校验 → `docker build` 构建校验 → 内存模式启动服务 → `npm run smoke` → `npm test`。用不可达的 PG 参数强制内存模式，无需外部数据库。
 - **环境变量**：见 `.env.example`（`PORT`、`PGHOST`、`PGPORT`、`PGUSER`、`PGPASSWORD`、`PGDATABASE`）；`.env` 已加入 `.gitignore`。

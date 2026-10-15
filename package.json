@@ -1,6 +1,6 @@
 {
   "name": "office-space",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "OfficeSpace · 办公空间管理：会议室预约 / 工具借用 / 物资申领 / 报修 / 坑位看板",
   "main": "server.js",
   "scripts": {

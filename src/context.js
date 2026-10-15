@@ -15,6 +15,8 @@ function createContext() {
   const REPAIR_PRIORITIES = ['high', 'normal', 'low'];
   const TOOL_CATEGORIES = ['测试电脑', '测试机器', '测试手机', '其它'];
   const INVENTORY_CATEGORIES = ['办公文具', '打印耗材', '电池', '清洁用品', '食品饮料', '其它'];
+  const OOO_CATEGORIES = ['外出', '请假', '出差', '调休', '其他'];
+  const FEEDBACK_CATEGORIES = ['建议', '吐槽', '问题', '表扬'];
   const LIST_PAGE = 30;
   const PERSIST_DEBOUNCE_MS = 500;
   const WS_PING_MS = 30000;
@@ -22,6 +24,8 @@ function createContext() {
   const OVERDUE_REMIND_THROTTLE_MS = 24 * 3600 * 1000;
   const ROOM_REMIND_WINDOW_MS = 10 * 60000;
   const BORROW_SOON_WINDOW_MS = 24 * 3600 * 1000;
+  const OOO_RETURN_WINDOW_MS = 30 * 60000;
+  const OOO_RETURN_REMIND_THROTTLE_MS = 4 * 3600 * 1000;
   const VISIT_REMIND_WINDOW_MS = 15 * 60000;
   const REPAIR_SLA_MS = 4 * 3600 * 1000;
   const MATERIAL_SLA_MS = 2 * 24 * 3600 * 1000;
@@ -96,8 +100,13 @@ function createContext() {
   }
   function spaceUserInfo(spaceId) {
     const info = new Map();
+    const sp = spaces.get(spaceId);
+    const activeOoo = new Map();
+    if (sp) for (const r of sp.ooo.values()) if (r.status === 'active') activeOoo.set(r.account, r);
     for (const u of getUsersIn(spaceId)) {
-      info.set(u.account, { account: u.account, username: u.nickname, avatar: u.avatar, online: true, role: isAdmin(spaces.get(spaceId), u.account) ? 'admin' : 'member', status: u.status || { label: '在岗' } });
+      const ooo = activeOoo.get(u.account);
+      const status = u.status || { label: '在岗' };
+      info.set(u.account, { account: u.account, username: u.nickname, avatar: u.avatar, online: true, role: isAdmin(sp, u.account) ? 'admin' : 'member', status: ooo ? Object.assign({}, status, { label: ooo.category, emoji: status.emoji || (ooo.category === '出差' ? '✈️' : ooo.category === '请假' ? '📅' : '🚶') }) : status });
     }
     const count = new Map();
     for (const d of info.values()) { const k = lk(d.username); count.set(k, (count.get(k) || 0) + 1); }
@@ -194,6 +203,10 @@ function createContext() {
       else if (r.kind === 'visitor') sp.visitors.set(data.id, data);
       else if (r.kind === 'attendance') sp.attendanceConfig = Object.assign(newAttendanceConfig(), data || {});
       else if (r.kind === 'attendance_record') sp.attendance.set(`${data.account}::${data.date}`, data);
+      else if (r.kind === 'desk') sp.desks.push(data);
+      else if (r.kind === 'desk_reservation') sp.deskReservations.set(data.id, data);
+      else if (r.kind === 'ooo') sp.ooo.set(data.id, data);
+      else if (r.kind === 'feedback') sp.feedbacks.set(data.id, data);
       else if (r.kind === 'notice') { sp.notices.push(data); sp.notices.sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
       else if (r.kind === 'stall') { const st = sp.stalls.find((s) => s.id === data.id); if (st) st.ratings = (data.ratings || []).slice(-60); }
     }
@@ -316,10 +329,10 @@ function createContext() {
 
   // ---------- 空间 ----------
   function weekKey(ts) { const d = new Date(ts || Date.now()); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
-  function newWeekly() { return { key: weekKey(), visits: 0, borrows: 0, requests: 0, repairs: 0, meetings: 0, attends: 0 }; }
-  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, meetingActualDuration: 0, helperCount: 0, favoriteRooms: [], roomRatesGiven: 0, favoriteCount: 0, attendanceCount: 0, earlyCount: 0, weekly: newWeekly() }; }
+  function newWeekly() { return { key: weekKey(), visits: 0, borrows: 0, requests: 0, repairs: 0, meetings: 0, attends: 0, desks: 0, ooo: 0 }; }
+  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, meetingActualDuration: 0, helperCount: 0, favoriteRooms: [], roomRatesGiven: 0, favoriteCount: 0, attendanceCount: 0, earlyCount: 0, deskCount: 0, oooCount: 0, weekly: newWeekly() }; }
   function recordWeekly(user, field) { if (!user.stats.weekly || user.stats.weekly.key !== weekKey()) user.stats.weekly = newWeekly(); user.stats.weekly[field] = (user.stats.weekly[field] || 0) + 1; }
-  function weeklyScore(stats) { const w = stats.weekly; if (!w || w.key !== weekKey()) return 0; return (w.visits || 0) + (w.borrows || 0) + (w.requests || 0) + (w.repairs || 0) + (w.meetings || 0) + (w.attends || 0); }
+  function weeklyScore(stats) { const w = stats.weekly; if (!w || w.key !== weekKey()) return 0; return (w.visits || 0) + (w.borrows || 0) + (w.requests || 0) + (w.repairs || 0) + (w.meetings || 0) + (w.attends || 0) + (w.desks || 0) + (w.ooo || 0); }
   function borrowOverdue(b, now) {
     if (!b || b.status !== 'borrowed') return false;
     const nowMs = now == null ? Date.now() : now;
@@ -360,6 +373,16 @@ function createContext() {
       if (b.soonRemindedAt) return false;
       if (!b.dueAt) return false;
       return nowMs >= b.dueAt - BORROW_SOON_WINDOW_MS && nowMs < b.dueAt;
+    });
+  }
+  // 外出登记临近预计返回（默认前 30 分钟内）且尚未提醒过的外出记录
+  function dueOooReturnReminders(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    return [...space.ooo.values()].filter((r) => {
+      if (!r || r.status !== 'active') return false;
+      if (!r.expectedReturnAt) return false;
+      if (r.returnRemindedAt) return false;
+      return nowMs >= r.expectedReturnAt - OOO_RETURN_WINDOW_MS && nowMs < r.expectedReturnAt;
     });
   }
   // 访客临近预计到访（默认到访前 15 分钟内）且尚未提醒过的待到访访客
@@ -422,6 +445,7 @@ function createContext() {
       rooms: [], roomReservations: new Map(), roomWaitlist: new Map(), reservations: new Map(),
       tools: [], borrows: new Map(), toolWaitlist: new Map(), materialRequests: new Map(), materialTemplates: new Map(), repairs: new Map(), visitors: new Map(), urges: new Map(), inventory: [], inventoryIssues: new Map(),
       attendanceConfig: newAttendanceConfig(), attendance: new Map(),
+      desks: [], deskReservations: new Map(), ooo: new Map(), feedbacks: new Map(),
     };
     sp.weeklyReportDate = null;
     sp.stalls = buildStalls(squat == null ? 4 : squat, urinal == null ? 3 : urinal);
@@ -766,6 +790,95 @@ function createContext() {
     return removed;
   }
 
+  // ---------- 工位预约 + 外出登记序列化 ----------
+  // 工位：单工位时段预约，同一工位同一时段只能有一条有效预约
+  function deskPublic(space, desk) {
+    const now = Date.now();
+    const today = [...space.deskReservations.values()].filter((r) => r.deskId === desk.id && r.status !== 'cancelled' && r.status !== 'expired');
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = todayStart.getTime() + 86400000;
+    const todayList = today.filter((r) => r.startAt >= todayStart.getTime() && r.startAt < todayEnd);
+    const upcoming = todayList.filter((r) => r.status === 'pending' && r.startAt >= now);
+    return { id: desk.id, name: desk.name, location: desk.location || '', description: desk.description || '', todayCount: todayList.length, upcomingCount: upcoming.length, todayMinutes: todayList.reduce((s, r) => s + Math.max(0, Math.round((Math.min(r.endAt, todayEnd) - r.startAt) / 60000)), 0) };
+  }
+  function deskReservationsPublic(space, info) {
+    return [...space.deskReservations.values()].map((r) => {
+      const who = info.get(r.account);
+      return { id: r.id, deskId: r.deskId, account: r.account, name: who ? who.display : r.name, startAt: r.startAt, endAt: r.endAt, note: r.note || '', status: r.status, actualStartAt: r.actualStartAt || null, actualEndAt: r.actualEndAt || null };
+    }).sort((a, b) => (b.startAt - a.startAt));
+  }
+  function deskUsageStats(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const ds = new Date(nowMs); ds.setHours(0, 0, 0, 0);
+    const dStart = ds.getTime(), dEnd = dStart + 86400000;
+    const workStart = new Date(ds); workStart.setHours(9, 0, 0, 0);
+    const workEnd = new Date(ds); workEnd.setHours(21, 0, 0, 0);
+    const rooms = space.desks.map((d) => {
+      const res = [...space.deskReservations.values()].filter((x) => x.deskId === d.id && x.status !== 'cancelled' && x.status !== 'expired');
+      const today = res.filter((x) => x.startAt >= dStart && x.startAt < dEnd);
+      const upcoming = res.filter((x) => x.startAt >= nowMs && x.status === 'pending');
+      const todayMinutes = today.reduce((s, x) => s + Math.max(0, Math.round((Math.min(x.endAt, dEnd) - x.startAt) / 60000)), 0);
+      return { deskId: d.id, name: d.name, location: d.location || '', todayCount: today.length, todayMinutes, upcomingCount: upcoming.length };
+    });
+    const capacity = space.desks.length * (workEnd - workStart) / 60000;
+    return { desks: rooms, totalTodayMinutes: rooms.reduce((s, r) => s + r.todayMinutes, 0), capacityMinutes: capacity, utilizationPct: capacity ? Math.round(rooms.reduce((s, r) => s + r.todayMinutes, 0) / capacity * 100) : 0, workStart: workStart.getTime(), workEnd: workEnd.getTime() };
+  }
+  function pruneDeskReservations(space, before, max = 200) {
+    let removed = 0;
+    for (const [id, r] of [...space.deskReservations]) {
+      if (removed >= max) break;
+      if (r.status !== 'completed' && r.status !== 'cancelled' && r.status !== 'expired') continue;
+      const ts = r.endAt || r.startAt || 0;
+      if (ts >= before) continue;
+      space.deskReservations.delete(id);
+      deleteEntity(space.id, 'desk_reservation', id);
+      removed++;
+    }
+    return removed;
+  }
+  // 外出登记：外出 / 请假 / 出差 / 调休，active 期间其他成员可见
+  function oooPublic(space, info, now) {
+    const nowMs = now == null ? Date.now() : now;
+    return [...space.ooo.values()].filter((r) => r.status === 'active').map((r) => {
+      const who = info.get(r.account);
+      return {
+        id: r.id, account: r.account, name: who ? who.display : r.name, category: r.category, reason: r.reason || '',
+        startAt: r.startAt, expectedReturnAt: r.expectedReturnAt || null, endAt: r.endAt || null, status: r.status,
+      };
+    }).sort((a, b) => a.startAt - b.startAt);
+  }
+  function oooStats(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const ds = new Date(nowMs); ds.setHours(0, 0, 0, 0);
+    const dStart = ds.getTime(), dEnd = dStart + 86400000;
+    const recs = [...space.ooo.values()];
+    return {
+      activeCount: recs.filter((r) => r.status === 'active').length,
+      todayCount: recs.filter((r) => r.startAt >= dStart && r.startAt < dEnd).length,
+      onLeaveCount: recs.filter((r) => r.category === '请假').length,
+      onTripCount: recs.filter((r) => r.category === '出差').length,
+    };
+  }
+
+  // ---------- 意见反馈序列化 ----------
+  // 意见反馈：成员匿名/实名提交，管理员回复 / 关闭，全员可见处理闭环
+  function feedbackPublic(space, info) {
+    return [...space.feedbacks.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map((r) => {
+      const who = info.get(r.account);
+      return {
+        id: r.id, anonymous: !!r.anonymous,
+        author: r.anonymous ? '匿名成员' : (who ? who.display : r.name || r.account),
+        category: r.category || '建议', content: r.content || '', status: r.status,
+        replies: (r.replies || []).map((rp) => ({ account: rp.account, name: rp.name || rp.account, content: rp.content || '', createdAt: rp.createdAt || 0 })),
+        createdAt: r.createdAt || 0, handledAt: r.handledAt || null,
+      };
+    });
+  }
+  function feedbackStats(space) {
+    const recs = [...space.feedbacks.values()];
+    return { open: recs.filter((r) => r.status === 'open').length, answered: recs.filter((r) => r.status === 'answered').length, closed: recs.filter((r) => r.status === 'closed').length };
+  }
+
   // ---------- 广播 ----------
   function broadcast(spaceId, type, payload) { broadcastTo(spaceId, Object.assign({ type }, payload)); }
   function broadcastUsers(sp) {
@@ -803,6 +916,20 @@ function createContext() {
   }
   function roomStatsBroadcast(sp) { broadcast(sp.id, 'roomStats', roomUsageStats(sp)); }
   function attendanceBroadcast(sp) { broadcast(sp.id, 'attendance', { records: attendancePublic(sp), stats: attendanceStats(sp), config: sp.attendanceConfig || newAttendanceConfig() }); }
+  function desksBroadcast(sp) {
+    const info = spaceUserInfo(sp.id);
+    const reservations = deskReservationsPublic(sp, info);
+    broadcast(sp.id, 'desks', { desks: sp.desks.map((d) => deskPublic(sp, d)), reservations: reservations.slice(0, LIST_PAGE), reservationTotal: reservations.length });
+  }
+  function deskStatsBroadcast(sp) { broadcast(sp.id, 'deskStats', deskUsageStats(sp)); }
+  function oooBroadcast(sp) {
+    const info = spaceUserInfo(sp.id);
+    broadcast(sp.id, 'ooo', { records: oooPublic(sp, info), stats: oooStats(sp) });
+  }
+  function feedbackBroadcast(sp) {
+    const info = spaceUserInfo(sp.id);
+    broadcast(sp.id, 'feedback', { records: feedbackPublic(sp, info), stats: feedbackStats(sp) });
+  }
   function broadcastAll(sp) {
     const info = spaceUserInfo(sp.id);
     const reservations = roomReservationsPublic(sp, info);
@@ -820,6 +947,10 @@ function createContext() {
     broadcast(sp.id, 'notices', { notices: sp.notices });
     roomStatsBroadcast(sp);
     attendanceBroadcast(sp);
+    desksBroadcast(sp);
+    deskStatsBroadcast(sp);
+    oooBroadcast(sp);
+    feedbackBroadcast(sp);
     broadcastUsers(sp);
     broadcastLeaderboard(sp);
   }
@@ -846,6 +977,9 @@ function createContext() {
     { id: 'collector', name: '收藏家', desc: '收藏3个会议室', icon: '⭐', check: (u) => (u.stats.favoriteCount || 0) >= 3 },
     { id: 'earlyBird', name: '早到达人', desc: '累计3天在9点前打卡', icon: '🐦', check: (u) => (u.stats.earlyCount || 0) >= 3 },
     { id: 'attendanceKing', name: '打卡达人', desc: '累计打卡10次', icon: '🕒', check: (u) => (u.stats.attendanceCount || 0) >= 10 },
+    { id: 'deskKnight', name: '工位达人', desc: '预约工位累计5次', icon: '🪑', check: (u) => (u.stats.deskCount || 0) >= 5 },
+    { id: 'awayReporter', name: '外出报备达人', desc: '外出登记累计5次', icon: '🧳', check: (u) => (u.stats.oooCount || 0) >= 5 },
+    { id: 'listener', name: '倾听达人', desc: '回复意见反馈累计3条', icon: '👂', check: (u) => (u.stats.feedbackReplyCount || 0) >= 3 },
   ];
   function checkAchievements(user) {
     let changed = false;
@@ -871,6 +1005,9 @@ function createContext() {
     collector: { field: 'favoriteCount', target: 3 },
     earlyBird: { field: 'earlyCount', target: 3 },
     attendanceKing: { field: 'attendanceCount', target: 10 },
+    deskKnight: { field: 'deskCount', target: 5 },
+    awayReporter: { field: 'oooCount', target: 5 },
+    listener: { field: 'feedbackReplyCount', target: 3 },
   };
   function achievementProgress(user, def) {
     const t = ACH_TARGETS[def.id] || { field: 'totalVisits', target: 1 };
@@ -903,10 +1040,14 @@ function createContext() {
     const resolvedMaterials = [...space.materialRequests.values()].filter((r) => r.status === 'fulfilled' && r.handledAt && r.handledAt >= today0 && r.handledAt < todayEnd);
     const pendingVisitors = [...space.visitors.values()].filter((v) => v.status === 'pending' || v.status === 'arrived');
     const todayAttendance = attendanceStats(space, now);
+    const oooStatsToday = oooStats(space, now);
+    const activeOoo = [...space.ooo.values()].filter((r) => r.status === 'active').map((r) => ({ id: r.id, account: r.account, name: r.name, category: r.category, expectedReturnAt: r.expectedReturnAt || null }));
+    const deskTodayCount = [...space.deskReservations.values()].filter((r) => r.status !== 'cancelled' && r.status !== 'expired' && r.startAt >= today0 && r.startAt < todayEnd).length;
+    const deskStatsToday = deskUsageStats(space, now);
     const todayMeetingMinutes = todayMeetings.reduce((s, r) => s + Math.max(0, Math.round((Math.min(r.endAt, todayEnd) - r.startAt) / 60000)), 0);
     const todayBorrowMinutes = [...space.borrows.values()].filter((b) => b.returnedAt && b.returnedAt >= today0 && b.returnedAt < todayEnd).reduce((s, b) => s + Math.max(0, Math.round((b.returnedAt - b.borrowedAt) / 60000)), 0);
     const mvp = leaderboardPublic(space).rankings.find((r) => r.mvp) || null;
-    return { todayMeetingCount: todayMeetings.length, todayMeetings: todayMeetings.slice(0, 5), todayMeetingMinutes, todayBorrowMinutes, overdueCount: overdue.length, myBorrows: myBorrows.length, pendingMaterialsCount: pendingMaterials.length, openRepairsCount: openRepairs.length, resolvedRepairsCount: resolvedRepairs.length, resolvedMaterialsCount: resolvedMaterials.length, pendingVisitorsCount: pendingVisitors.length, pendingVisitors: pendingVisitors.slice(0, 5).map((v) => ({ visitorName: v.visitorName, hostName: v.hostName, status: v.status })), attendanceCheckedIn: todayAttendance.checkedIn, attendanceLate: todayAttendance.late, attendanceCompleteRate: todayAttendance.completeRate, mvp };
+    return { todayMeetingCount: todayMeetings.length, todayMeetings: todayMeetings.slice(0, 5), todayMeetingMinutes, todayBorrowMinutes, overdueCount: overdue.length, myBorrows: myBorrows.length, pendingMaterialsCount: pendingMaterials.length, openRepairsCount: openRepairs.length, resolvedRepairsCount: resolvedRepairs.length, resolvedMaterialsCount: resolvedMaterials.length, pendingVisitorsCount: pendingVisitors.length, pendingVisitors: pendingVisitors.slice(0, 5).map((v) => ({ visitorName: v.visitorName, hostName: v.hostName, status: v.status })), attendanceCheckedIn: todayAttendance.checkedIn, attendanceLate: todayAttendance.late, attendanceCompleteRate: todayAttendance.completeRate, oooActiveCount: oooStatsToday.activeCount, activeOoo, deskTodayCount, deskUtilizationPct: deskStatsToday.utilizationPct, mvp };
   }
 
   // ---------- 我的待办 ----------
@@ -918,6 +1059,8 @@ function createContext() {
     const pendingVisitors = [...space.visitors.values()].filter((v) => v.hostAccount === user.account && (v.status === 'pending' || v.status === 'arrived'));
     const assignedMaterials = [...space.materialRequests.values()].filter((m) => m.handlerAccount === user.account && m.status !== 'fulfilled' && m.status !== 'cancelled');
     const assignedRepairs = [...space.repairs.values()].filter((r) => r.handlerAccount === user.account && (r.status === 'reported' || r.status === 'in_progress'));
+    const upcomingDesk = [...space.deskReservations.values()].filter((r) => r.account === user.account && r.status === 'pending' && r.startAt >= nowMs && r.startAt <= nowMs + 60 * 60000);
+    const activeOoo = [...space.ooo.values()].filter((r) => r.account === user.account && r.status === 'active');
     return {
       overdueCount: overdue.length,
       overdue: overdue.map((b) => ({ id: b.id, toolId: b.toolId, qty: b.qty, dueAt: b.dueAt || null, days: Math.floor((nowMs - (b.borrowedAt || nowMs)) / 86400000) })),
@@ -929,6 +1072,10 @@ function createContext() {
       assignedMaterials: assignedMaterials.map((m) => ({ id: m.id, name: m.name, status: m.status })),
       assignedRepairCount: assignedRepairs.length,
       assignedRepairs: assignedRepairs.map((r) => ({ id: r.id, category: r.category, location: r.location, status: r.status })),
+      upcomingDeskCount: upcomingDesk.length,
+      upcomingDesk: upcomingDesk.map((r) => ({ id: r.id, deskId: r.deskId, startAt: r.startAt, endAt: r.endAt })),
+      activeOooCount: activeOoo.length,
+      activeOoo: activeOoo.map((r) => ({ id: r.id, category: r.category, expectedReturnAt: r.expectedReturnAt || null })),
     };
   }
 
@@ -939,7 +1086,7 @@ function createContext() {
     const today0 = new Date(); today0.setHours(0, 0, 0, 0);
     const dayStart = today0.getTime() - (n - 1) * 86400000;
     const buckets = [];
-    for (let i = 0; i < n; i++) buckets.push({ date: dayStart + i * 86400000, meetings: 0, borrows: 0, requests: 0, repairs: 0, visitors: 0, attends: 0 });
+    for (let i = 0; i < n; i++) buckets.push({ date: dayStart + i * 86400000, meetings: 0, borrows: 0, requests: 0, repairs: 0, visitors: 0, attends: 0, desks: 0, ooo: 0 });
     const idxOf = (ts) => Math.floor((ts - dayStart) / 86400000);
     const bump = (b, k) => { if (b >= 0 && b < n) buckets[b][k]++; };
     for (const r of space.roomReservations.values()) {
@@ -951,7 +1098,9 @@ function createContext() {
     for (const r of space.repairs.values()) { bump(idxOf(r.createdAt), 'repairs'); }
     for (const v of space.visitors.values()) { bump(idxOf(v.createdAt), 'visitors'); }
     for (const r of space.attendance.values()) { if (r.checkInAt) bump(idxOf(r.checkInAt), 'attends'); }
-    return buckets.map((b) => ({ date: b.date, meetings: b.meetings, borrows: b.borrows, requests: b.requests, repairs: b.repairs, visitors: b.visitors, attends: b.attends }));
+    for (const r of space.deskReservations.values()) { if (r.status !== 'cancelled' && r.status !== 'expired') bump(idxOf(r.startAt), 'desks'); }
+    for (const r of space.ooo.values()) { bump(idxOf(r.startAt), 'ooo'); }
+    return buckets.map((b) => ({ date: b.date, meetings: b.meetings, borrows: b.borrows, requests: b.requests, repairs: b.repairs, visitors: b.visitors, attends: b.attends, desks: b.desks, ooo: b.ooo }));
   }
 
   // ---------- 空间周报 ----------
@@ -967,6 +1116,8 @@ function createContext() {
     const repairs = [...space.repairs.values()].filter((r) => inWeek(r.createdAt));
     const visitors = [...space.visitors.values()].filter((v) => inWeek(v.createdAt));
     const attendance = [...space.attendance.values()].filter((r) => r.checkInAt && inWeek(r.checkInAt));
+    const ooo = [...space.ooo.values()].filter((r) => inWeek(r.startAt));
+    const desks = [...space.deskReservations.values()].filter((r) => r.status !== 'cancelled' && r.status !== 'expired' && inWeek(r.startAt));
     const resolvedRepairs = [...space.repairs.values()].filter((r) => r.status === 'resolved' && r.handledAt && inWeek(r.handledAt));
     const fulfilledMaterials = [...space.materialRequests.values()].filter((m) => m.status === 'fulfilled' && m.handledAt && inWeek(m.handledAt));
     const lowStock = space.tools.filter((t) => isToolLowStock(t)).map((t) => ({ id: t.id, name: t.name, available: t.available, minAvailable: t.minAvailable || 1 }));
@@ -981,6 +1132,8 @@ function createContext() {
       repairs: repairs.length, resolvedRepairs: resolvedRepairs.length,
       visitors: visitors.length,
       attendance: attendance.length,
+      ooo: ooo.length,
+      desks: desks.length,
       openRepairsCount: openRepairs.length,
       pendingMaterialsCount: pendingMaterials.length,
       lowStockTools: lowStock,
@@ -991,7 +1144,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, FEEDBACK_CATEGORIES, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -1003,11 +1156,11 @@ function createContext() {
     // 持久化
     saveSpace, saveAccount, saveProfile, saveEntity, deleteEntity, saveStallRating, saveStatsToSpace,
     // 空间
-    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
+    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats,
     // 广播
-    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, noticesBroadcast, pushNotice, visitorsBroadcast,
+    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, noticesBroadcast, pushNotice, visitorsBroadcast,
     // 坑位辅助
     activeStallCount, checkAchievements, notifyUrge, ACHIEVEMENT_DEFS,
     achievementProgress, achievementDefsPublic,

@@ -18,16 +18,17 @@ const S = {
   lastSpace: localStorage.getItem('os_space')||'',
   ws: null, me:null, space:null, module:'rooms',
   pendingLogin:null,
-  DB:{ rooms:[], reservations:[], waitlist:[], waitlistTotal:0, tools:[], requests:[], materialTemplates:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[], inventory:{items:[],issues:[]}, attendance:{records:[],stats:{},config:{workStart:'09:00',workEnd:'18:00',lateMinutes:15}} },
+  DB:{ rooms:[], reservations:[], waitlist:[], waitlistTotal:0, tools:[], requests:[], materialTemplates:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[], inventory:{items:[],issues:[]}, attendance:{records:[],stats:{},config:{workStart:'09:00',workEnd:'18:00',lateMinutes:15}}, desks:{desks:[],reservations:[],reservationTotal:0}, ooo:{records:[],stats:{}} },
   visitorTotal:0, visitorOffset:0,
   borrowTotal:0, borrowOffset:0,
   roomStats:null,
+  deskStats:null,
   lastRoomBook:null,
   favorites:[],
   weeklyReport:null,
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['stalls','坑位看板','🚻'],['attend','考勤打卡','🕒'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -58,6 +59,10 @@ function dispatch(m){
     case 'tools': S.DB.tools=m.tools; S.DB.toolWaitlist=m.waitlist||[]; break;
     case 'inventory': S.DB.inventory={ items:m.items||[], issues:m.issues||[] }; break;
     case 'attendance': S.DB.attendance={ records:m.records||[], stats:m.stats||{}, config:m.config||{workStart:'09:00',workEnd:'18:00',lateMinutes:15} }; break;
+    case 'desks': S.DB.desks={ desks:m.desks||[], reservations:m.reservations||[], reservationTotal:m.reservationTotal||0 }; break;
+    case 'deskStats': S.deskStats=m.stats; break;
+    case 'ooo': S.DB.ooo={ records:m.records||[], stats:m.stats||{} }; break;
+    case 'feedback': S.DB.feedback={ records:m.records||[], stats:m.stats||{} }; break;
     case 'materials': S.DB.requests=m.requests; S.DB.materialTemplates=m.templates||[]; S.DB.matTotal=m.total||0; S.DB.matOffset=S.DB.requests.length; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; break;
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
@@ -71,7 +76,7 @@ function dispatch(m){
     case 'spaceTrend': S.DB.trend=m.trend||[]; break;
     case 'notices': S.DB.notices=m.notices||[]; break;
     case 'digest': S.digest=m.digest; break;
-    case 'weeklyReport': S.weeklyReport=m.report||null; if(m.report){ toast('📅 本周空间周报：会议 '+(m.report.meetings||0)+' · 借用 '+(m.report.borrows||0)+' · 申领 '+(m.report.requests||0)+' · 报修 '+(m.report.repairs||0)+'（已解决 '+(m.report.resolvedRepairs||0)+'）','success'); } render(); break;
+    case 'weeklyReport': S.weeklyReport=m.report||null; if(m.report){ toast('📅 本周空间周报：会议 '+(m.report.meetings||0)+' · 借用 '+(m.report.borrows||0)+' · 申领 '+(m.report.requests||0)+' · 报修 '+(m.report.repairs||0)+'（已解决 '+(m.report.resolvedRepairs||0)+'） · 工位 '+(m.report.desks||0)+' · 外出 '+(m.report.ooo||0),'success'); } render(); break;
     case 'suggestRooms': S.suggestions=m.suggestions||[]; renderSugg(); break;
     case 'statusSet': toast('✔ 状态已更新','success'); break;
     case 'remindSent': toast('✔ 已提醒 '+(m.count||0)+' 人','success'); break;
@@ -82,6 +87,8 @@ function dispatch(m){
     case 'inventoryLowStock': toast('⚠️ 物资库存告急：'+(m.itemName||'')+' 可用 '+m.available+'（阈值 '+m.minAvailable+'）','warn'); render(); break;
     case 'attendanceCheckedIn': toast(m.isLate?'⏰ 上班打卡成功（已迟到）':'✔ 上班打卡成功', m.isLate?'warn':'success'); render(); break;
     case 'attendanceCheckedOut': toast('✔ 下班打卡成功，今日工作 '+Math.round((m.workedMinutes||0)/60)+'h'+((m.workedMinutes||0)%60?(m.workedMinutes%60)+'m':''),'success'); render(); break;
+    case 'oooBacked': toast('✔ 已确认返回（'+(m.category||'外出')+'）','success'); render(); break;
+    case 'oooReturnSoon': toast('🔔 外出预计 '+fmtTime(m.expectedReturnAt)+' 返回，请记得回来','warn'); render(); break;
     case 'borrowDueSoon': toast('🔔 你借的设备即将到期，请按时归还','warn'); render(); break;
     case 'roomReminder': { const rm=(S.DB.rooms||[]).find(r=>r.id===m.roomId); toast('🔔 '+(rm?rm.name:'会议室')+' 即将开始：'+fmtTime(m.startAt),'success'); break; }
     case 'materialAssigned': toast('📌 物资申领已指派给你：'+(m.name||''),'info'); render(); break;
@@ -119,10 +126,10 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','roomStats','users','leaderboard','achievements','myReminders','spaceTrend','notices','digest'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','roomStats','users','leaderboard','achievements','myReminders','spaceTrend','notices','digest'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
@@ -286,7 +293,7 @@ function kickMember(account){ wsSend({type:'spaceKick', account}); closeModal();
 function submitPause(){ const paused=!!$('#spPaused').value; wsSend({type:'spacePause', paused, reason:$('#spPauseReason').value}); closeModal(); }
 
 /* ============ 概览 ============ */
-const ACH = { punctual:'守时达人', endurance:'持久战', night:'夜行者', king:'蹲坑之王', grabber:'抢位达人', rater:'评论家', borrower:'借阅达人', requester:'物资管家', reporter:'热心市民', meeter:'会议达人' };
+const ACH = { punctual:'守时达人', endurance:'持久战', night:'夜行者', king:'蹲坑之王', grabber:'抢位达人', rater:'评论家', borrower:'借阅达人', requester:'物资管家', reporter:'热心市民', meeter:'会议达人', roomGuide:'会议室向导', collector:'收藏家', earlyBird:'早到达人', attendanceKing:'打卡达人', deskKnight:'工位达人', awayReporter:'外出报备达人' };
 function renderDash(){
   const d=S.DB; const st=(d.stalls||[]); const occupied=st.filter(s=>s.status==='occupied').length;
   const totalBorrowed=d.tools.reduce((a,t)=>a+t.borrowedCount,0);
@@ -307,12 +314,16 @@ function renderDash(){
     ['访客登记', S.visitorTotal||0, '🚶'],
     ['坑位占用', occupied+'/'+st.length, '🚻'],
     ['今日打卡', ((S.DB.attendance&&S.DB.attendance.stats&&S.DB.attendance.stats.checkedIn)||0), '🕒'],
+    ['今日工位', dig.deskTodayCount||0, '🪑'],
+    ['外出中', dig.oooActiveCount||0, '🧳'],
   ];
   $('#main').innerHTML = `<div class="topbar"><div><h1>概览 <span class="view-tag">${esc(S.space?S.space.name:'')}</span></h1><div class="sub">空间内的公共资源使用概览</div></div></div>
     ${mvp?`<div class="row" style="border-color:var(--yellow)"><span><span class="who">👑 本周之星</span> <b>${esc(mvp.username)}</b> · 本周活跃 ${mvp.weekly} 次</span><span class="badge ok">MVP</span></div>`:''}
     <div class="cards">${cards.map(c=>`<div class="card"><h3>${c[2]} ${c[0]}</h3><div style="font-size:30px;font-weight:800">${c[1]}</div></div>`).join('')}</div>
     ${(S.roomStats&&S.roomStats.rooms&&S.roomStats.rooms.length)?`<h3 style="margin:22px 0 10px">📊 会议室今日占用 <span class="badge info">${S.roomStats.utilizationPct}%（9:00-21:00）</span> <span class="badge ok">⏱️ 共到场 ${Math.round((S.roomStats.totalActualMinutes||0)/60)}h</span></h3>
     <div class="list">${S.roomStats.rooms.map(r=>{ const cap=S.roomStats.capacityMinutes/S.roomStats.rooms.length||1; return `<div class="row"><span><span class="who">${esc(r.name)}</span> <span class="when">今日 ${r.todayCount} 场 · ${Math.round(r.todayMinutes/60)}h${r.todayMinutes%60?''+r.todayMinutes%60+'m':''} · 待开始 ${r.upcomingCount} · ⏱️ 到场 ${Math.round(r.actualMinutes/60)}h${r.actualMinutes%60?''+r.actualMinutes%60+'m':''}</span></span><span class="fs"><span class="bar"><i style="width:${Math.min(100,Math.round(r.todayMinutes/cap*100))}%"></i></span></span></div>`; }).join('')}</div>`:''}
+    ${(S.deskStats&&S.deskStats.desks&&S.deskStats.desks.length)?`<h3 style="margin:22px 0 10px">🪑 工位今日占用 <span class="badge info">${S.deskStats.utilizationPct}%（9:00-21:00）</span></h3>
+     <div class="list">${S.deskStats.desks.map(r=>`<div class="row"><span><span class="who">${esc(r.name)}</span> <span class="when">今日 ${r.todayCount} 场 · ${Math.round(r.todayMinutes/60)}h${r.todayMinutes%60?''+r.todayMinutes%60+'m':''} · 待开始 ${r.upcomingCount}</span></span><span class="fs"><span class="bar"><i style="width:${Math.min(100, Math.round(r.todayMinutes / (S.deskStats.capacityMinutes/S.deskStats.desks.length || 1) * 100))}%"></i></span></span></div>`).join('')}</div>`:''}
     ${dig?`<h3 style="margin:22px 0 10px">📌 每日看点</h3><div class="list">
       <div class="row"><span>今日会议 ${dig.todayMeetingCount} 场</span>${dig.todayMeetingCount?`<span class="when">${dig.todayMeetings.map(r=>`${esc(r.title)}(${esc(r.ownerName)})`).join('、')}</span>`:''}</div>
       ${dig.overdueCount?`<div class="row"><span>⚠️ 有 <b>${dig.overdueCount}</b> 笔借用逾期未还</span></div>`:''}
@@ -321,6 +332,7 @@ function renderDash(){
       ${dig.openRepairsCount?`<div class="row"><span>未办结报修 ${dig.openRepairsCount}</span></div>`:''}
       ${dig.pendingVisitorsCount?`<div class="row"><span>🚶 待接待访客 ${dig.pendingVisitorsCount}${dig.pendingVisitors&&dig.pendingVisitors.length?`（${dig.pendingVisitors.map(v=>esc(v.visitorName)).join('、')}）`:''}</span></div>`:''}
       ${dig.attendanceCheckedIn?`<div class="row"><span>🕒 今日打卡 ${dig.attendanceCheckedIn} 人${dig.attendanceLate?`（迟到 ${dig.attendanceLate} 人）`:''}</span></div>`:''}
+      ${dig.oooActiveCount?`<div class="row"><span>🧳 外出中 ${dig.oooActiveCount} 人${dig.activeOoo&&dig.activeOoo.length?`（${dig.activeOoo.map(o=>esc(o.name)+'·'+esc(o.category)).join('、')}）`:''}</span></div>`:''}
       ${dig.todayBorrowMinutes?`<div class="row"><span>📅 今日归还借用累计 ${Math.round(dig.todayBorrowMinutes/60)} 小时</span></div>`:''}
     </div>`:''}
     <h3 style="margin:22px 0 10px">🟢 在线状态</h3>
@@ -332,7 +344,7 @@ function renderDash(){
     ${overdue.length?`<h3 style="margin:22px 0 10px">⏰ 逾期借用 · 占用王</h3><div class="list">${overdue.map(b=>`<div class="row"><span>${esc(b.borrowerName)} ×${b.qty} · 已借 ${b.days} 天</span><button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒归还</button></div>`).join('')}</div>`:''}
     ${S.weeklyReport?`<h3 style="margin:22px 0 10px">📅 本周空间周报 <span class="badge info">${fmtTime(S.weeklyReport.weekStart)}</span></h3><div class="list">
       <div class="row"><span>会议 ${S.weeklyReport.meetings} 场 / ${Math.round(S.weeklyReport.meetingMinutes/60)}h</span></div>
-      <div class="row"><span>借用 ${S.weeklyReport.borrows} · 申领 ${S.weeklyReport.requests}（已满足 ${S.weeklyReport.fulfilledMaterials}） · 报修 ${S.weeklyReport.repairs}（已解决 ${S.weeklyReport.resolvedRepairs}） · 访客 ${S.weeklyReport.visitors}</span></div>
+      <div class="row"><span>借用 ${S.weeklyReport.borrows} · 申领 ${S.weeklyReport.requests}（已满足 ${S.weeklyReport.fulfilledMaterials}） · 报修 ${S.weeklyReport.repairs}（已解决 ${S.weeklyReport.resolvedRepairs}） · 访客 ${S.weeklyReport.visitors} · 工位 ${S.weeklyReport.desks||0} · 外出 ${S.weeklyReport.ooo||0}</span></div>
       ${S.weeklyReport.openRepairsCount?`<div class="row"><span>⏳ 未办结报修 ${S.weeklyReport.openRepairsCount}</span></div>`:''}
       ${S.weeklyReport.pendingMaterialsCount?`<div class="row"><span>⏳ 待处理申领 ${S.weeklyReport.pendingMaterialsCount}</span></div>`:''}
       ${(S.weeklyReport.lowStockTools||[]).length?`<div class="row"><span>⚠️ 库存告急：${S.weeklyReport.lowStockTools.map(t=>`${esc(t.name)} ${t.available}/${t.minAvailable}`).join('、')}</span></div>`:''}
@@ -809,6 +821,146 @@ function openAttendConfig(){
 }
 function submitAttendConfig(){ wsSend({type:'attendConfig',workStart:$('#acStart').value,workEnd:$('#acEnd').value,lateMinutes:parseInt($('#acLate').value,10)}); closeModal(); }
 
+/* ============ 工位预约 ============ */
+function deskBadge(st){ return st==='pending'?'<span class="badge warn">已预约</span>':st==='completed'?'<span class="badge ok">已完成</span>':'<span class="badge grey">'+st+'</span>'; }
+function deskHeatHtml(d){
+  const desks = d.desks||[];
+  const now = Date.now();
+  const today = new Date(); today.setHours(0,0,0,0); const dStart=today.getTime(); const dEnd=dStart+86400000;
+  if(!desks.length) return '';
+  const startH = 9, endH = 21; const hours = endH - startH;
+  const cols = `repeat(${hours}, 1fr)`;
+  const labels = Array.from({length:hours}, (_,i)=>`${pad(startH+i)}:00`);
+  const cellFor = (hourIdx, desk) => {
+    const cellStart = dStart + hourIdx*3600000; const cellEnd = cellStart + 3600000;
+    const res = (d.reservations||[]).find(r=>r.deskId===desk.id && r.status!=='cancelled' && r.status!=='expired' && r.startAt < cellEnd && r.endAt > cellStart);
+    if(!res) return '';
+    if(res.account===S.me.account) return 'background:#8b5cf6;';
+    if(res.status==='pending') return 'background:#f59e0b;';
+    if(res.status==='active') return 'background:#3b82f6;';
+    return 'background:#10b981;';
+  };
+  return `<h3 style="margin:22px 0 10px">🔥 工位热力（今日 9:00-21:00）</h3>
+    <div style="overflow:auto"><div style="min-width:720px;display:grid;grid-template-columns:110px ${cols};gap:4px;align-items:center">
+      <div style="font-size:12px;color:var(--muted)"></div>${labels.map(l=>`<div style="font-size:12px;color:var(--muted);text-align:center">${l}</div>`).join('')}
+      ${desks.map(k=>`<div style="font-size:12px;font-weight:700">${esc(k.name)}</div>${Array.from({length:hours},(_,i)=>`<div style="height:22px;border-radius:4px;${cellFor(i,k)}"></div>`).join('')}`).join('')}
+    </div></div>`;
+}
+function renderDesks(){
+  const d=S.DB.desks||{desks:[],reservations:[]};
+  const me=S.me.account, now=Date.now();
+  $('#main').innerHTML = `<div class="topbar"><div><h1>工位预约</h1><div class="sub">开放工位 / 共享座位的时段预约，实时占用</div></div>
+    ${S.admin?'<button class="btn pri" onclick="openDeskCreate()">＋ 新增工位</button>':''}</div>
+    <div class="cards">${(d.desks||[]).map(k=>{
+      const mine=(d.reservations||[]).filter(r=>r.deskId===k.id&&(r.account===me));
+      const upcoming=mine.filter(r=>r.status==='pending'&&r.startAt>=now);
+      return `<div class="card"><h3>🪑 ${esc(k.name)} ${k.location?'· '+esc(k.location):''}</h3>
+        <div class="meta">今日 ${k.todayCount} 场 · 待开始 ${k.upcomingCount} · 时长 ${Math.round(k.todayMinutes/60)}h${k.todayMinutes%60?''+k.todayMinutes%60+'m':''}</div>
+        <div class="foot fs">${mine.some(r=>r.status==='pending')?'<span class="badge ok">你已预约</span>':`<button class="btn pri sm" onclick="openDeskReserve('${k.id}','${esc(k.name)}')">预约</button>`}</div></div>`;
+    }).join('')||'<div class="empty">还没有工位，管理员可新增</div>'}</div>
+    ${deskHeatHtml(d)}
+    <h3 style="margin:22px 0 10px">📅 全部预约</h3>
+    <div class="list">${(d.reservations||[]).map(r=>{
+      const desk=(d.desks||[]).find(k=>k.id===r.deskId);
+      const mine=r.account===me;
+      return `<div class="row"><span><span class="who">🪑 ${esc(desk?desk.name:'工位')}</span> · ${esc(r.name)} <span class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}</span><div class="desc">${esc(r.note||'')}</div></span>
+        <span class="fs">${deskBadge(r.status)}${mine&&r.status==='pending'?`<button class="btn pri sm" onclick="deskStart('${r.id}')">签到</button><button class="btn danger sm" onclick="cancelDesk('${r.id}')">取消</button>`:''}${mine&&r.status==='active'?`<button class="btn green sm" onclick="deskEnd('${r.id}')">签退</button>`:''}</span></div>`;
+    }).join('')||'<div class="empty">暂无工位预约</div>'}</div>`;
+}
+function openDeskCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>新增工位</h2><div class="form">
+  <div class="fld"><label>名称</label><input id="dkName" placeholder="如：3F 工位 A"></div>
+  <div class="fld"><label>位置</label><input id="dkLoc" placeholder="可选"></div>
+  <div class="fld"><label>备注</label><input id="dkDesc" placeholder="可选"></div>
+  <button class="btn pri" onclick="submitDeskCreate()">创建</button></div>`); }
+function submitDeskCreate(){ wsSend({type:'deskCreate',name:$('#dkName').value,location:$('#dkLoc').value,description:$('#dkDesc').value}); closeModal(); }
+function openDeskReserve(id,name){
+  const d=(ms)=>{ const x=new Date(ms), off=x.getTimezoneOffset(); return new Date(ms-off).toISOString().slice(0,16); };
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>预约工位 · ${esc(name)}</h2><div class="form">
+    <div class="fld"><label>开始时间</label><input id="dkStart" type="datetime-local"></div>
+    <div class="fld"><label>结束时间</label><input id="dkEnd" type="datetime-local"></div>
+    <div class="fld"><label>备注（可选）</label><input id="dkNote" placeholder="如：专注写方案"></div>
+    <button class="btn pri" onclick="submitDeskReserve('${id}')">提交预约</button>
+    <div class="hint">同一工位时段不可重叠；到点后自动流转为已完成</div></div>`);
+  const start=Date.now()+10*60000, end=start+60*60000;
+  $('#dkStart').value=d(start); $('#dkEnd').value=d(end);
+}
+function submitDeskReserve(id){
+  const st=new Date($('#dkStart').value).getTime(), en=new Date($('#dkEnd').value).getTime();
+  if(!(st>0)||!(en>st)) return toast('时间无效','error');
+  wsSend({type:'deskReserve',deskId:id,startAt:st,endAt:en,note:$('#dkNote').value||''});
+  closeModal();
+}
+function cancelDesk(id){ wsSend({type:'deskCancel',reservationId:id}); }
+function deskStart(id){ wsSend({type:'deskStart',reservationId:id}); }
+function deskEnd(id){ wsSend({type:'deskEnd',reservationId:id}); }
+function removeDesk(id){ if(confirm('删除该工位？')) wsSend({type:'deskDelete',deskId:id}); }
+
+/* ============ 外出登记 ============ */
+function renderOoo(){
+  const d=S.DB.ooo||{records:[],stats:{}};
+  const me=S.me.account;
+  const st=d.stats||{};
+  $('#main').innerHTML = `<div class="topbar"><div><h1>外出登记</h1><div class="sub">登记外出 / 请假 / 出差 / 调休，同事可看到你的状态与预计返回时间</div></div>
+    <button class="btn pri" onclick="openOooCreate()">＋ 登记外出</button></div>
+    <div class="cards">
+      <div class="card"><h3>🧳 外出中</h3><div style="font-size:30px;font-weight:800">${st.activeCount||0}</div><div class="meta">人当前外出 / 请假</div></div>
+      <div class="card"><h3>📅 今日登记</h3><div style="font-size:30px;font-weight:800">${st.todayCount||0}</div><div class="meta">人次</div></div>
+      <div class="card"><h3>🏷️ 请假</h3><div style="font-size:30px;font-weight:800">${st.onLeaveCount||0}</div><div class="meta">人</div></div>
+      <div class="card"><h3>✈️ 出差</h3><div style="font-size:30px;font-weight:800">${st.onTripCount||0}</div><div class="meta">人</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">📋 当前外出</h3>
+    <div class="list">${(d.records||[]).length?d.records.map(r=>{
+      const mine=r.account===me;
+      return `<div class="row"><span><span class="who">${esc(r.name||r.account)}</span> <span class="badge warn">${esc(r.category)}</span>
+        <div class="desc">${esc(r.reason||'')}</div>
+        <div class="when">${fmtTime(r.startAt)}${r.expectedReturnAt?' · 预计返回 '+fmtTime(r.expectedReturnAt):''}</div>
+      </span><span class="fs">${mine?`<button class="btn green sm" onclick="ooBack('${r.id}')">已返回</button><button class="btn danger sm" onclick="ooCancel('${r.id}')">取消</button>`:(S.admin?`<button class="btn danger sm" onclick="ooRemove('${r.id}')">删除</button>`:'')}</span></div>`;
+    }).join(''):'<div class="empty">当前没有人外出</div>'}</div>`;
+}
+function openOooCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>登记外出</h2><div class="form">
+  <div class="fld"><label>类型</label><select id="ooCat"><option>外出</option><option>请假</option><option>出差</option><option>调休</option><option>其他</option></select></div>
+  <div class="fld"><label>事由（可选）</label><input id="ooReason" placeholder="如：客户拜访 / 家中有事"></div>
+  <div class="fld"><label>预计返回时间（可选）</label><input id="ooReturn" type="datetime-local"></div>
+  <button class="btn pri" onclick="submitOooCreate()">登记</button>
+  <div class="hint">已有进行中的外出登记时需先返回或取消</div></div>`); }
+function submitOooCreate(){ const rt=$('#ooReturn').value?new Date($('#ooReturn').value).getTime():0; wsSend({type:'oooCreate',category:$('#ooCat').value,reason:$('#ooReason').value,expectedReturnAt:rt||0}); closeModal(); }
+function ooBack(id){ wsSend({type:'oooBack',oooId:id}); }
+function ooCancel(id){ wsSend({type:'oooCancel',oooId:id}); }
+function ooRemove(id){ wsSend({type:'oooRemove',oooId:id}); }
+
+/* ============ 意见反馈 ============ */
+function renderFeedback(){
+  const d=S.DB.feedback||{records:[],stats:{}};
+  const me=S.me.account;
+  const st=d.stats||{};
+  const statusBadge=(s)=> s==='open'?'<span class="badge warn">待处理</span>':s==='answered'?'<span class="badge ok">已回复</span>':'<span class="badge">已关闭</span>';
+  $('#main').innerHTML = `<div class="topbar"><div><h1>意见反馈</h1><div class="sub">匿名 / 实名提建议、吐槽、问题或表扬，管理员回复后闭环</div></div>
+    <button class="btn pri" onclick="openFeedbackCreate()">＋ 提反馈</button></div>
+    <div class="cards">
+      <div class="card"><h3>📥 待处理</h3><div style="font-size:30px;font-weight:800">${st.open||0}</div><div class="meta">条反馈等待回复</div></div>
+      <div class="card"><h3>✅ 已回复</h3><div style="font-size:30px;font-weight:800">${st.answered||0}</div><div class="meta">条已闭环</div></div>
+      <div class="card"><h3>🔒 已关闭</h3><div style="font-size:30px;font-weight:800">${st.closed||0}</div><div class="meta">条无需跟进</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">💌 反馈列表</h3>
+    <div class="list">${(d.records||[]).length?d.records.map(r=>`
+      <div class="row"><span><span class="who">${r.anonymous?'🕶️ ':'🙋 '}${esc(r.author)} <span class="badge">${esc(r.category)}</span> ${statusBadge(r.status)}</span>
+        <div class="desc">${esc(r.content)}</div>
+        <div class="when">${fmtTime(r.createdAt)}</div>
+        ${(r.replies||[]).map(rp=>`<div class="reply"><span class="who">👤 ${esc(rp.name||rp.account)}</span><div class="desc">${esc(rp.content)}</div></div>`).join('')}
+      </span><span class="fs">${S.admin&&r.status!=='closed'?`<button class="btn pri sm" onclick="openFeedbackReply('${r.id}')">回复</button><button class="btn danger sm" onclick="feedbackClose('${r.id}')">关闭</button>`:''}</span></div>`).join(''):'<div class="empty">还没有反馈，来提第一条吧</div>'}</div>`;
+}
+function openFeedbackCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>提反馈</h2><div class="form">
+  <div class="fld"><label>类型</label><select id="fbCat"><option>建议</option><option>吐槽</option><option>问题</option><option>表扬</option></select></div>
+  <div class="fld"><label>内容</label><textarea id="fbContent" rows="4" placeholder="描述你的建议或问题…"></textarea></div>
+  <label class="check"><input id="fbAnon" type="checkbox"> 匿名提交</label>
+  <button class="btn pri" onclick="submitFeedbackCreate()">提交</button></div>`); }
+function submitFeedbackCreate(){ wsSend({type:'feedbackCreate',category:$('#fbCat').value,content:$('#fbContent').value,anonymous:$('#fbAnon').checked}); closeModal(); }
+function openFeedbackReply(id){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>回复反馈</h2><div class="form">
+  <div class="fld"><label>回复内容</label><textarea id="fbReply" rows="4" placeholder="感谢反馈，我们会跟进…"></textarea></div>
+  <button class="btn pri" onclick="submitFeedbackReply('${id}')">回复</button></div>`); }
+function submitFeedbackReply(id){ wsSend({type:'feedbackReply',feedbackId:id,content:$('#fbReply').value}); closeModal(); }
+function feedbackClose(id){ wsSend({type:'feedbackClose',feedbackId:id}); }
+
 function renderAchievements(){
   const list = S.DB.achievements || [];
   $('#main').innerHTML = `<div class="topbar"><div><h1>成就墙</h1><div class="sub">办公冒险进度 · 达成条件即可解锁专属徽章</div></div></div>
@@ -826,22 +978,22 @@ function renderAchievements(){
 function renderReminders(){
   const r = S.DB.reminders || {};
   const tools = S.DB.tools || [];
-  const fmtMin = (ms) => `${Math.floor(ms/60000)}分钟`;
-  const sec = (r) => {
-    if (r.overdueCount) return `<h3 style="margin:22px 0 10px">⏰ 逾期借用 <span class="badge bad">${r.overdueCount}</span></h3><div class="list">${r.overdue.map(b=>{ const t=tools.find(x=>x.id===b.toolId); return `<div class="row"><span>${esc(t?t.name:b.toolId)} ×${b.qty} · 已借 ${b.days} 天</span><button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒归还</button></div>`; }).join('')}</div>`;
-    if (r.upcomingCount) return `<h3 style="margin:22px 0 10px">📅 临近会议 <span class="badge warn">${r.upcomingCount}</span></h3><div class="list">${r.upcoming.map(m=>`<div class="row"><span><span class="who">${esc(m.title)}</span> <span class="when">${fmtTime(m.startAt)} → ${fmtTime(m.endAt)}</span></span></div>`).join('')}</div>`;
-    if (r.pendingVisitorCount) return `<h3 style="margin:22px 0 10px">🚶 待接待访客 <span class="badge warn">${r.pendingVisitorCount}</span></h3><div class="list">${r.pendingVisitors.map(v=>`<div class="row"><span>${esc(v.visitorName)} <span class="badge ${v.status==='pending'?'warn':'info'}">${v.status==='pending'?'待到访':'已到访'}</span></span></div>`).join('')}</div>`;
-    if (r.assignedMaterialCount) return `<h3 style="margin:22px 0 10px">📦 指派给我的申领 <span class="badge warn">${r.assignedMaterialCount}</span></h3><div class="list">${r.assignedMaterials.map(m=>`<div class="row"><span>${esc(m.name)} <span class="badge ${m.status==='pending'?'warn':'info'}">${m.status}</span></span></div>`).join('')}</div>`;
-    if (r.assignedRepairCount) return `<h3 style="margin:22px 0 10px">🛠️ 指派给我的报修 <span class="badge warn">${r.assignedRepairCount}</span></h3><div class="list">${r.assignedRepairs.map(x=>`<div class="row"><span>${esc(x.category)} ${esc(x.location)} <span class="badge ${x.status==='reported'?'warn':'info'}">${x.status}</span></span></div>`).join('')}</div>`;
-    return '<div class="empty">🎉 一切就绪，暂无待办事项</div>';
-  };
+  const sections = [];
+  if (r.overdueCount) sections.push(`<h3 style="margin:22px 0 10px">⏰ 逾期借用 <span class="badge bad">${r.overdueCount}</span></h3><div class="list">${r.overdue.map(b=>{ const t=tools.find(x=>x.id===b.toolId); return `<div class="row"><span>${esc(t?t.name:b.toolId)} ×${b.qty} · 已借 ${b.days} 天</span><button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒归还</button></div>`; }).join('')}</div>`);
+  if (r.upcomingCount) sections.push(`<h3 style="margin:22px 0 10px">📅 临近会议 <span class="badge warn">${r.upcomingCount}</span></h3><div class="list">${r.upcoming.map(m=>`<div class="row"><span><span class="who">${esc(m.title)}</span> <span class="when">${fmtTime(m.startAt)} → ${fmtTime(m.endAt)}</span></span></div>`).join('')}</div>`);
+  if (r.upcomingDeskCount) sections.push(`<h3 style="margin:22px 0 10px">🪑 临近工位 <span class="badge warn">${r.upcomingDeskCount}</span></h3><div class="list">${r.upcomingDesk.map(m=>{ const desk=(S.DB.desks||[]).find(x=>x.id===m.deskId); return `<div class="row"><span><span class="who">${esc(desk?desk.name:'工位')}</span> <span class="when">${fmtTime(m.startAt)} → ${fmtTime(m.endAt)}</span></span><span class="fs">${deskBadge('pending')}<button class="btn danger sm" onclick="cancelDesk('${m.id}')">取消</button></span></div>`; }).join('')}</div>`);
+  if (r.activeOooCount) sections.push(`<h3 style="margin:22px 0 10px">🧳 外出中 <span class="badge warn">${r.activeOooCount}</span></h3><div class="list">${r.activeOoo.map(o=>`<div class="row"><span><span class="who">${esc(o.category)}</span> <span class="when">${o.expectedReturnAt?'预计返回 '+fmtTime(o.expectedReturnAt):''}</span></span><span class="fs"><button class="btn green sm" onclick="ooBack('${o.id}')">已返回</button><button class="btn danger sm" onclick="ooCancel('${o.id}')">取消</button></span></div>`).join('')}</div>`);
+  if (r.pendingVisitorCount) sections.push(`<h3 style="margin:22px 0 10px">🚶 待接待访客 <span class="badge warn">${r.pendingVisitorCount}</span></h3><div class="list">${r.pendingVisitors.map(v=>`<div class="row"><span>${esc(v.visitorName)} <span class="badge ${v.status==='pending'?'warn':'info'}">${v.status==='pending'?'待到访':'已到访'}</span></span></div>`).join('')}</div>`);
+  if (r.assignedMaterialCount) sections.push(`<h3 style="margin:22px 0 10px">📦 指派给我的申领 <span class="badge warn">${r.assignedMaterialCount}</span></h3><div class="list">${r.assignedMaterials.map(m=>`<div class="row"><span>${esc(m.name)} <span class="badge ${m.status==='pending'?'warn':'info'}">${m.status}</span></span></div>`).join('')}</div>`);
+  if (r.assignedRepairCount) sections.push(`<h3 style="margin:22px 0 10px">🛠️ 指派给我的报修 <span class="badge warn">${r.assignedRepairCount}</span></h3><div class="list">${r.assignedRepairs.map(x=>`<div class="row"><span>${esc(x.category)} ${esc(x.location)} <span class="badge ${x.status==='reported'?'warn':'info'}">${x.status}</span></span></div>`).join('')}</div>`);
+  if (!sections.length) sections.push('<div class="empty">🎉 一切就绪，暂无待办事项</div>');
   $('#main').innerHTML = `<div class="topbar"><div><h1>我的待办</h1><div class="sub">按优先级聚合与你相关的到期、临期与待处理事项</div></div>
-    <button class="btn" onclick="wsSend({type:'getMyReminders'})">刷新</button></div>${sec(r)}`;
+    <button class="btn" onclick="wsSend({type:'getMyReminders'})">刷新</button></div>${sections.join('')}`;
 }
 function renderTrend(){
   const list = S.DB.trend || [];
-  const metrics = [['meetings','🏢 会议'],['borrows','🔧 借用'],['requests','📦 申领'],['repairs','🛠️ 报修'],['visitors','🚶 访客'],['attends','🕒 打卡']];
-  const maxVal = Math.max(1, ...list.map((b) => Math.max(b.meetings, b.borrows, b.requests, b.repairs, b.visitors, b.attends)));
+  const metrics = [['meetings','🏢 会议'],['borrows','🔧 借用'],['requests','📦 申领'],['repairs','🛠️ 报修'],['visitors','🚶 访客'],['attends','🕒 打卡'],['desks','🪑 工位'],['ooo','🧳 外出']];
+  const maxVal = Math.max(1, ...list.map((b) => Math.max(b.meetings, b.borrows, b.requests, b.repairs, b.visitors, b.attends, b.desks||0, b.ooo||0)));
   $('#main').innerHTML = `<div class="topbar"><div><h1>空间趋势</h1><div class="sub">近 ${list.length} 天各模块活动量</div></div>
     <div class="btn grp"><button class="btn" onclick="loadTrend(7)">近7天</button><button class="btn pri" onclick="loadTrend(14)">近14天</button><button class="btn" onclick="loadTrend(30)">近30天</button></div></div>
     ${list.length?metrics.map(([k,label])=>`

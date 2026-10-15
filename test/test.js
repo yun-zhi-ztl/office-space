@@ -38,6 +38,15 @@ function httpJson(method, path, body) {
 const reg = (a, p, u) => httpJson('POST', '/api/register', { account: a, password: p, username: u, avatar: '🧑' });
 const mk = (ws, type) => ws._messages.filter(m => m.type === type);
 const last = (ws, type) => { const a = mk(ws, type); return a[a.length - 1]; };
+async function waitFor(ws, type, predicate, timeout = 5000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const a = mk(ws, type);
+    if (a.length && predicate(a[a.length - 1])) return a[a.length - 1];
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return null;
+}
 
 async function loginTo(ws, spaceId, account, password) {
   await sendMsg(ws, { type: 'join', spaceId });
@@ -955,7 +964,7 @@ async function runTests() {
     await sendMsg(wA, { type: 'getAchievements' });
     const ach = last(wA, 'achievements');
     assert(ach && Array.isArray(ach.achievements), '成就墙返回 achievements 数组');
-    assert(ach.achievements.length === 15, '成就墙含 15 个成就');
+    assert(ach.achievements.length === 18, '成就墙含 18 个成就');
     assert(ach.achievements.every((a) => a.id && a.name && a.desc && a.icon), '每项成就含 id/name/desc/icon');
     assert(ach.achievements.every((a) => a.current != null && a.target != null && a.pct != null && typeof a.unlocked === 'boolean'), '每项成就含进度字段');
     assert(ach.achievements.find((a) => a.id === 'punctual').target === 3, '守时达人目标值为 3');
@@ -982,7 +991,7 @@ async function runTests() {
     await sendMsg(wN, { type: 'removeNotice', noticeId: nid });
     const rm = last(wN, 'noticeRemoved');
     assert(rm && rm.noticeId === nid, '管理员删除公告成功');
-    nt = last(wN, 'notices');
+    nt = await waitFor(wN, 'notices', (n) => n.notices.length === 0, 5000);
     assert(nt && nt.notices.length === 0, '删除后公告列表清空');
     wN.close(); wM.close();
   }
@@ -1011,7 +1020,7 @@ async function runTests() {
     await sendMsg(wT, { type: 'getSpaceTrend', days: 14 });
     const t = last(wT, 'spaceTrend');
     assert(t && Array.isArray(t.trend) && t.trend.length === 14, '趋势返回 14 天数组');
-    assert(t.trend.every((b) => 'date' in b && 'meetings' in b && 'borrows' in b && 'requests' in b && 'repairs' in b && 'visitors' in b), '每项含 date 与五类计数');
+    assert(t.trend.every((b) => 'date' in b && 'meetings' in b && 'borrows' in b && 'requests' in b && 'repairs' in b && 'visitors' in b && 'attends' in b && 'desks' in b && 'ooo' in b), '每项含 date 与七类计数');
     wT.close();
   }
 
@@ -1252,6 +1261,84 @@ async function runTests() {
     await sendMsg(wB, { type: 'attendConfig', workStart: '08:00', workEnd: '17:00', lateMinutes: 30 });
     const errCfg = mk(wB, 'error');
     assert(errCfg.length > 0 && errCfg[errCfg.length - 1].message.includes('仅管理员'), '成员配置考勤规则被拒');
+    wA.close(); wB.close();
+  }
+
+  // ========== 测试30: 工位预约与外出登记 ==========
+  console.log('\n📋 测试30: 工位预约与外出登记');
+  {
+    const spD = (await httpJson('POST', '/api/spaces', { name: '工位外出办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aD = 'desk_' + runKey, bD = 'deskm_' + runKey;
+    await reg(aD, 'pw', '工位管理员'); await reg(bD, 'pw', '工位成员');
+    const wA = await createWSClient(); await loginTo(wA, spD.id, aD, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spD.id, bD, 'pw');
+    // 工位创建与预约
+    await sendMsg(wA, { type: 'deskCreate', name: '3F工位A', location: '3F' });
+    const desks0 = await waitFor(wA, 'desks', (d) => d.desks && d.desks.length === 1, 3000);
+    const deskId = desks0 && desks0.desks[0].id;
+    assert(deskId, '管理员创建工位成功');
+    const startAt = Date.now() + 20 * 60000;
+    await sendMsg(wB, { type: 'deskReserve', deskId, startAt, endAt: startAt + 60 * 60000, note: '专注' });
+    const desks1 = await waitFor(wA, 'desks', (d) => d.reservations && d.reservations.length === 1, 3000);
+    assert(desks1 && desks1.reservations[0].status === 'pending', '成员预约工位成功');
+    const deskStats = await waitFor(wA, 'deskStats', (s) => s && s.desks && s.desks.length === 1, 3000);
+    assert(deskStats && deskStats.utilizationPct >= 0, '工位统计广播包含利用率');
+    // 工位签到 / 签退
+    const resId = desks1.reservations[0].id;
+    await sendMsg(wB, { type: 'deskStart', reservationId: resId });
+    const deskActive = await waitFor(wA, 'desks', (d) => d.reservations && d.reservations.some((r) => r.id === resId && r.status === 'active'), 3000);
+    assert(deskActive, '工位签到后状态流转为进行中');
+    const deskActive2 = await waitFor(wA, 'desks', (d) => d.reservations && d.reservations.some((r) => r.id === resId && r.actualStartAt), 3000);
+    assert(deskActive2, '工位签到记录实际到场时间');
+    await sendMsg(wB, { type: 'deskEnd', reservationId: resId });
+    const deskDone = await waitFor(wA, 'desks', (d) => d.reservations && d.reservations.some((r) => r.id === resId && r.status === 'completed'), 3000);
+    assert(deskDone, '工位签退后状态流转为已完成');
+    // 外出登记与状态同步
+    await sendMsg(wB, { type: 'oooCreate', category: '出差', reason: '客户现场', expectedReturnAt: Date.now() + 2 * 3600000 });
+    const oooMsg = await waitFor(wB, 'ooo', (o) => o.records && o.records.length === 1, 3000);
+    assert(oooMsg && oooMsg.stats.activeCount === 1, '外出登记后统计 activeCount=1');
+    const usersMsg = await waitFor(wB, 'users', (u) => u.users && u.users.some((x) => x.account === bD && x.status && x.status.label === '出差'), 3000);
+    assert(usersMsg && usersMsg.users.find((x) => x.account === bD).status.label === '出差', '外出登记同步在线状态');
+    await sendMsg(wB, { type: 'getMyReminders' });
+    const myRem = await waitFor(wB, 'myReminders', (r) => r.reminders && r.reminders.activeOooCount === 1, 3000);
+    assert(myRem && myRem.reminders.activeOooCount === 1, '我的待办聚合外出中');
+    // 返回外出
+    const oooId = oooMsg.records[0].id;
+    await sendMsg(wB, { type: 'oooBack', oooId });
+    const oooBackMsg = await waitFor(wB, 'oooBacked', (m) => m.category === '出差', 3000);
+    assert(oooBackMsg, '外出返回通知送达');
+    const oooAfter = await waitFor(wB, 'ooo', (o) => o.records && o.records.length === 0, 3000);
+    assert(oooAfter && oooAfter.stats.activeCount === 0, '外出返回后 activeCount 归零');
+    wA.close(); wB.close();
+  }
+
+  // ========== 测试31: 意见反馈 ==========
+  console.log('\n📋 测试31: 意见反馈');
+  {
+    const spF = (await httpJson('POST', '/api/spaces', { name: '反馈办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aF = 'fb_' + runKey, bF = 'fbm_' + runKey;
+    await reg(aF, 'pw', '反馈管理员'); await reg(bF, 'pw', '反馈成员');
+    const wA = await createWSClient(); await loginTo(wA, spF.id, aF, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spF.id, bF, 'pw');
+    // 成员匿名提交反馈
+    await sendMsg(wB, { type: 'feedbackCreate', category: '建议', content: '希望增加意见反馈模块', anonymous: true });
+    const fb0 = await waitFor(wB, 'feedback', (f) => f.records && f.records.length === 1, 3000);
+    assert(fb0 && fb0.records[0].author === '匿名成员', '匿名反馈隐藏作者');
+    assert(fb0 && fb0.records[0].status === 'open', '新反馈初始为待处理');
+    assert(fb0 && fb0.stats.open === 1, '反馈统计待处理为 1');
+    // 成员不能回复
+    await sendMsg(wB, { type: 'feedbackReply', feedbackId: fb0.records[0].id, content: '我自己回复' });
+    const fbErr = mk(wB, 'error');
+    assert(fbErr.length > 0 && fbErr[fbErr.length - 1].message.includes('仅管理员'), '成员回复反馈被拒');
+    // 管理员回复后闭环
+    const fbId = fb0.records[0].id;
+    await sendMsg(wA, { type: 'feedbackReply', feedbackId: fbId, content: '已收到，加入排期' });
+    const fb1 = await waitFor(wA, 'feedback', (f) => f.records && f.records.some((r) => r.id === fbId && r.status === 'answered'), 3000);
+    assert(fb1 && fb1.stats.answered === 1, '管理员回复后反馈已回复');
+    // 管理员关闭反馈
+    await sendMsg(wA, { type: 'feedbackClose', feedbackId: fbId });
+    const fb2 = await waitFor(wA, 'feedback', (f) => f.records && f.records.some((r) => r.id === fbId && r.status === 'closed'), 3000);
+    assert(fb2 && fb2.stats.closed === 1, '管理员关闭反馈成功');
     wA.close(); wB.close();
   }
 

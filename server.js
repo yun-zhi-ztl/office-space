@@ -23,6 +23,9 @@ const profileModule = require('./src/modules/profile');
 const stallsModule = require('./src/modules/stalls');
 const extrasModule = require('./src/modules/extras');
 const attendanceModule = require('./src/modules/attendance');
+const desksModule = require('./src/modules/desks');
+const oooModule = require('./src/modules/ooo');
+const feedbackModule = require('./src/modules/feedback');
 
 // ---------- 上下文 ----------
 const api = createContext();
@@ -60,6 +63,9 @@ const profile = profileModule(api);
 const stalls = stallsModule(api);
 const extras = extrasModule(api);
 const attendance = attendanceModule(api);
+const desks = desksModule(api);
+const ooo = oooModule(api);
+const feedback = feedbackModule(api);
 
 // ---------- 分页加载 ----------
 function handleFetchPage(ws, user, space, msg) {
@@ -73,6 +79,7 @@ function handleFetchPage(ws, user, space, msg) {
   else if (msg.module === 'rooms') { const all = api.roomReservationsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
   else if (msg.module === 'visitors') { const all = api.visitorsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
   else if (msg.module === 'borrows') { const all = api.borrowsPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
+  else if (msg.module === 'feedback') { const all = api.feedbackPublic(space, info); total = all.length; items = all.slice(offset, offset + limit); }
   else return api.sendTo(ws, api.serError('不支持的分页模块'));
   api.sendTo(ws, { type: 'page', module: msg.module, offset, items, total });
 }
@@ -124,6 +131,12 @@ wss.on('connection', (ws) => {
         stalls.handleStalls(ws, user, space, msg); break;
       case 'attendConfig': case 'attendCheckIn': case 'attendCheckOut':
         attendance.handleAttendance(ws, user, space, msg); break;
+      case 'deskCreate': case 'deskDelete': case 'deskReserve': case 'deskCancel': case 'deskStart': case 'deskEnd':
+        desks.handleDesks(ws, user, space, msg); break;
+      case 'oooCreate': case 'oooBack': case 'oooCancel': case 'oooRemove':
+        ooo.handleOoo(ws, user, space, msg); break;
+      case 'feedbackCreate': case 'feedbackReply': case 'feedbackClose': case 'feedbackRemove':
+        feedback.handleFeedback(ws, user, space, msg); break;
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
       case 'announce': extras.announce(ws, user, space, msg); break;
       case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;
@@ -244,6 +257,13 @@ setInterval(() => {
     }
     if (roomsChanged) rooms.roomsBroadcast(sp);
     if (api.pruneRoomReservations(sp, now - 7 * 86400000)) rooms.roomsBroadcast(sp);
+    // 工位预约：到点自动流转为已完成，避免「进行中」悬挂
+    let desksChanged = false;
+    for (const res of [...sp.deskReservations.values()]) {
+      if (res.status === 'pending' && now >= res.endAt) { res.status = 'completed'; desksChanged = true; api.saveEntity(sp.id, 'desk_reservation', res.id, res); }
+    }
+    if (desksChanged) { desks.desksBroadcast(sp); api.deskStatsBroadcast(sp); }
+    if (api.pruneDeskReservations(sp, now - 7 * 86400000)) { desks.desksBroadcast(sp); api.deskStatsBroadcast(sp); }
     // 候补清理：时段已过仍未晋升的候补标记为 expired
     let waitlistChanged = false;
     for (const [wid, w] of [...sp.roomWaitlist]) {
@@ -284,6 +304,16 @@ setInterval(() => {
         api.sendToAccount(b.borrowerAccount, { type: 'borrowDueSoon', borrowId: b.id });
       }
       tools.toolsBroadcast(sp);
+    }
+    // 外出预计返回提醒：预计返回前 30 分钟内提醒一次
+    const oooReturnReminders = api.dueOooReturnReminders(sp, now);
+    if (oooReturnReminders.length) {
+      for (const r of oooReturnReminders) {
+        r.returnRemindedAt = now;
+        api.saveEntity(sp.id, 'ooo', r.id, r);
+        api.sendToAccount(r.account, { type: 'oooReturnSoon', oooId: r.id, expectedReturnAt: r.expectedReturnAt });
+      }
+      ooo.oooBroadcast(sp);
     }
     // 访客预计到访提醒：到访前 15 分钟内提醒接待人一次
     const visitorReminders = api.dueVisitorReminders(sp, now);
@@ -337,7 +367,7 @@ setInterval(() => {
       sp.weeklyReportDate = api.weekKey(monday9);
       const report = api.buildWeeklyReport(sp, now);
       api.broadcast(sp.id, 'weeklyReport', { report });
-      api.pushNotice(sp, `📅 本周空间周报：会议 ${report.meetings} · 借用 ${report.borrows} · 申领 ${report.requests} · 报修 ${report.repairs}（已解决 ${report.resolvedRepairs}）`, 'system', '系统');
+      api.pushNotice(sp, `📅 本周空间周报：会议 ${report.meetings} · 借用 ${report.borrows} · 申领 ${report.requests} · 报修 ${report.repairs}（已解决 ${report.resolvedRepairs}） · 工位 ${report.desks} · 外出 ${report.ooo}`, 'system', '系统');
     }
   }
 }, 15000);
