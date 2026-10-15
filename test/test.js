@@ -369,6 +369,42 @@ async function runTests() {
     wP1.close(); wP2.close();
   }
 
+  // ========== 测试14: 空间设置（管理员改名） ==========
+  console.log('\n📋 测试14: 空间设置');
+  {
+    const spS = (await httpJson('POST', '/api/spaces', { name: '旧空间名', squat_count: 1, urinal_count: 1 })).json;
+    const aS = 'space_' + runKey;
+    await reg(aS, 'pw', '空间管理员');
+    const wS = await createWSClient(); await loginTo(wS, spS.id, aS, 'pw');
+    await sendMsg(wS, { type: 'spaceRename', name: '新空间名' });
+    const ren = last(wS, 'spaceRenamed');
+    assert(ren && ren.name === '新空间名', '管理员改空间名成功');
+    const spacesNow = await httpJson('GET', '/api/spaces');
+    const found = (spacesNow.json || []).find((s) => s.id === spS.id);
+    assert(found && found.name === '新空间名', '空间列表同步新名称');
+    const bS = 'spacemem_' + runKey; await reg(bS, 'pw', '成员');
+    const wM = await createWSClient(); await loginTo(wM, spS.id, bS, 'pw');
+    await sendMsg(wM, { type: 'spaceRename', name: '非法改名' });
+    const errR = mk(wM, 'error');
+    assert(errR.length > 0 && errR[errR.length - 1].message.includes('仅管理员'), '非管理员改名被拒');
+    wS.close(); wM.close();
+  }
+
+  // ========== 测试15: 紧急模式 ==========
+  console.log('\n📋 测试15: 紧急模式');
+  {
+    const spE = (await httpJson('POST', '/api/spaces', { name: '紧急办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aE = 'emg_' + runKey;
+    await reg(aE, 'pw', '紧急用户');
+    const wE = await createWSClient(); await loginTo(wE, spE.id, aE, 'pw');
+    await sendMsg(wE, { type: 'toggleEmergency', enabled: true });
+    const em = last(wE, 'emergencyToggled');
+    assert(em && em.enabled === true, '开启紧急模式成功');
+    const uE = last(wE, 'users').users.find((u) => u.account === aE);
+    assert(uE && uE.emergencyMode === true, '用户广播含紧急模式');
+    wE.close();
+  }
+
   // ========== 总结 ==========
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);

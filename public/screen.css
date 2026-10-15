@@ -22,6 +22,8 @@
   .roomrow:last-child{border-bottom:none;}
   .roomrow .now{color:#34d399;font-weight:600;}
   .roomrow .next{color:#94a3b8;}
+  .roomrow .ok{color:#34d399;font-weight:600;}
+  .roomrow .wait{color:#fbbf24;font-weight:600;}
   .chips{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;flex:1;align-items:center;}
   .chip{background:rgba(30,41,59,.72);border:1px solid #334155;border-radius:14px;padding:20px;text-align:center;}
   .chip .n{font-size:44px;font-weight:800;color:#38bdf8;}

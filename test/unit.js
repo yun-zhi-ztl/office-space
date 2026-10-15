@@ -98,6 +98,27 @@ assertEq(vp.length, 1, 'visitorsPublic 返回访客列表');
 assertEq(vp[0].visitorName, '客户王', 'visitorsPublic 保留访客姓名');
 assertEq(vp[0].status, 'pending', 'visitorsPublic 保留访客状态');
 
+// ---------- 每日看点 ----------
+console.log('\n📋 10. 每日看点');
+const dv = api.createSpace('s4', '看点空间', 1, 0);
+const du = { account: 'alice', stats: api.newStats(), achievements: [] };
+dv.visitors.set('pv', { id: 'pv', hostAccount: 'bob', hostName: '乙', visitorName: '李四', purpose: '面谈', status: 'pending', createdAt: Date.now(), expectedAt: null, arrivedAt: null, leftAt: null, contact: '' });
+const digest = api.buildDigest(dv, du);
+assertEq(digest.pendingVisitorsCount, 1, 'digest 统计待接待访客');
+assertEq(digest.pendingVisitors[0].visitorName, '李四', 'digest 含访客姓名');
+
+// ---------- 用户广播 ----------
+console.log('\n📋 11. 用户广播');
+const spB = api.createSpace('s5', '广播空间', 1, 0);
+const sent = [];
+const fakeWs = { readyState: 1, send: (d) => { sent.push(JSON.parse(d)); } };
+api.users.set('bu1', { id: 'bu1', account: 'alice', nickname: '甲', avatar: '🧑', currentSpace: spB.id, ws: fakeWs, emergencyMode: true });
+spB.clients.add(fakeWs);
+api.broadcastUsers(spB);
+const lastUser = sent.filter((m) => m.type === 'users').pop();
+assert(lastUser && lastUser.users.some((u) => u.account === 'alice' && u.emergencyMode === true), '用户广播含紧急模式字段');
+api.users.delete('bu1'); spB.clients.delete(fakeWs);
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

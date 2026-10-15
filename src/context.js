@@ -428,7 +428,7 @@ function createContext() {
     for (const [, u] of users) {
       if (u.currentSpace !== sp.id) continue;
       const d = info.get(u.account) || {};
-      arr.push({ account: u.account, online: true, username: u.nickname, avatar: u.avatar, role: d.role || 'member', display: d.display || u.nickname, status: u.status || { label: '在岗' } });
+      arr.push({ account: u.account, online: true, username: u.nickname, avatar: u.avatar, role: d.role || 'member', display: d.display || u.nickname, status: u.status || { label: '在岗' }, emergencyMode: !!u.emergencyMode });
     }
     broadcast(sp.id, 'users', { users: arr });
   }
@@ -494,8 +494,9 @@ function createContext() {
     const myBorrows = [...space.borrows.values()].filter((b) => b.borrowerAccount === user.account && b.status === 'borrowed');
     const pendingMaterials = [...space.materialRequests.values()].filter((r) => r.status === 'pending');
     const openRepairs = [...space.repairs.values()].filter((r) => r.status === 'reported' || r.status === 'in_progress');
+    const pendingVisitors = [...space.visitors.values()].filter((v) => v.status === 'pending' || v.status === 'arrived');
     const mvp = leaderboardPublic(space).rankings.find((r) => r.mvp) || null;
-    return { todayMeetingCount: todayMeetings.length, todayMeetings: todayMeetings.slice(0, 5), overdueCount: overdue.length, myBorrows: myBorrows.length, pendingMaterialsCount: pendingMaterials.length, openRepairsCount: openRepairs.length, mvp };
+    return { todayMeetingCount: todayMeetings.length, todayMeetings: todayMeetings.slice(0, 5), overdueCount: overdue.length, myBorrows: myBorrows.length, pendingMaterialsCount: pendingMaterials.length, openRepairsCount: openRepairs.length, pendingVisitorsCount: pendingVisitors.length, pendingVisitors: pendingVisitors.slice(0, 5).map((v) => ({ visitorName: v.visitorName, hostName: v.hostName, status: v.status })), mvp };
   }
 
   return {

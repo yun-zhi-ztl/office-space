@@ -1,7 +1,7 @@
 'use strict';
 // 扩展功能：setStatus / announce / suggestRoom / remindReturn + 公告推送
 module.exports = function extrasModule(api) {
-  const { users, broadcastUsers, sendTo, serError, genId, roomPublic, noticesBroadcast } = api;
+  const { users, broadcastUsers, sendTo, serError, genId, roomPublic, noticesBroadcast, isAdmin, saveSpace, broadcast } = api;
 
   function pushNotice(space, text, fromAccount, fromName) {
     space.notices.unshift({ id: genId('n', null), text, from: fromName || fromAccount || '系统', ts: Date.now() });
@@ -36,6 +36,16 @@ module.exports = function extrasModule(api) {
     sendTo(ws, { type: 'suggestRooms', suggestions: list.map(roomPublic) });
   }
 
+  function handleRenameSpace(ws, user, space, msg) {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可修改空间'));
+    const name = (msg.name || '').trim().slice(0, 30);
+    if (!name) return sendTo(ws, serError('空间名不能为空'));
+    if (name === space.name) return sendTo(ws, { type: 'spaceRenamed', name });
+    space.name = name;
+    saveSpace(space);
+    broadcast(space.id, 'spaceRenamed', { name });
+  }
+
   function handleRemindReturn(ws, user, space, msg) {
     const b = space.borrows.get(msg.borrowId);
     if (!b || b.status !== 'borrowed') return sendTo(ws, serError('借用记录不存在或已归还'));
@@ -47,5 +57,5 @@ module.exports = function extrasModule(api) {
     sendTo(ws, { type: 'remindSent', count: n });
   }
 
-  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn };
+  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace };
 };

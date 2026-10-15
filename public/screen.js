@@ -1,6 +1,7 @@
 
-var DB={rooms:[],reservations:[],stalls:[],tools:[],requests:[],repairs:[],users:[],leaderboard:[],notices:[]};
-var STATE={view:0,count:4,paused:false,ms:12000};
+var DB={rooms:[],reservations:[],stalls:[],tools:[],requests:[],repairs:[],visitors:[],visitorTotal:0,users:[],leaderboard:[],notices:[]};
+var STATE={view:0,count:5,paused:false,ms:12000};
+var VIEWS=['rooms','overview','stalls','notices','visitors'];
 var ws=null;
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function pad(n){return (n<10?'0':'')+n;}
@@ -17,6 +18,7 @@ function connect(){
     if(m.type==='stalls')DB.stalls=m.stalls;
     if(m.type==='materials')DB.requests=m.requests;
     if(m.type==='repairs')DB.repairs=m.repairs;
+    if(m.type==='visitors'){DB.visitors=m.visitors||[];DB.visitorTotal=m.total||0;}
     if(m.type==='users')DB.users=m.users;
     if(m.type==='leaderboard')DB.leaderboard=m.rankings||[];
     if(m.type==='notices')DB.notices=m.notices||[];
@@ -27,9 +29,9 @@ function connect(){
 /* ---- 轮播 ---- */
 function show(i){
   STATE.view=(i+STATE.count)%STATE.count;
-  [0,1,2,3].forEach(function(k){
-    var el=document.getElementById('view-'+['rooms','overview','stalls','notices'][k]);
-    if(el){ el.classList.toggle('show', k===STATE.view); }
+  VIEWS.forEach(function(k){
+    var el=document.getElementById('view-'+k);
+    if(el){ el.classList.toggle('show', k===VIEWS[STATE.view]); }
   });
   var dots=document.querySelectorAll('#dots .dot');
   [].forEach.call(dots,function(d,k){ d.classList.toggle('on', k===STATE.view); });
@@ -57,9 +59,10 @@ function buildOverview(){
   var overdue=DB.tools.reduce(function(a,t){return a+(t.activeBorrows||[]).filter(function(b){return b.overdue;}).length;},0);
   var pendReq=DB.requests.filter(function(r){return r.status==='pending';}).length;
   var openRep=DB.repairs.filter(function(r){return r.status==='reported'||r.status==='in_progress';}).length;
+  var pendVisitors=DB.visitors.filter(function(v){return v.status==='pending'||v.status==='arrived';}).length;
   qs('#chips').innerHTML=[
     ['🚻 坑位占用', occupied+'/'+DB.stalls.length],['📦 待处理申领', pendReq],['🛠️ 未办结报修', openRep],
-    ['⏰ 逾期借用', overdue],['🟢 在线', DB.users.length],['🏢 会议室', DB.rooms.length]
+    ['🚶 待接待访客', pendVisitors],['⏰ 逾期借用', overdue],['🟢 在线', DB.users.length],['🏢 会议室', DB.rooms.length]
   ].map(function(c){return '<div class="chip"><div class="n">'+c[1]+'</div><div class="t">'+c[0]+'</div></div>';}).join('');
   var mvp=DB.leaderboard.find(function(r){return r.mvp;});
   qs('#mvp').innerHTML = mvp ? ('👑 <b>'+esc(mvp.username)+'</b> 本周活跃 '+mvp.weekly+' 次') : '--';
@@ -73,9 +76,15 @@ function buildStalls(){
   qs('#status').innerHTML = DB.users.map(function(u){return '<span>'+esc(u.avatar||'')+' '+esc(u.display||u.username)+(u.status&&u.status.emoji?' '+esc(u.status.emoji):'')+' '+esc((u.status&&u.status.label)||'在岗')+'</span>';}).join('')||'<span>暂无人在线</span>';
 }
 function buildNotices(){ qs('#notices').innerHTML = DB.notices.slice(0,8).map(function(n){return '<div class="n"><b>'+esc(n.from)+'</b> '+esc(n.text)+'</div>';}).join('')||'<div class="empty">暂无公告</div>'; }
-function renderAll(){ buildRooms(); buildOverview(); buildStalls(); buildNotices(); }
+function buildVisitors(){
+  var list=DB.visitors.filter(function(v){return v.status==='pending'||v.status==='arrived';});
+  qs('#visitors').innerHTML = (list.length?list.map(function(v){
+    return '<div class="roomrow"><span>'+esc(v.hostName)+' 接待 <b>'+esc(v.visitorName)+'</b> <span class="next">'+esc(v.purpose||'')+'</span></span><span class="'+(v.status==='pending'?'wait':'ok')+'">'+(v.status==='pending'?'待到访':'已到访')+'</span></div>';
+  }).join(''):'<div class="empty">暂无待接待访客</div>');
+}
+function renderAll(){ buildRooms(); buildOverview(); buildStalls(); buildNotices(); buildVisitors(); }
 /* ---- 启动 ---- */
-[0,1,2,3].forEach(function(k){ var d=document.createElement('div'); d.className='dot'; d.onclick=function(){ show(k); }; document.getElementById('dots').appendChild(d); });
+VIEWS.forEach(function(k,idx){ var d=document.createElement('div'); d.className='dot'; d.onclick=function(){ show(idx); }; document.getElementById('dots').appendChild(d); });
 show(0);
 setInterval(function(){
   var d=new Date(); document.getElementById('clock').textContent=pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds());

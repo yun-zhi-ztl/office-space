@@ -114,6 +114,7 @@ wss.on('connection', (ws) => {
         stalls.handleStalls(ws, user, space, msg); break;
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
       case 'announce': extras.announce(ws, user, space, msg); break;
+      case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;
       case 'suggestRoom': extras.suggestRoom(ws, user, space, msg); break;
       case 'remindReturn': extras.remindReturn(ws, user, space, msg); break;
       default:
