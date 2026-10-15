@@ -113,12 +113,14 @@ async function runTests() {
   await sendMsg(w2, { type: 'roomBook', roomId, startAt: Date.now() - 60000, endAt: Date.now() + 3600000 });
   const errPast = mk(w2, 'error');
   assert(errPast.length > 0 && errPast[errPast.length - 1].message.includes('不能早于'), '过去时间预约被拒');
-  // 冲突检测：另一账号预约重叠时段
+  // 冲突检测：另一账号预约重叠时段（先建第二间用于验证冲突建议）
+  await sendMsg(w1, { type: 'roomCreate', name: '小会议室', capacity: 4 });
   const wA = await createWSClient();
   await loginTo(wA, sp.id, ADMIN, 'pw');
   await sendMsg(wA, { type: 'roomBook', roomId, startAt: t0 + 20 * 60000, endAt: t0 + 50 * 60000 });
   const errsA = mk(wA, 'error');
   assert(errsA.length > 0 && errsA[errsA.length - 1].message.includes('已被预约'), '重叠时段预约被拒绝(冲突检测)');
+  assert(errsA[errsA.length - 1].suggestions && errsA[errsA.length - 1].suggestions.some((r) => r.name === '小会议室'), '冲突响应附带空闲会议室建议');
   // 取消自己的预约
   await sendMsg(w2, { type: 'reservationCancel', reservationId: resId });
   rooms = last(w2, 'rooms');
