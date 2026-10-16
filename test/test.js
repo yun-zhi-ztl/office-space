@@ -1777,6 +1777,59 @@ async function runTests() {
     assert(rApprovedWl, '候补晋升审批批准成功');
     wA.close(); wB.close(); wC.close();
   }
+
+  // ========== 测试42: 请假审批 ==========
+  console.log('\n📋 测试42: 请假审批');
+  {
+    const spL = (await httpJson('POST', '/api/spaces', { name: '请假办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aL = 'lva_' + runKey, bL = 'lvm_' + runKey;
+    await reg(aL, 'pw', '请假管理员'); await reg(bL, 'pw', '请假成员');
+    const wA = await createWSClient(); await loginTo(wA, spL.id, aL, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spL.id, bL, 'pw');
+    const base = Date.now();
+    const findLeave = (msg, id) => (msg.leaves || []).find((r) => r.id === id);
+    // 成员提交请假申请
+    await sendMsg(wB, { type: 'leaveCreate', category: '事假', reason: '家里有事', startAt: base + 2 * 3600000, endAt: base + 4 * 3600000 });
+    const leaves0 = await waitFor(wB, 'leaves', (r) => r.leaves && r.leaves.some((x) => x.category === '事假' && x.status === 'pending'), 3000);
+    assert(leaves0 && leaves0.leaves[0].status === 'pending', '成员提交请假申请成功（pending）');
+    assert(leaves0 && leaves0.leaves[0].account === bL, '请假记录关联提交账号');
+    assert(leaves0 && leaves0.stats.pendingCount === 1, '请假统计 pendingCount=1');
+    const leaveId = leaves0.leaves[0].id;
+    // 重复提交被拒
+    await sendMsg(wB, { type: 'leaveCreate', category: '病假', reason: '重复', startAt: base + 5 * 3600000, endAt: base + 7 * 3600000 });
+    const errDup = mk(wB, 'error').pop();
+    assert(errDup && errDup.message.includes('待审批'), '重复提交请假被拒');
+    // 成员不能审批他人
+    await sendMsg(wB, { type: 'leaveApprove', leaveId });
+    const errMember = mk(wB, 'error').pop();
+    assert(errMember && errMember.message.includes('仅管理员'), '成员审批被拒');
+    // 成员不能取消他人（这里仅提交人是本人可取消，取消他人场景由管理员代测）
+    await sendMsg(wB, { type: 'leaveCancel', leaveId });
+    const leavesCancel = await waitFor(wB, 'leaves', (r) => r.leaves && r.leaves.some((x) => x.id === leaveId && x.status === 'cancelled'), 3000);
+    assert(leavesCancel, '成员取消自己的请假申请成功');
+    // 管理员审批：提交人申请，管理员批准
+    await sendMsg(wB, { type: 'leaveCreate', category: '年假', reason: '回老家', startAt: base + 8 * 3600000, endAt: base + 10 * 3600000 });
+    const leaves1 = await waitFor(wB, 'leaves', (r) => r.leaves && r.leaves.some((x) => x.category === '年假' && x.status === 'pending'), 3000);
+    assert(leaves1, '再次提交请假申请成功');
+    const leaveId2 = leaves1.leaves[0].id;
+    await sendMsg(wA, { type: 'leaveApprove', leaveId: leaveId2 });
+    const leavesApproved = await waitFor(wA, 'leaves', (r) => r.leaves && r.leaves.some((x) => x.id === leaveId2 && x.status === 'approved'), 3000);
+    assert(leavesApproved && findLeave(leavesApproved, leaveId2).decidedBy === aL, '管理员批准后状态变为 approved 并记录审批人');
+    // 申请人收到单发通知
+    const notifyApproved = await waitFor(wB, 'leaveApproved', (m) => m.leaveId === leaveId2, 3000);
+    assert(notifyApproved, '申请人收到 leaveApproved 单发通知');
+    // 提交新申请用于驳回
+    await sendMsg(wB, { type: 'leaveCreate', category: '调休', reason: '补休', startAt: base + 12 * 3600000, endAt: base + 14 * 3600000 });
+    const leaves2 = await waitFor(wB, 'leaves', (r) => r.leaves && r.leaves.some((x) => x.category === '调休' && x.status === 'pending'), 3000);
+    assert(leaves2, '提交用于驳回的请假申请');
+    const leaveId3 = leaves2.leaves[0].id;
+    await sendMsg(wA, { type: 'leaveReject', leaveId: leaveId3, decideNote: '人手不足' });
+    const leavesRejected = await waitFor(wA, 'leaves', (r) => r.leaves && r.leaves.some((x) => x.id === leaveId3 && x.status === 'rejected'), 3000);
+    assert(leavesRejected && findLeave(leavesRejected, leaveId3).decideNote === '人手不足', '管理员驳回并记录原因');
+    const notifyRejected = await waitFor(wB, 'leaveRejected', (m) => m.leaveId === leaveId3, 3000);
+    assert(notifyRejected && notifyRejected.decideNote === '人手不足', '申请人收到 leaveRejected 单发通知');
+    wA.close(); wB.close();
+  }
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

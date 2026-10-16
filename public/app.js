@@ -18,7 +18,7 @@ const S = {
   lastSpace: localStorage.getItem('os_space')||'',
   ws: null, me:null, space:null, module:'rooms',
   pendingLogin:null,
-  DB:{ rooms:[], reservations:[], waitlist:[], waitlistTotal:0, tools:[], requests:[], materialTemplates:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[], inventory:{items:[],issues:[]}, attendance:{records:[],stats:{},config:{workStart:'09:00',workEnd:'18:00',lateMinutes:15}}, desks:{desks:[],reservations:[],reservationTotal:0}, ooo:{records:[],stats:{}}, events:[], polls:[], knowledge:[], tasks:[], notifications:[] },
+  DB:{ rooms:[], reservations:[], waitlist:[], waitlistTotal:0, tools:[], requests:[], materialTemplates:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[], inventory:{items:[],issues:[]}, attendance:{records:[],stats:{},config:{workStart:'09:00',workEnd:'18:00',lateMinutes:15}}, desks:{desks:[],reservations:[],reservationTotal:0}, ooo:{records:[],stats:{}}, leaves:{leaves:[],stats:{}}, events:[], polls:[], knowledge:[], tasks:[], notifications:[] },
   visitorTotal:0, visitorOffset:0,
   borrowTotal:0, borrowOffset:0,
   eventTotal:0, eventOffset:0, pollTotal:0, pollOffset:0, knowledgeTotal:0, knowledgeOffset:0, taskTotal:0, taskStats:{}, notificationTotal:0, notificationUnread:0,
@@ -31,7 +31,7 @@ const S = {
   attendanceCalendar:null,
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -67,6 +67,7 @@ function dispatch(m){
     case 'ooo': S.DB.ooo={ records:m.records||[], stats:m.stats||{} }; break;
     case 'feedback': S.DB.feedback={ records:m.records||[], stats:m.stats||{} }; break;
     case 'mood': S.DB.mood={ records:m.records||[], stats:m.stats||{} }; break;
+    case 'leaves': S.DB.leaves={ leaves:m.leaves||[], stats:m.stats||{} }; break;
     case 'events': S.DB.events=m.events||[]; S.eventTotal=m.total||0; S.eventOffset=S.DB.events.length; S.eventStats=m.stats||{}; break;
     case 'polls': S.DB.polls=m.polls||[]; S.pollTotal=m.total||0; S.pollOffset=S.DB.polls.length; S.pollStats=m.stats||{}; break;
     case 'knowledge': S.DB.knowledge=m.knowledge||[]; S.knowledgeTotal=m.total||0; S.knowledgeOffset=S.DB.knowledge.length; S.knowledgeStats=m.stats||{}; break;
@@ -98,6 +99,9 @@ function dispatch(m){
     case 'attendanceCheckedOut': toast('✔ 下班打卡成功，今日工作 '+Math.round((m.workedMinutes||0)/60)+'h'+((m.workedMinutes||0)%60?(m.workedMinutes%60)+'m':''),'success'); render(); break;
     case 'oooBacked': toast('✔ 已确认返回（'+(m.category||'外出')+'）','success'); render(); break;
     case 'moodCheckedIn': toast('🌈 心情已记录：'+(m.emoji||''),'success'); render(); break;
+    case 'leaveCreated': if(S.admin) toast('📅 有请假申请待审批：'+(m.name||'')+' · '+(m.category||''),'info'); break;
+    case 'leaveApproved': toast('✔ 请假申请已批准：'+(m.category||''),'success'); render(); break;
+    case 'leaveRejected': toast('✘ 请假申请已被驳回：'+(m.category||'')+(m.decideNote?' · '+m.decideNote:''),'warn'); render(); break;
     case 'eventCreated': toast('🎉 活动已创建','success'); render(); break;
     case 'eventRsvpChanged': { const ev=(S.DB.events||[]).find(e=>e.id===m.rsvpId); if(ev) ev.myRsvp=m.status; toast('✔ 已更新参与状态（'+({going:'参加',maybe:'可能',not_going:'不参加'}[m.status]||m.status)+'）','success'); render(); break; }
     case 'eventCancelled': toast('已取消活动','warn'); render(); break;
@@ -162,10 +166,10 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','roomStats','users','leaderboard','achievements','myReminders','spaceTrend','notices','digest'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','roomStats','users','leaderboard','achievements','myReminders','spaceTrend','notices','digest'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
@@ -1017,6 +1021,59 @@ function submitOooCreate(){ const rt=$('#ooReturn').value?new Date($('#ooReturn'
 function ooBack(id){ wsSend({type:'oooBack',oooId:id}); }
 function ooCancel(id){ wsSend({type:'oooCancel',oooId:id}); }
 function ooRemove(id){ wsSend({type:'oooRemove',oooId:id}); }
+
+/* ============ 请假审批 ============ */
+function renderLeaves(){
+  const d=S.DB.leaves||{leaves:[],stats:{}};
+  const me=S.me.account;
+  const st=d.stats||{};
+  const badge = {pending:'warn',approved:'ok',rejected:'grey',cancelled:'grey'};
+  const label = {pending:'待审批',approved:'已批准',rejected:'已驳回',cancelled:'已取消'};
+  $('#main').innerHTML = `<div class="topbar"><div><h1>请假审批</h1><div class="sub">成员提交请假申请，管理员审批；与外出登记互补，便于统一跟踪请假</div></div>
+    <button class="btn pri" onclick="openLeaveCreate()">＋ 提交请假</button></div>
+    <div class="cards">
+      <div class="card"><h3>⏳ 待审批</h3><div style="font-size:30px;font-weight:800">${st.pendingCount||0}</div><div class="meta">个申请</div></div>
+      <div class="card"><h3>📅 今日申请</h3><div style="font-size:30px;font-weight:800">${st.todayCount||0}</div><div class="meta">人次</div></div>
+      <div class="card"><h3>✅ 已批准</h3><div style="font-size:30px;font-weight:800">${st.approvedCount||0}</div><div class="meta">累计</div></div>
+      <div class="card"><h3>❌ 已驳回</h3><div style="font-size:30px;font-weight:800">${st.rejectedCount||0}</div><div class="meta">累计</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">📋 请假记录</h3>
+    <div class="list">${(d.leaves||[]).length?d.leaves.map(r=>{
+      const mine=r.account===me;
+      return `<div class="row"><span><span class="who">${esc(r.name||r.account)}</span> <span class="badge ${badge[r.status]||'grey'}">${label[r.status]||r.status}</span>
+        <div class="desc">${esc(r.category)}${r.reason?' · '+esc(r.reason):''}</div>
+        <div class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}${r.decideNote?' · 备注：'+esc(r.decideNote):''}</div>
+      </span><span class="fs">${mine&&r.status==='pending'?`<button class="btn danger sm" onclick="leaveCancel('${r.id}')">取消</button>`:''}${S.admin&&r.status==='pending'?`<button class="btn green sm" onclick="leaveApprove('${r.id}')">批准</button><button class="btn danger sm" onclick="openLeaveReject('${r.id}')">驳回</button>`:''}</span></div>`;
+    }).join(''):'<div class="empty">还没有请假申请</div>'}</div>`;
+}
+function openLeaveCreate(){
+  const d=(ms)=>{ const x=new Date(ms), off=x.getTimezoneOffset(); return new Date(ms-off).toISOString().slice(0,16); };
+  const now=Date.now(), start=now+86400000, end=start+2*86400000;
+  const cats=['事假','病假','年假','调休','婚假','产假','丧假','其他'];
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>提交请假</h2><div class="form">
+    <div class="fld"><label>请假类型</label><select id="lvCat">${cats.map(c=>`<option>${esc(c)}</option>`).join('')}</select></div>
+    <div class="fld"><label>开始时间</label><input id="lvStart" type="datetime-local"></div>
+    <div class="fld"><label>结束时间</label><input id="lvEnd" type="datetime-local"></div>
+    <div class="fld"><label>事由</label><input id="lvReason" placeholder="可选"></div>
+    <button class="btn pri" onclick="submitLeaveCreate()">提交申请</button></div>`);
+  $('#lvStart').value=d(start); $('#lvEnd').value=d(end);
+}
+function submitLeaveCreate(){
+  const st=new Date($('#lvStart').value).getTime(), en=new Date($('#lvEnd').value).getTime();
+  if(!(st>0)||!(en>st)) return toast('时间无效','error');
+  wsSend({type:'leaveCreate',category:$('#lvCat').value,startAt:st,endAt:en,reason:$('#lvReason').value});
+  closeModal();
+}
+function leaveCancel(id){ wsSend({type:'leaveCancel',leaveId:id}); }
+function leaveApprove(id){ wsSend({type:'leaveApprove',leaveId:id}); }
+function openLeaveReject(id){
+  const r=(S.DB.leaves||[]).leaves.find(x=>x.id===id);
+  S.lastLeaveReject=id;
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>驳回请假 · ${esc(r?r.name:'')}</h2><div class="form">
+    <div class="fld"><label>驳回原因（可选）</label><input id="lvNote" placeholder="可选"></div>
+    <button class="btn danger" onclick="submitLeaveReject()">确认驳回</button></div>`);
+}
+function submitLeaveReject(){ wsSend({type:'leaveReject',leaveId:S.lastLeaveReject,decideNote:$('#lvNote').value}); closeModal(); }
 
 /* ============ 意见反馈 ============ */
 function renderFeedback(){

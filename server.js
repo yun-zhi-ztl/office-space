@@ -32,6 +32,7 @@ const pollsModule = require('./src/modules/polls');
 const knowledgeModule = require('./src/modules/knowledge');
 const tasksModule = require('./src/modules/tasks');
 const notificationsModule = require('./src/modules/notifications');
+const leavesModule = require('./src/modules/leaves');
 
 // ---------- 上下文 ----------
 const api = createContext();
@@ -78,6 +79,7 @@ const polls = pollsModule(api);
 const knowledge = knowledgeModule(api);
 const tasks = tasksModule(api);
 const notifications = notificationsModule(api);
+const leaves = leavesModule(api);
 
 // ---------- 分页加载 ----------
 function handleFetchPage(ws, user, space, msg) {
@@ -165,6 +167,8 @@ wss.on('connection', (ws) => {
         tasks.handleTasks(ws, user, space, msg); break;
       case 'notificationRead': case 'notificationReadAll':
         notifications.handleNotifications(ws, user, space, msg); break;
+      case 'leaveCreate': case 'leaveCancel': case 'leaveApprove': case 'leaveReject':
+        leaves.handleLeaves(ws, user, space, msg); break;
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
       case 'announce': extras.announce(ws, user, space, msg); break;
       case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;

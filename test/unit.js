@@ -883,8 +883,28 @@ assertEq(cal.streak, 10, 'attendanceCalendar 连续 10 天');
 assertEq(cal.perfectMonthCount, 0, '有迟到时全勤月为 0');
 assertEq(cal.currentMonthPerfect, false, '本月有迟到非全勤');
 
+// ---------- 请假审批序列化 + 统计 ----------
+console.log('\n📋 50. 请假审批序列化 / 统计');
+const lvSp = api.createSpace('lv', '请假空间', 1, 0);
+const lvNow = new Date('2026-10-15T10:00:00+08:00').getTime();
+lvSp.leaves.set('lv1', { id: 'lv1', account: 'alice', name: '甲', category: '病假', reason: '发烧', startAt: lvNow + 86400000, endAt: lvNow + 172800000, status: 'pending', createdAt: 10, decidedAt: null, decidedBy: null, decideNote: '' });
+lvSp.leaves.set('lv2', { id: 'lv2', account: 'bob', name: '乙', category: '年假', reason: '休息', startAt: lvNow + 259200000, endAt: lvNow + 345600000, status: 'approved', createdAt: 30, decidedAt: 40, decidedBy: 'admin', decideNote: '' });
+lvSp.leaves.set('lv3', { id: 'lv3', account: 'carol', name: '丙', category: '事假', reason: '搬家', startAt: lvNow, endAt: lvNow + 3600000, status: 'rejected', createdAt: 50, decidedAt: 60, decidedBy: 'admin', decideNote: '时段冲突' });
+const lvPub = api.leavesPublic(lvSp, api.spaceUserInfo(lvSp.id), lvNow);
+assertEq(lvPub.length, 3, 'leavesPublic 返回请假记录');
+assertEq(lvPub[0].id, 'lv3', 'leavesPublic 按创建时间倒序');
+assertEq(lvPub[0].status, 'rejected', 'leavesPublic 暴露状态');
+assertEq(lvPub[0].decideNote, '时段冲突', 'leavesPublic 暴露驳回原因');
+assertEq(lvPub[1].decidedBy, 'admin', 'leavesPublic 暴露审批人');
+assertEq(lvPub[1].status, 'approved', 'leavesPublic 暴露已批准状态');
+const lvSt = api.leavesStats(lvSp, lvNow);
+assertEq(lvSt.pendingCount, 1, 'leavesStats 统计待审批');
+assertEq(lvSt.approvedCount, 1, 'leavesStats 统计已批准');
+assertEq(lvSt.rejectedCount, 1, 'leavesStats 统计已驳回');
+assertEq(lvSt.todayCount, 1, 'leavesStats 统计今日开始数');
+
 // ---------- 新成就 ----------
-console.log('\n📋 50. 待办任务 / 连续打卡成就');
+console.log('\n📋 51. 待办任务 / 连续打卡成就');
 const achUser5 = { stats: api.newStats(), achievements: [] };
 achUser5.stats.taskCreateCount = 5; achUser5.stats.taskDoneCount = 5;
 api.checkAchievements(achUser5);
