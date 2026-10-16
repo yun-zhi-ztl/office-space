@@ -653,7 +653,8 @@ assertEq(invIssues[0].itemName, '5号电池', '库存领用记录关联物资名
 
 // ---------- 考勤打卡 ----------
 console.log('\n📋 39. 考勤打卡');
-const todayD = new Date('2026-10-16T09:05:00+08:00');
+// 用本地时间构造，避免 CI runner 时区差异导致 isLateAt / todayKey 判定漂移
+const todayD = new Date(2026, 9, 16, 9, 5, 0, 0);
 assertEq(api.todayKey(todayD.getTime()), '2026-10-16', 'todayKey 返回 YYYY-MM-DD');
 const cfgA = api.newAttendanceConfig();
 assertEq(cfgA.workStart, '09:00', '考勤默认上班时间 09:00');
@@ -662,15 +663,16 @@ assertEq(cfgA.lateMinutes, 15, '考勤默认迟到宽限 15 分钟');
 assertEq(api.parseTime('09:05'), 545, 'parseTime 解析 HH:MM 为分钟');
 assertEq(api.parseTime('bad'), null, 'parseTime 非法格式返回 null');
 // 09:00 上班、宽限 15 分钟：09:15 已迟到（>= 宽限）
-const nine = new Date('2026-10-16T09:00:00+08:00').getTime();
-const at9 = new Date('2026-10-16T09:00:00+08:00').getTime();
-const at915 = new Date('2026-10-16T09:15:00+08:00').getTime();
-const at916 = new Date('2026-10-16T09:16:00+08:00').getTime();
+const localDay = new Date(2026, 9, 16, 0, 0, 0, 0).getTime();
+const nine = localDay + 9 * 3600000;
+const at9 = localDay + 9 * 3600000;
+const at915 = localDay + 9 * 3600000 + 15 * 60000;
+const at916 = localDay + 9 * 3600000 + 16 * 60000;
 assertEq(api.isLateAt(at9, cfgA), false, '09:00 打卡不迟到');
 assertEq(api.isLateAt(at915, cfgA), true, '09:15 打卡已迟到（宽限 15 分钟）');
 assertEq(api.isLateAt(at916, cfgA), true, '09:16 打卡已迟到');
 const spA = api.createSpace('s29', '考勤空间', 1, 0);
-const nowA = new Date('2026-10-16T12:00:00+08:00').getTime();
+const nowA = localDay + 12 * 3600000;
 spA.attendance.set('alice::2026-10-16', { id: 'a1', account: 'alice', name: '甲', date: '2026-10-16', checkInAt: nine, checkOutAt: nine + 3 * 60 * 60000, isLate: false, status: 'checked_out', workedMinutes: 180 });
 spA.attendance.set('bob::2026-10-16', { id: 'a2', account: 'bob', name: '乙', date: '2026-10-16', checkInAt: at915, checkOutAt: null, isLate: true, status: 'checked_in', workedMinutes: 0 });
 spA.attendance.set('carol::2026-10-15', { id: 'a3', account: 'carol', name: '丙', date: '2026-10-15', checkInAt: nine, checkOutAt: null, isLate: false, status: 'checked_in', workedMinutes: 0 });

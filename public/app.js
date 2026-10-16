@@ -1034,7 +1034,7 @@ function renderLeaves(){
   const badge = {pending:'warn',approved:'ok',rejected:'grey',cancelled:'grey'};
   const label = {pending:'待审批',approved:'已批准',rejected:'已驳回',cancelled:'已取消'};
   $('#main').innerHTML = `<div class="topbar"><div><h1>请假审批</h1><div class="sub">成员提交请假申请，管理员审批；与外出登记互补，便于统一跟踪请假</div></div>
-    <button class="btn pri" onclick="openLeaveCreate()">＋ 提交请假</button></div>
+    <button class="btn pri" onclick="openLeaveCreate()">＋ 提交请假</button>${S.admin&&st.pendingCount>0?`<button class="btn green" onclick="leaveBatchApprove()">✔ 一键批准全部（${st.pendingCount}）</button><button class="btn danger" onclick="leaveBatchReject()">✘ 一键驳回全部</button>`:''}></div>
     <div class="cards">
       <div class="card"><h3>⏳ 待审批</h3><div style="font-size:30px;font-weight:800">${st.pendingCount||0}</div><div class="meta">个申请</div></div>
       <div class="card"><h3>📅 今日申请</h3><div style="font-size:30px;font-weight:800">${st.todayCount||0}</div><div class="meta">人次</div></div>
@@ -1078,6 +1078,8 @@ function openLeaveReject(id){
     <button class="btn danger" onclick="submitLeaveReject()">确认驳回</button></div>`);
 }
 function submitLeaveReject(){ wsSend({type:'leaveReject',leaveId:S.lastLeaveReject,decideNote:$('#lvNote').value}); closeModal(); }
+function leaveBatchApprove(){ if(!confirm('一键批准当前全部待审批请假申请？')) return; wsSend({type:'leaveBatchApprove'}); render(); }
+function leaveBatchReject(){ const note=(prompt('驳回全部待审批请假申请，可填共同原因（可选）')||'').trim(); if(note.length>120) return toast('原因最多 120 字','error'); if(!confirm('一键驳回当前全部待审批请假申请？'+(note?' 原因：'+note:''))) return; wsSend({type:'leaveBatchReject',decideNote:note}); render(); }
 
 /* ============ 会议纪要 ============ */
 function renderMeetingNotes(){

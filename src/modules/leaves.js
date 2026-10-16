@@ -52,6 +52,32 @@ module.exports = function leavesModule(api) {
       saveEntity(space.id, 'leave', rec.id, rec);
       leavesBroadcast(space);
       sendToAccount(rec.account, { type: 'leaveRejected', leaveId: rec.id, category: rec.category, decideNote: rec.decideNote });
+    } else if (msg.type === 'leaveBatchApprove') {
+      if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可批量审批请假申请'));
+      const pending = [...space.leaves.values()].filter((r) => r.status === 'pending');
+      if (!pending.length) return sendTo(ws, serError('没有待审批的请假申请'));
+      for (const rec of pending) {
+        rec.status = 'approved';
+        rec.decidedAt = Date.now();
+        rec.decidedBy = user.account;
+        saveEntity(space.id, 'leave', rec.id, rec);
+        sendToAccount(rec.account, { type: 'leaveApproved', leaveId: rec.id, category: rec.category, startAt: rec.startAt, endAt: rec.endAt });
+      }
+      leavesBroadcast(space);
+    } else if (msg.type === 'leaveBatchReject') {
+      if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可批量审批请假申请'));
+      const pending = [...space.leaves.values()].filter((r) => r.status === 'pending');
+      if (!pending.length) return sendTo(ws, serError('没有待审批的请假申请'));
+      const note = (msg.decideNote || '').trim().slice(0, 120);
+      for (const rec of pending) {
+        rec.status = 'rejected';
+        rec.decidedAt = Date.now();
+        rec.decidedBy = user.account;
+        rec.decideNote = note;
+        saveEntity(space.id, 'leave', rec.id, rec);
+        sendToAccount(rec.account, { type: 'leaveRejected', leaveId: rec.id, category: rec.category, decideNote: note });
+      }
+      leavesBroadcast(space);
     }
   }
 

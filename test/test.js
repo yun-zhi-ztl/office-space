@@ -1828,7 +1828,24 @@ async function runTests() {
     assert(leavesRejected && findLeave(leavesRejected, leaveId3).decideNote === '人手不足', '管理员驳回并记录原因');
     const notifyRejected = await waitFor(wB, 'leaveRejected', (m) => m.leaveId === leaveId3, 3000);
     assert(notifyRejected && notifyRejected.decideNote === '人手不足', '申请人收到 leaveRejected 单发通知');
-    wA.close(); wB.close();
+    // 批量审批：两个成员各提交一条，管理员一键批准全部
+    const cL = 'lvc_' + runKey;
+    await reg(cL, 'pw', '请假成员C');
+    const wC = await createWSClient(); await loginTo(wC, spL.id, cL, 'pw');
+    await sendMsg(wB, { type: 'leaveCreate', category: '事假', reason: '批量A', startAt: base + 20 * 3600000, endAt: base + 22 * 3600000 });
+    await sendMsg(wC, { type: 'leaveCreate', category: '病假', reason: '批量B', startAt: base + 20 * 3600000, endAt: base + 22 * 3600000 });
+    const leavesBatch = await waitFor(wB, 'leaves', (r) => r.stats && r.stats.pendingCount === 2, 3000);
+    assert(leavesBatch, '两个成员各提交一条待审批请假');
+    await sendMsg(wA, { type: 'leaveBatchApprove' });
+    const leavesBatchApproved = await waitFor(wA, 'leaves', (r) => r.leaves && r.leaves.every((x) => x.status !== 'pending'), 3000);
+    assert(leavesBatchApproved && leavesBatchApproved.stats.pendingCount === 0, '一键批准全部后待审批归零');
+    assert(leavesBatchApproved && leavesBatchApproved.leaves.some((x) => x.category === '事假' && x.status === 'approved' && x.reason === '批量A'), '批量A 请假已批准');
+    assert(leavesBatchApproved && leavesBatchApproved.leaves.some((x) => x.category === '病假' && x.status === 'approved' && x.reason === '批量B'), '批量B 请假已批准');
+    assert(leavesBatchApproved && leavesBatchApproved.leaves.filter((x) => x.status === 'approved').every((x) => x.decidedBy === aL), '批量批准记录审批人');
+    const notifyBatchA = await waitFor(wB, 'leaveApproved', (m) => m.category === '事假', 3000);
+    const notifyBatchB = await waitFor(wC, 'leaveApproved', (m) => m.category === '病假', 3000);
+    assert(notifyBatchA && notifyBatchB, '批量批准后两位申请人均收到单发通知');
+    wA.close(); wB.close(); wC.close();
   }
 
   // ========== 测试43: 会议纪要 ==========

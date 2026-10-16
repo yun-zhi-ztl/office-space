@@ -169,7 +169,7 @@ wss.on('connection', (ws) => {
         tasks.handleTasks(ws, user, space, msg); break;
       case 'notificationRead': case 'notificationReadAll':
         notifications.handleNotifications(ws, user, space, msg); break;
-      case 'leaveCreate': case 'leaveCancel': case 'leaveApprove': case 'leaveReject':
+      case 'leaveCreate': case 'leaveCancel': case 'leaveApprove': case 'leaveReject': case 'leaveBatchApprove': case 'leaveBatchReject':
         leaves.handleLeaves(ws, user, space, msg); break;
       case 'meetingNoteCreate': case 'meetingNoteEdit': case 'meetingNoteRemove':
         meetingNotes.handleMeetingNotes(ws, user, space, msg); break;
