@@ -11,7 +11,7 @@
 1. **会议室预约** —— 预约时段、冲突检测、取消，并提供会议室占用率统计。
 2. **测试工具借用** —— 登记在库设备（测试电脑 / 测试机器 / 测试手机等）的借出与归还。
 3. **物资申领** —— 提出是否需要电池等物资的请求，支持优先级，并由同事/管理员处理。
-4. **报修** —— 上报厕所、灯光、空调等设施故障，支持优先级并推进状态。
+4. **报修** —— 上报厕所、灯光、空调等设施故障，支持优先级并推进状态，可添加跟进评论。
 5. **坑位看板**（原「坑位雷达」）—— 卫生间坑位实时占用 / 预约 / 抢位 / 催促 / 评分。
 6. **考勤打卡** —— 上下班打卡，管理员可配置工作时间与迟到宽限，自动判定迟到并统计。
 7. **工位预约** —— 开放工位 / 共享座位的时段预约，签到签退并记录实际到场时长。
@@ -89,12 +89,14 @@
   - 管理员可维护常用物资模板；成员提交申领时可选模板自动填充名称、数量、单位与说明。
 
 ### 报修（repairs）
-- `repair`: `{ id, code, reporterAccount, reporterName, category, priority, location, description, status, handlerAccount?, handlerName?, createdAt, updatedAt, escalatedAt? }`
+- `repair`: `{ id, code, reporterAccount, reporterName, category, priority, location, description, status, handlerAccount?, handlerName?, createdAt, updatedAt, escalatedAt?, comments[] }`
   - `category`: 厕所 / 灯光 / 空调 / 其它
   - `priority`: `high` / `normal` / `low`（默认 `normal`），上报人或管理员可调整。
   - 上报人或管理员可指派 `handlerAccount`（负责人）。
   - 状态流转：`reported` → `in_progress` → `resolved`；上报人可取消 `reported`。
+  - `comments[]`：跟进评论数组（最多 30 条）；每条 `{ id, account, name, text, createdAt }`，列表暴露 `commentCount` 与最近 20 条（倒序）。
   - `code`：提交时生成的 `RP-YYYYMMDD-XXXX` 工单号，列表、导出 CSV 与重复报修提示中均可引用。
+  - 跟进评论权限：上报人、负责人或管理员可添加；评论用于记录上门时间、配件进度、处理结果等跟进信息。
   - 升级：高优先级（`high`）报修超过 8 小时仍未解决（`reported` / `in_progress`）时自动升级一次，向上报人与所有管理员发送 `repairEscalated` 提醒，避免关键工单被漏掉。
 
 ### 访客登记（visitors）
@@ -213,6 +215,7 @@
 | `repairCreate` | 提交报修（可带 `priority`，返回 `code` 工单号） | member |
 | `repairAssign` | 指派报修负责人 | reporter / admin |
 | `repairUpdate` | 推进 / 取消报修状态，或调整 `priority` | member / owner / admin |
+| `repairComment` | 添加报修跟进评论（`repairId` + `text`） | reporter / handler / admin |
 | `visitorCreate` / `visitorArrived` / `visitorLeft` / `visitorCancel` / `visitorRemove` / `visitorCheckin` | 访客登记与状态流转 / 删除 / 凭签到码核销 | member / host / admin |
 | `deskCreate` / `deskDelete` | 新增 / 删除工位 | admin |
 | `deskReserve` / `deskCancel` | 预约工位（含冲突检测）/ 取消自己的预约 | member / owner |
@@ -379,7 +382,7 @@
 | 心情打卡 | 每天 emoji 记录一次心情，同一账号每天只保留一条；统计今日人数与各表情计数 | `moodCheckIn` + `mood` |
 
 ### 客户端→服务端新增消息
-`setStatus`、`announce`、`spaceRename`、`spacePause`、`spaceAdminSet`、`spaceKick`、`suggestRoom`、`remindReturn`、`toolExtend`、`toolBorrow`(`dueAt` 自定义归还时间)、`toolCreate` / `toolAdjust`(`minAvailable` 库存告急阈值)、`inventoryCreate` / `inventoryAdjust`(`minAvailable` 物资库存告急阈值) / `inventoryIssue` / `inventoryReturn`、`roomBook`(周期 `repeat`/`repeatCount`)、`reservationCancelSeries`、`reservationReschedule`、`roomRate`、`roomFavorite`、`roomWaitlist`、`roomWaitlistCancel`、`materialAssign`、`repairAssign`、`repairUpdate`(优先级)、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`visitorCheckin`、`attendCheckIn` / `attendCheckOut` / `attendConfig`、`deskCreate` / `deskDelete` / `deskReserve` / `deskCancel` / `deskStart` / `deskEnd`、`oooCreate` / `oooBack` / `oooCancel` / `oooRemove`、`feedbackCreate` / `feedbackReply` / `feedbackClose` / `feedbackRemove`、`moodCheckIn`、`materialUpdate`、`profileUpdate`、`passwordChange`、`toggleEmergency`、`fetchPage`(`borrows` 等分页模块)；服务端相应广播/单发
+`setStatus`、`announce`、`spaceRename`、`spacePause`、`spaceAdminSet`、`spaceKick`、`suggestRoom`、`remindReturn`、`toolExtend`、`toolBorrow`(`dueAt` 自定义归还时间)、`toolCreate` / `toolAdjust`(`minAvailable` 库存告急阈值)、`inventoryCreate` / `inventoryAdjust`(`minAvailable` 物资库存告急阈值) / `inventoryIssue` / `inventoryReturn`、`roomBook`(周期 `repeat`/`repeatCount`)、`reservationCancelSeries`、`reservationReschedule`、`roomRate`、`roomFavorite`、`roomWaitlist`、`roomWaitlistCancel`、`materialAssign`、`repairAssign`、`repairUpdate`(优先级)、`repairComment`(跟进评论)、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`visitorCheckin`、`attendCheckIn` / `attendCheckOut` / `attendConfig`、`deskCreate` / `deskDelete` / `deskReserve` / `deskCancel` / `deskStart` / `deskEnd`、`oooCreate` / `oooBack` / `oooCancel` / `oooRemove`、`feedbackCreate` / `feedbackReply` / `feedbackClose` / `feedbackRemove`、`moodCheckIn`、`materialUpdate`、`profileUpdate`、`passwordChange`、`toggleEmergency`、`fetchPage`(`borrows` 等分页模块)；服务端相应广播/单发
 `users`(含 `status`、`emergencyMode`、`role`) 、`notices`、`suggestRooms`、`borrowReminder`、`roomReminder`、`borrowDueSoon`、`materialAssigned`、`materialFulfilled`、`materialSla`、`repairAssigned`、`repairInProgress`、`repairResolved`、`repairSla`、`repairEscalated`、`adminSet`、`spaceKicked`、`digest`、`visitors`、`spaceRenamed`、`spacePaused`、`roomWaitlistPromoted`、`reservationRescheduled`、`rooms`(含 `waitlist`)、`roomRated`、`roomFavorites`、`visitorCheckinNotification`、`visitorArrived`、`visitorLeft`、`visitorReminder`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendance`、`attendanceCheckedIn`、`attendanceCheckedOut`、`desks`、`deskStats`、`ooo`、`feedback`、`mood`、`oooBacked`、`oooReturnSoon`、`moodCheckedIn`。
 
 ## 9. 代码架构（多模块拆分）

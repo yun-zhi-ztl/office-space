@@ -727,6 +727,8 @@ function createContext() {
       handleDurationMinutes: r.handledAt ? Math.max(0, Math.round((r.handledAt - r.createdAt) / 60000)) : null,
        slaReminded: !!r.slaRemindedAt,
        escalated: !!r.escalatedAt,
+      commentCount: (r.comments || []).length,
+      comments: (r.comments || []).map((c) => ({ id: c.id, account: c.account, name: c.name, text: c.text || '', createdAt: c.createdAt || 0 })).reverse().slice(0, 20),
     })).sort((a, b) => (b.createdAt - a.createdAt));
   }
   function borrowsPublic(sp, info) {

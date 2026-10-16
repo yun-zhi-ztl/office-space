@@ -128,6 +128,7 @@ function dispatch(m){
     case 'repairResolved': toast('✅ 报修已解决：'+(m.category||'')+' · '+(m.location||''),'success'); render(); break;
     case 'repairSla': toast('⚠️ 报修超时未处理：'+(m.category||'')+' · '+(m.location||''),'warn'); render(); break;
     case 'repairEscalated': toast('🚨 高优先报修已升级：'+(m.category||'')+' · '+(m.location||'')+'，请尽快处理','warn'); render(); break;
+    case 'repairCommented': { const r=(S.DB.repairs||[]).find(x=>x.id===m.repairId); if(r){ r.commentCount=(r.commentCount||0)+1; } toast('💬 报修已跟进','success'); render(); break; }
     case 'materialSla': toast('⚠️ 申领超时未处理：'+(m.name||'')+' ×'+(m.qty||1),'warn'); render(); break;
     case 'stats': if(S.me && m.stats){ S.me.stats = m.stats; if(m.achievements) S.me.achievements = m.achievements; render(); } break;
     case 'urgeNotification': toast('📣 有人催促你了（'+m.count+' 人）','urge'); break;
@@ -732,18 +733,26 @@ function renderRepairs(){
   const pLabel=p=>p==='high'?'高':p==='normal'?'中':'低';
   $('#main').innerHTML = `<div class="topbar"><div><h1>报修</h1><div class="sub">上报厕所、灯光、空调等设施故障并及时跟进</div></div>
     <button class="btn pri" onclick="openRepair()">＋ 我要报修</button><button class="btn" onclick="exportModuleCsv('repairs',REP_COLS)">导出 CSV</button></div>
-    <div class="list">${d.repairs.map(r=>{ const canAssign=r.reporterAccount===me||S.admin; const handled=r.handledAt?` · 处理 ${Math.max(0,Math.round((r.handledAt-r.createdAt)/60000))} 分钟`:''; return `<div class="row"><span><span class="who">${esc(r.category)} · ${esc(r.location)}</span> ${r.code?`<span class="badge ${r.status==='resolved'?'ok':r.status==='cancelled'?'grey':'info'}">${esc(r.code)}</span>`:''} <span class="when">${esc(r.reporterName)} ${fmtTime(r.createdAt)}${r.handlerName?` · 负责人 ${esc(r.handlerName)}`:''}${handled}</span><div class="desc">${esc(r.description)}</div></span>
+    <div class="list">${d.repairs.map(r=>{ const canAssign=r.reporterAccount===me||S.admin; const handled=r.handledAt?` · 处理 ${Math.max(0,Math.round((r.handledAt-r.createdAt)/60000))} 分钟`:''; return `<div class="row"><span><span class="who">${esc(r.category)} · ${esc(r.location)}</span> ${r.code?`<span class="badge ${r.status==='resolved'?'ok':r.status==='cancelled'?'grey':'info'}">${esc(r.code)}</span>`:''} <span class="when">${esc(r.reporterName)} ${fmtTime(r.createdAt)}${r.handlerName?` · 负责人 ${esc(r.handlerName)}`:''}${handled}</span><div class="desc">${esc(r.description)}</div>${repairCommentListHtml(r)}</span>
       <span class="fs">
       <span class="badge ${badge(r.status)}">${label(r.status)}</span>
       <span class="badge ${pBadge(r.priority)}">${pLabel(r.priority)}优先</span>
       ${r.escalated?'<span class="badge bad">已升级</span>':''}
+      ${r.commentCount?`<span class="badge ok">💬 ${r.commentCount}</span>`:''}
       ${r.status==='reported'?`<button class="btn sm" onclick="setRepair('${r.id}','in_progress')">开始处理</button>`:''}
       ${(r.status==='reported'||r.status==='in_progress')?`<button class="btn green sm" onclick="setRepair('${r.id}','resolved')">已解决</button>`:''}
       ${r.status==='reported'||r.status==='in_progress'?`${r.reporterAccount===me||S.admin?`<button class="btn sm" onclick="openPriority('${r.id}','${esc(r.priority||'normal')}')">改优先级</button>`:''}`:''}
       ${r.status==='reported'?`${canAssign?`<button class="btn sm" onclick="openAssign('repair','${r.id}')">指派</button>`:''}${r.reporterAccount===me?`<button class="btn danger sm" onclick="setRepair('${r.id}','cancelled')">撤销</button>`:''}`:''}
+      ${(r.reporterAccount===me||r.handlerAccount===me||S.admin)?`<div style="margin-top:6px"><input placeholder="跟进评论…" maxlength="200" onkeydown="if(event.key==='Enter')repairComment('${r.id}',this.value)"/></div>`:''}
       </span></div>`; }).join('')||'<div class="empty">暂无报修记录</div>'}
     </div>
     ${(S.DB.repOffset||0)<(S.DB.repTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('repairs')">加载更多（${S.DB.repTotal-(S.DB.repOffset||0)}）</button></div>`:''}`;
+}
+// 报修工单跟进评论：展示最近评论（倒序）
+function repairCommentListHtml(r) {
+  const comments = (r.comments || []).slice().reverse();
+  if (!comments.length) return '';
+  return `<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">${comments.map((c) => `<div style="font-size:12px;margin-bottom:4px"><b>${esc(c.name||'')}</b> <span style="color:var(--muted)">${fmtTime(c.createdAt)}</span><br>${esc(c.text||'')}</div>`).join('')}</div>`;
 }
 function openRepair(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>提交报修</h2><div class="form">
   <div class="fld"><label>类别</label><select id="rpCat"><option>厕所</option><option>灯光</option><option>空调</option><option>其它</option></select></div>
@@ -754,6 +763,7 @@ function openRepair(){ openModal(`<span class="close" onclick="closeModal()">×<
   <button class="btn pri" onclick="submitRepair()">提交</button></div>`); }
 function submitRepair(){ wsSend({type:'repairCreate',category:$('#rpCat').value,priority:$('#rpPri').value,location:$('#rpLoc').value,description:$('#rpDesc').value}); closeModal(); }
 function setRepair(id,status){ wsSend({type:'repairUpdate',repairId:id,status}); }
+function repairComment(id, text){ wsSend({type:'repairComment',repairId:id,text}); }
 function openPriority(id,cur){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>调整优先级</h2><div class="form">
   <div class="fld"><label>优先级</label><select id="ppPri"><option value="high" ${cur==='high'?'selected':''}>高</option><option value="normal" ${cur==='normal'?'selected':''}>中</option><option value="low" ${cur==='low'?'selected':''}>低</option></select></div>
   <button class="btn pri" onclick="submitPriority('${id}')">保存</button></div>`); }

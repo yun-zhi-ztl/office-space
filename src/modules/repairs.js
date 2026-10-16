@@ -1,5 +1,5 @@
 'use strict';
-// 报修模块：repairCreate / repairUpdate
+// 报修模块：repairCreate / repairAssign / repairUpdate / repairComment
 module.exports = function repairsModule(api) {
   const { spaceUserInfo, repairsPublic, broadcast, LIST_PAGE, REPAIR_CATEGORIES, REPAIR_PRIORITIES, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToAccount, sendToUser, checkAchievements, isAdmin, findDuplicateRepair, pushNotification } = api;
 
@@ -24,7 +24,7 @@ module.exports = function repairsModule(api) {
       const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
       const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
       const code = `RP-${ymd}-${suffix}`;
-      const rep = { id: genId('rp', null), code, reporterAccount: user.account, reporterName: user.nickname, category, location, description, priority, status: 'reported', createdAt: now, updatedAt: now, slaRemindedAt: null };
+      const rep = { id: genId('rp', null), code, reporterAccount: user.account, reporterName: user.nickname, category, location, description, priority, status: 'reported', createdAt: now, updatedAt: now, slaRemindedAt: null, comments: [] };
       space.repairs.set(rep.id, rep);
       user.stats.repairCount = (user.stats.repairCount || 0) + 1;
       recordWeekly(user, 'repairs');
@@ -89,6 +89,22 @@ module.exports = function repairsModule(api) {
         pushNotification(space, { type: 'repairResolved', level: 'success', title: '报修已解决', body: rep.category + ' · ' + rep.location });
       }
       repairsBroadcast(space);
+    } else if (msg.type === 'repairComment') {
+      const rep = space.repairs.get(msg.repairId);
+      if (!rep) return sendTo(ws, serError('报修记录不存在'));
+      const allowed = rep.reporterAccount === user.account || rep.handlerAccount === user.account || isAdmin(space, user.account);
+      if (!allowed) return sendTo(ws, serError('仅上报人、负责人或管理员可跟进评论'));
+      const text = (msg.text || '').trim().slice(0, 200);
+      if (!text) return sendTo(ws, serError('请输入跟进内容'));
+      const comments = rep.comments || [];
+      if (comments.length >= 30) return sendTo(ws, serError('跟进评论已达上限（30 条）'));
+      const comment = { id: genId('rc', null), account: user.account, name: user.nickname, text, createdAt: Date.now() };
+      comments.push(comment);
+      rep.comments = comments;
+      rep.updatedAt = Date.now();
+      saveEntity(space.id, 'repair', rep.id, rep);
+      repairsBroadcast(space);
+      sendTo(ws, { type: 'repairCommented', repairId: rep.id, comment });
     }
   }
 

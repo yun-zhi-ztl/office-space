@@ -232,10 +232,12 @@ assert(usage.utilizationPct >= 0 && usage.utilizationPct <= 100, '占用率在 0
 
 console.log('\n📋 16. 报修优先级序列化');
 const spR = api.createSpace('s8', '报修空间', 1, 0);
-spR.repairs.set('r8', { id: 'r8', reporterAccount: 'alice', reporterName: '甲', category: '灯光', priority: 'high', location: '走廊', description: '闪烁', status: 'reported', createdAt: Date.now(), updatedAt: Date.now() });
+spR.repairs.set('r8', { id: 'r8', reporterAccount: 'alice', reporterName: '甲', category: '灯光', priority: 'high', location: '走廊', description: '闪烁', status: 'reported', createdAt: Date.now(), updatedAt: Date.now(), comments: [{ id: 'rc1', account: 'alice', name: '甲', text: '已联系物业', createdAt: Date.now() }] });
 const rp = api.repairsPublic(spR, new Map());
 assertEq(rp[0].priority, 'high', 'repairsPublic 保留优先级');
 assertEq(rp[0].location, '走廊', 'repairsPublic 保留位置');
+assertEq(rp[0].commentCount, 1, 'repairsPublic 统计跟进评论数');
+assertEq(rp[0].comments[0].text, '已联系物业', 'repairsPublic 暴露跟进评论');
 
 // ---------- 借用记录序列化 ----------
 console.log('\n📋 17. 借用记录序列化');

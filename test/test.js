@@ -558,6 +558,33 @@ async function runTests() {
   assert(rep6dItem && rep6dItem.code && /^RP-\d{8}-[A-Z0-9]+$/.test(rep6dItem.code), '报修生成 RP-日期-编号 工单号');
   const rep6dId = rep6dItem.id;
 
+  // ========== 测试6e: 报修跟进评论 ==========
+  console.log('\n📋 测试6e: 报修跟进评论');
+  await sendMsg(w2, { type: 'repairCreate', category: '灯光', location: '2F 茶水间', description: '灯不亮' });
+  let rep6e = last(w2, 'repairs');
+  const rep6eItem = rep6e.repairs.find(r => r.description === '灯不亮');
+  const rep6eId = rep6eItem.id;
+  // 上报人跟进评论
+  await sendMsg(w2, { type: 'repairComment', repairId: rep6eId, text: '物业已确认上门时间' });
+  let rep6e1 = last(w2, 'repairs');
+  let item6e1 = rep6e1.repairs.find(r => r.id === rep6eId);
+  assert(item6e1.commentCount === 1, '上报人跟进评论成功');
+  assert(item6e1.comments[0].text === '物业已确认上门时间', '跟进评论内容正确');
+  // 指派负责人后，负责人也可跟进
+  await sendMsg(w2, { type: 'repairAssign', repairId: rep6eId, handlerAccount: THIRD });
+  await sendMsg(w3, { type: 'repairComment', repairId: rep6eId, text: '已下单配件' });
+  let rep6e2 = last(w3, 'repairs');
+  let item6e2 = rep6e2.repairs.find(r => r.id === rep6eId);
+  assert(item6e2.commentCount === 2, '负责人跟进评论成功');
+  // 无关成员评论被拒
+  await sendMsg(w4, { type: 'repairComment', repairId: rep6eId, text: '我也来说一句' });
+  const err6e = mk(w4, 'error');
+  assert(err6e.length > 0 && err6e[err6e.length - 1].message.includes('仅上报人、负责人或管理员'), '无关成员评论被拒');
+  // 空评论被拒
+  await sendMsg(w2, { type: 'repairComment', repairId: rep6eId, text: '   ' });
+  const err6eEmpty = mk(w2, 'error');
+  assert(err6eEmpty.length > 0 && err6eEmpty[err6eEmpty.length - 1].message.includes('请输入跟进内容'), '空跟进评论被拒');
+
   // ========== 测试5c: 物资常用模板 ==========
   console.log('\n📋 测试5c: 物资常用模板（管理员维护 + 快捷申领）');
   await sendMsg(w1, { type: 'materialTemplateCreate', name: '5号电池', defaultQty: 4, defaultUnit: '节', defaultReason: '遥控器备用' });
