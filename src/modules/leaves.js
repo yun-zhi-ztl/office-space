@@ -15,7 +15,7 @@ module.exports = function leavesModule(api) {
       const endAt = Math.floor(+msg.endAt || 0);
       if (!(startAt > 0) || !(endAt > startAt)) return sendTo(ws, serError('请选择有效的请假时段'));
       if (startAt < Date.now()) return sendTo(ws, serError('请假开始时间不能早于当前时间'));
-      const rec = { id: genId('lv', null), account: user.account, name: user.nickname, category, reason, startAt, endAt, status: 'pending', createdAt: Date.now(), decidedAt: null, decidedBy: null, decideNote: '' };
+      const rec = { id: genId('lv', null), account: user.account, name: user.nickname, category, reason, startAt, endAt, status: 'pending', createdAt: Date.now(), decidedAt: null, decidedBy: null, decideNote: '', slaRemindedAt: null };
       space.leaves.set(rec.id, rec);
       saveEntity(space.id, 'leave', rec.id, rec);
       leavesBroadcast(space);

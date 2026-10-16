@@ -439,6 +439,21 @@ assertEq(api.MATERIAL_SLA_MS, 2 * 24 * 3600 * 1000, '申领 SLA 为 48 小时');
 const matPub = api.materialsPublic(spMat, new Map());
 assertEq(matPub[0].slaReminded, false, 'materialsPublic 暴露 slaReminded');
 
+// ---------- 请假审批 SLA 超时提醒 ----------
+console.log('\n📋 27b. 请假审批 SLA 超时提醒');
+const spLeave = api.createSpace('s19b', '请假 SLA 空间', 1, 0);
+const nowLeave = 1000000000;
+const lSla = api.LEAVE_APPROVAL_SLA_MS;
+spLeave.leaves.set('lv1', { id: 'lv1', account: 'alice', name: '甲', category: '事假', reason: '家中有事', startAt: nowLeave + 86400000, endAt: nowLeave + 2 * 86400000, status: 'pending', createdAt: nowLeave - lSla, decidedAt: null, decidedBy: null, decideNote: '', slaRemindedAt: null });
+spLeave.leaves.set('lv2', { id: 'lv2', account: 'bob', name: '乙', category: '病假', reason: '', startAt: nowLeave + 86400000, endAt: nowLeave + 2 * 86400000, status: 'pending', createdAt: nowLeave - lSla + 1, decidedAt: null, decidedBy: null, decideNote: '', slaRemindedAt: null });
+spLeave.leaves.set('lv3', { id: 'lv3', account: 'carol', name: '丙', category: '年假', reason: '', startAt: nowLeave + 86400000, endAt: nowLeave + 2 * 86400000, status: 'pending', createdAt: nowLeave - lSla, decidedAt: null, decidedBy: null, decideNote: '', slaRemindedAt: nowLeave - 1000 });
+spLeave.leaves.set('lv4', { id: 'lv4', account: 'dave', name: '丁', category: '调休', reason: '', startAt: nowLeave + 86400000, endAt: nowLeave + 2 * 86400000, status: 'approved', createdAt: nowLeave - lSla, decidedAt: nowLeave, decidedBy: 'admin', decideNote: '', slaRemindedAt: null });
+const leaveSlaRem = api.dueLeaveSlaReminders(spLeave, nowLeave);
+assertEq(leaveSlaRem.map((r) => r.id), ['lv1'], '仅返回超时且未提醒过的待审批请假');
+assertEq(api.LEAVE_APPROVAL_SLA_MS, 24 * 3600 * 1000, '请假审批 SLA 为 24 小时');
+const leavePub = api.leavesPublic(spLeave, new Map());
+assertEq(leavePub[0].slaRemindedAt, null, 'leavesPublic 暴露 slaRemindedAt');
+
 // ---------- 报修重复检测 ----------
 console.log('\n📋 28. 报修重复检测');
 const spDup = api.createSpace('s20', '报修重复空间', 1, 0);

@@ -405,6 +405,16 @@ setInterval(() => {
       }
       materials.materialsBroadcast(sp);
     }
+    // 请假审批 SLA 提醒：待审批超过 SLA 仍未处理时提醒管理员，避免漏审批
+    const leaveSlaReminders = api.dueLeaveSlaReminders(sp, now);
+    if (leaveSlaReminders.length) {
+      for (const r of leaveSlaReminders) {
+        r.slaRemindedAt = now;
+        api.saveEntity(sp.id, 'leave', r.id, r);
+        for (const acc of sp.admins) api.sendToAccount(acc, { type: 'leaveSla', leaveId: r.id, category: r.category, name: r.name, startAt: r.startAt });
+      }
+      leaves.leavesBroadcast(sp);
+    }
     // 高优先级报修升级：超过阈值仍未解决时升级提醒一次
     const repairEscalations = api.dueRepairEscalations(sp, now);
     if (repairEscalations.length) {

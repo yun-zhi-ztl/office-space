@@ -103,6 +103,7 @@ function dispatch(m){
     case 'leaveCreated': if(S.admin) toast('📅 有请假申请待审批：'+(m.name||'')+' · '+(m.category||''),'info'); break;
     case 'leaveApproved': toast('✔ 请假申请已批准：'+(m.category||''),'success'); render(); break;
     case 'leaveRejected': toast('✘ 请假申请已被驳回：'+(m.category||'')+(m.decideNote?' · '+m.decideNote:''),'warn'); render(); break;
+    case 'leaveSla': toast('⏳ 请假申请待审批超时：'+(m.name||'')+' · '+(m.category||''),'warn'); render(); break;
     case 'meetingNoteCreated': if(S.admin) toast('📝 会议纪要已更新：'+(m.noteId||''),'info'); break;
     case 'meetingNoteUpdated': toast('✔ 会议纪要已保存','success'); render(); break;
     case 'eventCreated': toast('🎉 活动已创建','success'); render(); break;
@@ -1043,7 +1044,7 @@ function renderLeaves(){
     <h3 style="margin:22px 0 10px">📋 请假记录</h3>
     <div class="list">${(d.leaves||[]).length?d.leaves.map(r=>{
       const mine=r.account===me;
-      return `<div class="row"><span><span class="who">${esc(r.name||r.account)}</span> <span class="badge ${badge[r.status]||'grey'}">${label[r.status]||r.status}</span>
+      return `<div class="row"><span><span class="who">${esc(r.name||r.account)}</span> <span class="badge ${badge[r.status]||'grey'}">${label[r.status]||r.status}</span>${r.status==='pending'&&r.slaRemindedAt?' <span class="badge warn">已超时</span>':''}
         <div class="desc">${esc(r.category)}${r.reason?' · '+esc(r.reason):''}</div>
         <div class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}${r.decideNote?' · 备注：'+esc(r.decideNote):''}</div>
       </span><span class="fs">${mine&&r.status==='pending'?`<button class="btn danger sm" onclick="leaveCancel('${r.id}')">取消</button>`:''}${S.admin&&r.status==='pending'?`<button class="btn green sm" onclick="leaveApprove('${r.id}')">批准</button><button class="btn danger sm" onclick="openLeaveReject('${r.id}')">驳回</button>`:''}</span></div>`;
