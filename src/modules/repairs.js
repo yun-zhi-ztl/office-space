@@ -105,6 +105,22 @@ module.exports = function repairsModule(api) {
       saveEntity(space.id, 'repair', rep.id, rep);
       repairsBroadcast(space);
       sendTo(ws, { type: 'repairCommented', repairId: rep.id, comment });
+    } else if (msg.type === 'repairRate') {
+      const rep = space.repairs.get(msg.repairId);
+      if (!rep) return sendTo(ws, serError('报修记录不存在'));
+      if (rep.reporterAccount !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('仅上报人或管理员可评价'));
+      if (rep.status !== 'resolved') return sendTo(ws, serError('仅已解决的报修可评价'));
+      if (rep.satisfaction) return sendTo(ws, serError('该报修已评价'));
+      const satisfaction = parseInt(msg.satisfaction, 10);
+      if (!Number.isInteger(satisfaction) || satisfaction < 1 || satisfaction > 5) return sendTo(ws, serError('满意度需为 1-5 分'));
+      const comment = (msg.satisfactionComment || '').trim().slice(0, 60);
+      rep.satisfaction = satisfaction;
+      rep.satisfactionComment = comment;
+      rep.satisfiedAt = Date.now();
+      rep.updatedAt = Date.now();
+      saveEntity(space.id, 'repair', rep.id, rep);
+      repairsBroadcast(space);
+      sendTo(ws, { type: 'repairRated', repairId: rep.id, satisfaction });
     }
   }
 

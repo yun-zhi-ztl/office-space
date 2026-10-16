@@ -292,6 +292,12 @@ assertEq(rp[0].priority, 'high', 'repairsPublic 保留优先级');
 assertEq(rp[0].location, '走廊', 'repairsPublic 保留位置');
 assertEq(rp[0].commentCount, 1, 'repairsPublic 统计跟进评论数');
 assertEq(rp[0].comments[0].text, '已联系物业', 'repairsPublic 暴露跟进评论');
+// 已解决报修的满意度字段
+spR.repairs.set('r8s', { id: 'r8s', reporterAccount: 'alice', reporterName: '甲', category: '空调', priority: 'normal', location: '会议室', description: '不制冷', status: 'resolved', createdAt: Date.now(), updatedAt: Date.now(), satisfaction: 4, satisfactionComment: '修得很快', satisfiedAt: Date.now() });
+const rpS = api.repairsPublic(spR, new Map()).find((r) => r.id === 'r8s');
+assertEq(rpS.satisfaction, 4, 'repairsPublic 暴露 satisfaction');
+assertEq(rpS.satisfactionComment, '修得很快', 'repairsPublic 暴露 satisfactionComment');
+assert(rpS.satisfiedAt > 0, 'repairsPublic 暴露 satisfiedAt');
 
 // ---------- 借用记录序列化 ----------
 console.log('\n📋 17. 借用记录序列化');

@@ -668,6 +668,45 @@ async function runTests() {
   const err6eEmpty = mk(w2, 'error');
   assert(err6eEmpty.length > 0 && err6eEmpty[err6eEmpty.length - 1].message.includes('请输入跟进内容'), '空跟进评论被拒');
 
+  // ========== 测试6f: 报修满意度评分 ==========
+  console.log('\n📋 测试6f: 报修满意度评分');
+  // 上报 → 处理中 → 已解决 → 上报人评价 4 星
+  await sendMsg(w2, { type: 'repairCreate', category: '灯光', location: '2F 满意度评分测试', description: '评分用灯' });
+  let rep6f = last(w2, 'repairs');
+  const rep6fId = rep6f.repairs.find(r => r.description === '评分用灯').id;
+  await sendMsg(w1, { type: 'repairUpdate', repairId: rep6fId, status: 'in_progress' });
+  await sendMsg(w1, { type: 'repairUpdate', repairId: rep6fId, status: 'resolved' });
+  await sendMsg(w2, { type: 'repairRate', repairId: rep6fId, satisfaction: 4, satisfactionComment: '修得很快' });
+  rep6f = last(w2, 'repairs');
+  const item6f = rep6f.repairs.find(r => r.id === rep6fId);
+  assert(item6f.satisfaction === 4, '上报人对已解决报修评价 4 星成功');
+  assert(item6f.satisfactionComment === '修得很快', '满意度评价文本正确');
+  assert(mk(w2, 'repairRated').length >= 1, '评价后下发 repairRated 通知');
+  // 未解决时评价被拒
+  await sendMsg(w2, { type: 'repairCreate', category: '灯光', location: '2F 未解决评分', description: '未解决' });
+  const rep6f2Id = last(w2, 'repairs').repairs.find(r => r.description === '未解决').id;
+  await sendMsg(w2, { type: 'repairRate', repairId: rep6f2Id, satisfaction: 5 });
+  const err6f2 = mk(w2, 'error');
+  assert(err6f2.length > 0 && err6f2[err6f2.length - 1].message.includes('已解决'), '未解决报修评价被拒');
+  // 非上报人评价被拒
+  await sendMsg(w3, { type: 'repairRate', repairId: rep6fId, satisfaction: 3 });
+  const err6f3 = mk(w3, 'error');
+  assert(err6f3.length > 0 && err6f3[err6f3.length - 1].message.includes('仅上报人或管理员'), '非上报人评价被拒');
+  // 重复评价被拒
+  await sendMsg(w2, { type: 'repairRate', repairId: rep6fId, satisfaction: 5 });
+  const err6f4 = mk(w2, 'error');
+  assert(err6f4.length > 0 && err6f4[err6f4.length - 1].message.includes('已评价'), '重复评价被拒');
+  // satisfaction 越界被拒（0 / 6）
+  await sendMsg(w2, { type: 'repairCreate', category: '灯光', location: '2F 越界评分', description: '越界' });
+  const rep6f5Id = last(w2, 'repairs').repairs.find(r => r.description === '越界').id;
+  await sendMsg(w1, { type: 'repairUpdate', repairId: rep6f5Id, status: 'resolved' });
+  await sendMsg(w2, { type: 'repairRate', repairId: rep6f5Id, satisfaction: 0 });
+  const err6f5 = mk(w2, 'error');
+  assert(err6f5.length > 0 && err6f5[err6f5.length - 1].message.includes('1-5'), '满意度 0 分被拒');
+  await sendMsg(w2, { type: 'repairRate', repairId: rep6f5Id, satisfaction: 6 });
+  const err6f6 = mk(w2, 'error');
+  assert(err6f6.length > 0 && err6f6[err6f6.length - 1].message.includes('1-5'), '满意度 6 分被拒');
+
   // ========== 测试5c: 物资常用模板 ==========
   console.log('\n📋 测试5c: 物资常用模板（管理员维护 + 快捷申领）');
   await sendMsg(w1, { type: 'materialTemplateCreate', name: '5号电池', defaultQty: 4, defaultUnit: '节', defaultReason: '遥控器备用' });

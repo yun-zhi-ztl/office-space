@@ -141,7 +141,7 @@ wss.on('connection', (ws) => {
         materials.handleMaterials(ws, user, space, msg); break;
       case 'inventoryCreate': case 'inventoryDelete': case 'inventoryAdjust': case 'inventoryIssue': case 'inventoryReturn':
         inventory.handleInventory(ws, user, space, msg); break;
-      case 'repairCreate': case 'repairUpdate': case 'repairAssign': case 'repairComment':
+      case 'repairCreate': case 'repairUpdate': case 'repairAssign': case 'repairComment': case 'repairRate':
         repairs.handleRepairs(ws, user, space, msg); break;
       case 'visitorCreate': case 'visitorArrived': case 'visitorLeft': case 'visitorCancel': case 'visitorRemove': case 'visitorCheckin':
         visitors.handleVisitors(ws, user, space, msg); break;

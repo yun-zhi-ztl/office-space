@@ -138,6 +138,7 @@ function dispatch(m){
     case 'repairSla': toast('⚠️ 报修超时未处理：'+(m.category||'')+' · '+(m.location||''),'warn'); render(); break;
     case 'repairEscalated': toast('🚨 高优先报修已升级：'+(m.category||'')+' · '+(m.location||'')+'，请尽快处理','warn'); render(); break;
     case 'repairCommented': { const r=(S.DB.repairs||[]).find(x=>x.id===m.repairId); if(r){ r.commentCount=(r.commentCount||0)+1; } toast('💬 报修已跟进','success'); render(); break; }
+    case 'repairRated': toast('✔ 已评价：'+(m.satisfaction||'')+'⭐','success'); render(); break;
     case 'materialSla': toast('⚠️ 申领超时未处理：'+(m.name||'')+' ×'+(m.qty||1),'warn'); render(); break;
     case 'stats': if(S.me && m.stats){ S.me.stats = m.stats; if(m.achievements) S.me.achievements = m.achievements; render(); } break;
     case 'urgeNotification': toast('📣 有人催促你了（'+m.count+' 人）','urge'); break;
@@ -768,9 +769,11 @@ function renderRepairs(){
       <span class="badge ${badge(r.status)}">${label(r.status)}</span>
       <span class="badge ${pBadge(r.priority)}">${pLabel(r.priority)}优先</span>
       ${r.escalated?'<span class="badge bad">已升级</span>':''}
+      ${r.satisfaction?`<span class="badge ok">已评 ${r.satisfaction}⭐</span>`:''}
       ${r.commentCount?`<span class="badge ok">💬 ${r.commentCount}</span>`:''}
       ${r.status==='reported'?`<button class="btn sm" onclick="setRepair('${r.id}','in_progress')">开始处理</button>`:''}
       ${(r.status==='reported'||r.status==='in_progress')?`<button class="btn green sm" onclick="setRepair('${r.id}','resolved')">已解决</button>`:''}
+      ${r.status==='resolved'&&!r.satisfaction&&(r.reporterAccount===me||S.admin)?`<button class="btn sm" onclick="openRepairRate('${r.id}')">评价</button>`:''}
       ${r.status==='reported'||r.status==='in_progress'?`${r.reporterAccount===me||S.admin?`<button class="btn sm" onclick="openPriority('${r.id}','${esc(r.priority||'normal')}')">改优先级</button>`:''}`:''}
       ${r.status==='reported'?`${canAssign?`<button class="btn sm" onclick="openAssign('repair','${r.id}')">指派</button>`:''}${r.reporterAccount===me?`<button class="btn danger sm" onclick="setRepair('${r.id}','cancelled')">撤销</button>`:''}`:''}
       ${(r.reporterAccount===me||r.handlerAccount===me||S.admin)?`<div style="margin-top:6px"><input placeholder="跟进评论…" maxlength="200" onkeydown="if(event.key==='Enter')repairComment('${r.id}',this.value)"/></div>`:''}
@@ -794,6 +797,26 @@ function openRepair(){ openModal(`<span class="close" onclick="closeModal()">×<
 function submitRepair(){ wsSend({type:'repairCreate',category:$('#rpCat').value,priority:$('#rpPri').value,location:$('#rpLoc').value,description:$('#rpDesc').value}); closeModal(); }
 function setRepair(id,status){ wsSend({type:'repairUpdate',repairId:id,status}); }
 function repairComment(id, text){ wsSend({type:'repairComment',repairId:id,text}); }
+/* 报修满意度评分：已解决的报修，上报人/管理员可打 1-5 星并留评 */
+function openRepairRate(id){
+  const r=(S.DB.repairs||[]).find(x=>x.id===id); if(!r) return;
+  S.lastRateId=id;
+  S._repairRate=5;
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>报修满意度 · ${esc(r.location||'')}</h2><div class="form">
+    <div class="fld"><label>总体满意度</label>${[1,2,3,4,5].map(n=>`<button class="btn ${n===5?'pri':''}" data-val="${n}" onclick="repairRateClick(this)">${'⭐'.repeat(n)}</button>`).join('')}</div>
+    <div class="fld"><label>评价（可选，最多 60 字）</label><input id="rpRateComment" placeholder="如：上门很快，修好了"></div>
+    <button class="btn pri" onclick="submitRepairRate('${id}')">提交评价</button></div>`);
+}
+function repairRateClick(btn){
+  const n=parseInt(btn.dataset.val,10);
+  S._repairRate=n;
+  btn.closest('.fld').querySelectorAll('button').forEach(b=>b.classList.toggle('pri', parseInt(b.dataset.val,10)===n));
+}
+function submitRepairRate(id){
+  const satisfaction=parseInt(S._repairRate||5,10);
+  wsSend({type:'repairRate',repairId:id,satisfaction:satisfaction,satisfactionComment:$('#rpRateComment').value||''});
+  closeModal();
+}
 function openPriority(id,cur){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>调整优先级</h2><div class="form">
   <div class="fld"><label>优先级</label><select id="ppPri"><option value="high" ${cur==='high'?'selected':''}>高</option><option value="normal" ${cur==='normal'?'selected':''}>中</option><option value="low" ${cur==='low'?'selected':''}>低</option></select></div>
   <button class="btn pri" onclick="submitPriority('${id}')">保存</button></div>`); }
