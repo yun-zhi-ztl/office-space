@@ -204,10 +204,24 @@ module.exports = function roomsModule(api) {
       if (res.ownerAccount !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('只能给结束的会议评分'));
       if (res.status !== 'completed') return sendTo(ws, serError('只有已结束的会议可以评分'));
       if (res.rating) return sendTo(ws, serError('该会议已评分'));
-      const score = parseInt(msg.score, 10);
-      if (!Number.isInteger(score) || score < 1 || score > 5) return sendTo(ws, serError('评分需为 1-5 分'));
+      const dims = { environment: '环境', equipment: '设备', service: '服务' };
+      let scores;
+      if (msg.scores && typeof msg.scores === 'object') {
+        scores = {};
+        for (const k of Object.keys(dims)) {
+          const v = parseInt(msg.scores[k], 10);
+          if (!Number.isInteger(v) || v < 1 || v > 5) return sendTo(ws, serError(`${dims[k]}评分需为 1-5 分`));
+          scores[k] = v;
+        }
+      } else {
+        const score = parseInt(msg.score, 10);
+        if (!Number.isInteger(score) || score < 1 || score > 5) return sendTo(ws, serError('评分需为 1-5 分'));
+        scores = { environment: score, equipment: score, service: score };
+      }
+      const avg = Math.round((scores.environment + scores.equipment + scores.service) / 3);
       const comment = (msg.comment || '').trim().slice(0, 60);
-      res.rating = score;
+      res.rating = avg;
+      res.ratings = scores;
       res.ratedAt = Date.now();
       res.ratingComment = comment;
       user.stats.roomRatesGiven = (user.stats.roomRatesGiven || 0) + 1;
@@ -216,7 +230,7 @@ module.exports = function roomsModule(api) {
       sendToUser(user.id, { type: 'stats', stats: user.stats, achievements: user.achievements });
       saveEntity(space.id, 'room_reservation', res.id, res);
       roomsBroadcast(space);
-      sendTo(ws, { type: 'roomRated', reservationId: res.id, roomId: res.roomId, score });
+      sendTo(ws, { type: 'roomRated', reservationId: res.id, roomId: res.roomId, score: avg, scores });
     } else if (msg.type === 'roomFavorite') {
       const room = space.rooms.find((r) => r.id === msg.roomId);
       if (!room) return sendTo(ws, serError('会议室不存在'));

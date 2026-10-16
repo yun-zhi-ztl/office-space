@@ -42,7 +42,7 @@
 - `room_reservation`: `{ id, roomId, ownerAccount, title, startAt, endAt, note, status, repeat?, seriesId?, seriesIndex?, participants?, actualStartAt?, actualEndAt?, rating?, ratingComment?, ratedAt? }`
   - 状态：`pending`(已约) / `active`(进行中) / `completed` / `cancelled` / `expired`
   - 约束：同一房间在 `[startAt, endAt)` 内不得与他人预约重叠（冲突检测）。
-  - 评分：会议结束（`completed`）后，预约人或管理员可对会议室评分 1-5 分（可选评价 ≤60 字），同一会议只评一次；会议室平均分与评分数由 `roomRatingSummary` 聚合，随 `rooms` 广播（`room.rating = { avg, count, ratings }`）。
+  - 评分：会议结束（`completed`）后，预约人或管理员可对会议室做环境 / 设备 / 服务三维评分（各 1-5 分，可选评价 ≤60 字），同一会议只评一次；也兼容单 `score` 一次性三维度同分。总体分取三维度平均并四舍五入，会议室平均分与评分数、维度分由 `roomRatingSummary` 聚合，随 `rooms` 广播（`room.rating = { avg, count, dimensions, ratings }`）。
   - 周期预约：`repeat` 为 `daily` / `weekly`（或省略表示单次），`repeatCount` 限制场次（每天 ≤ 90、每周 ≤ 52）；
     创建时按天 / 周展开为多条独立预约，共用 `seriesId`，可整体取消待开始场次。
   - 收藏：成员可收藏会议室，`profiles.stats.favoriteRooms` 记录收藏房间 id，前端「我的收藏」快捷过滤。
@@ -201,7 +201,7 @@
 | `reservationReschedule` | 改期自己的（或管理员代改）待开始预约 | owner / admin |
 | `reservationCancelSeries` | 取消自己的周期预约全部待开始场次 | owner |
 | `roomWaitlist` / `roomWaitlistCancel` | 时段冲突时加入候补 / 取消自己的候补 | member / owner |
-| `roomRate` | 给已结束的会议给会议室评分（1-5 分 + 可选评价） | owner / admin |
+| `roomRate` | 给已结束的会议评分：`scores = { environment, equipment, service }`（各 1-5），兼容单 `score`；总体分取平均 | owner / admin |
 | `roomFavorite` | 收藏 / 取消收藏会议室 | member |
 | `toolCreate` / `toolDelete` / `toolAdjust` | 增删设备 / 调整库存（`toolAdjust` 可带 `minAvailable` 修改库存告急阈值） | admin |
 | `toolBorrow` / `toolReturn` / `toolExtend` / `toolWaitlist` | 借用（可带 `dueAt` 自定义归还时间） / 归还 / 续借设备 / 库存不足时排队 | member |
@@ -255,7 +255,7 @@
 报修列表展示工单号 `RP-日期-编号` 并可调整高 / 中 / 低优先级；空间暂停时顶部展示暂停横幅并限制对应创建操作；
 物资申领支持管理员维护常用模板、成员选模板快捷提交；物资库存支持管理员维护台账、成员领用/归还与库存告急标记；公告支持 👍 / 🎉 / 😮 / 🤝 / 🔥 回应并可取消；
 物资 / 报修 / 访客 / 会议室预约 / 借用记录列表支持一键导出 CSV（自动拉取全部分页）；
-会议室卡片展示平均评分，成员可收藏会议室并在「我的收藏」中过滤；已结束的会议可一键评分（1-5 星 + 评价）；报修列表展示「已升级」标记；
+会议室卡片展示平均评分与维度分（环境 / 设备 / 服务），成员可收藏会议室并在「我的收藏」中过滤；已结束的会议可一键三维评分（各 1-5 星 + 评价）；报修列表展示「已升级」标记；
 工位预约支持热力时间轴与「签到 / 签退」按钮，成员可查看今日工位占用与占用率；外出登记同步在线状态、同事可见外出中与预计返回时间；意见反馈支持匿名 / 实名提交与管理员回复闭环；物资申领支持设置高 / 普通 / 低优先级并一键调整；心情打卡支持 emoji 选择与今日心情分布看板。
 
 ## 6. 非目标（本版本暂不实现）
@@ -343,7 +343,7 @@
 | 访客重复登记 | 同一接待人对同一访客当天已有待到访/已到访记录时拒绝重复登记，避免同一访客重复占用接待资源 | `visitorCreate`(返回 `duplicateVisitor` 错误) |
 | 工具排队 | 库存不足时加入排队，归还或调整库存释放库存后按先来先服务自动晋升为借用并通知排队人 | `toolWaitlist` / `toolWaitlistPromoted` |
 | 借用归还通知 | 归还设备后自动向空间公告一条「已归还设备 ×数量」通知，资产归还留痕、全员可见 | 复用 `pushNotice`（服务端下发 `notices`） |
-| 会议室评分 | 会议结束后给会议室打 1-5 分并留一句评价，会议室聚合平均分与评分数 | `roomRate` / `rooms`(含 `room.rating`) |
+| 会议室评分 | 会议结束后给会议室做环境 / 设备 / 服务三维 1-5 分并留评价，聚合总体分与维度分 | `roomRate` / `rooms`(含 `room.rating`) |
 | 收藏会议室 | 成员收藏常用会议室，前端「我的收藏」快捷过滤，收藏随个人资料持久化 | `roomFavorite` / `roomFavorites` |
 | 报修升级 | 高优先级报修超过 8 小时未解决自动升级一次，提醒上报人与管理员，避免漏单 | `repairEscalated` |
 | 自定义归还期限 | 借用设备时可指定特殊归还时间（≥30 分钟、≤90 天），默认 7 天不变 | `toolBorrow`(dueAt) |

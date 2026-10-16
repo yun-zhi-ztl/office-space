@@ -600,22 +600,28 @@ function createContext() {
   // ---------- 序列化 ----------
   // 会议室评分：扫描该会议室已完成预约上的评分，聚合平均分、评分数与最近评分
   function roomRatingSummary(space, roomId) {
+    const dims = ['environment', 'equipment', 'service'];
     const list = [];
     for (const r of space.roomReservations.values()) {
       if (r.roomId !== roomId) continue;
       if (r.status !== 'completed') continue;
       if (!r.rating) continue;
-      list.push({ account: r.ownerAccount, ownerName: r.ownerName, score: r.rating, comment: r.ratingComment || '', createdAt: r.ratedAt || 0 });
+      list.push({ account: r.ownerAccount, ownerName: r.ownerName, score: r.rating, comment: r.ratingComment || '', createdAt: r.ratedAt || 0, scores: r.ratings || null });
     }
     const count = list.length;
     const sum = list.reduce((s, x) => s + (x.score || 0), 0);
     const avg = count ? +(sum / count).toFixed(1) : 0;
-    return { avg, count, ratings: list.slice(-8).reverse() };
+    const dimensions = {};
+    for (const k of dims) {
+      const vals = list.map((x) => x.scores && x.scores[k]).filter((v) => Number.isInteger(v));
+      dimensions[k] = { avg: vals.length ? +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : 0, count: vals.length };
+    }
+    return { avg, count, dimensions, ratings: list.slice(-8).reverse() };
   }
   function roomPublic(space, r) { return { id: r.id, name: r.name, capacity: r.capacity, location: r.location, description: r.description, tags: r.tags || [], rating: roomRatingSummary(space, r.id) }; }
   function reservationPublic(res, info) {
     const who = info.get(res.ownerAccount);
-    return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status, repeat: res.repeat || null, seriesId: res.seriesId || null, remindAt: res.remindAt || null, participants: res.participants || null, actualStartAt: res.actualStartAt || null, actualEndAt: res.actualEndAt || null, rating: res.rating || null, ratedAt: res.ratedAt || null, ratingComment: res.ratingComment || '' };
+    return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status, repeat: res.repeat || null, seriesId: res.seriesId || null, remindAt: res.remindAt || null, participants: res.participants || null, actualStartAt: res.actualStartAt || null, actualEndAt: res.actualEndAt || null, rating: res.rating || null, ratedAt: res.ratedAt || null, ratingComment: res.ratingComment || '', ratings: res.ratings || null };
   }
   function roomWaitlistPublic(space, info) {
     if (!info) info = spaceUserInfo(space.id);

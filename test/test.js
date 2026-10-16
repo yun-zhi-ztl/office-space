@@ -1131,13 +1131,14 @@ async function runTests() {
     resList = last(wRate, 'rooms');
     res = resList && resList.reservations[0];
     assert(res && res.status === 'completed', '会议结束为 completed');
-    // 评分 5 分
-    await sendMsg(wRate, { type: 'roomRate', reservationId: res.id, score: 5, comment: '很好' });
+    // 评分：多维度（环境/设备/服务），总体分自动取平均并取整
+    await sendMsg(wRate, { type: 'roomRate', reservationId: res.id, scores: { environment: 5, equipment: 4, service: 3 }, comment: '环境好，投影偏暗' });
     const rated = last(wRate, 'roomRated');
-    assert(rated && rated.score === 5, '会议室评分成功返回');
+    assert(rated && rated.score === 4 && rated.scores && rated.scores.environment === 5, '会议室多维度评分成功返回，总体分取平均');
     const roomsFinal = last(wRate, 'rooms');
     const room = roomsFinal && roomsFinal.rooms.find((r) => r.id === roomId);
-    assert(room && room.rating && room.rating.count === 1 && room.rating.avg === 5, '会议室聚合评分 5 分');
+    assert(room && room.rating && room.rating.count === 1 && room.rating.avg === 4, '会议室聚合总体评分 4 分');
+    assert(room && room.rating.dimensions && room.rating.dimensions.environment.avg === 5 && room.rating.dimensions.equipment.avg === 4 && room.rating.dimensions.service.avg === 3, '会议室聚合维度评分正确');
     // 重复评分被拒
     await sendMsg(wRate, { type: 'roomRate', reservationId: res.id, score: 1 });
     const errRate = mk(wRate, 'error');

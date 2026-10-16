@@ -449,7 +449,7 @@ function roomCard(r){
   const d=S.DB, me=S.me.account;
   const upcoming=d.reservations.filter(x=>x.roomId===r.id&&x.status==='pending').sort((a,b)=>a.startAt-b.startAt).slice(0,3);
   const fav = (S.favorites||[]).includes(r.id);
-  const rate = r.rating ? `<div class="meta">评分 ${'⭐'.repeat(Math.round(r.rating.avg))}${'☆'.repeat(5-Math.round(r.rating.avg))} ${r.rating.avg} (${r.rating.count})</div>` : '';
+  const rate = r.rating ? `<div class="meta">评分 ${'⭐'.repeat(Math.round(r.rating.avg))}${'☆'.repeat(5-Math.round(r.rating.avg))} ${r.rating.avg} (${r.rating.count})${r.rating.dimensions?` · 环境 ${r.rating.dimensions.environment.avg} 设备 ${r.rating.dimensions.equipment.avg} 服务 ${r.rating.dimensions.service.avg}`:''}</div>` : '';
   return `<div class="card"><h3>${esc(r.name)} <button class="btn sm ${fav?'pri':''}" title="收藏" onclick="toggleFavorite('${r.id}')">${fav?'⭐':'☆'}</button> ${S.admin?`<span></span><button class="btn danger sm" onclick="removeRoom('${r.id}')">删</button>`:''}</h3>
     <div class="meta">容量 ${r.capacity} 人${r.location?' · '+esc(r.location):''}${r.description?'<div>'+esc(r.description)+'</div>':''}${r.tags&&r.tags.length?'<div style="margin-top:4px">'+r.tags.map(t=>`<span class="badge grey">${esc(t)}</span>`).join('')+'</div>':''}</div>
     ${rate}
@@ -528,15 +528,21 @@ function openRoomRate(id){
   const r=(S.DB.reservations||[]).find(x=>x.id===id); if(!r) return;
   const rm=(S.DB.rooms||[]).find(x=>x.id===r.roomId);
   S.lastRateId=id;
+  S._rateScores={environment:3,equipment:3,service:3};
+  const dimRows=[['environment','环境'],['equipment','设备'],['service','服务']].map(([k,label])=>`<div class="fld"><label>${label} <span class="dim-val" style="color:var(--muted)">3 分</span></label>${[1,2,3,4,5].map(n=>`<button class="btn ${n===3?'pri':''}" data-dim="${k}" data-val="${n}" onclick="rateClick(this,'${k}')">${'⭐'.repeat(n)}</button>`).join('')}</div>`).join('');
   openModal(`<span class="close" onclick="closeModal()">×</span><h2>会议室评分 · ${esc(rm?rm.name:'会议室')}</h2><div class="form">
-    <div class="fld"><label>评分（1-5）</label>${[1,2,3,4,5].map(n=>`<button class="btn ${n===5?'pri':''}" onclick="setRate(${n})">${'⭐'.repeat(n)}</button>`).join('')}</div>
+    ${dimRows}
     <div class="fld"><label>评价（可选，最多 60 字）</label><input id="rtComment" placeholder="如：隔音一般，投影清晰"></div>
     <button class="btn pri" onclick="submitRoomRate()">提交评分</button></div>`);
-  S._rateScore=3;
-  setRate(3);
 }
-function setRate(n){ S._rateScore=n; document.querySelectorAll('.modal .fld button').forEach((b,i)=>b.classList.toggle('pri', (i+1)===n)); }
-function submitRoomRate(){ wsSend({type:'roomRate',reservationId:S.lastRateId,score:S._rateScore||3,comment:$('#rtComment').value||''}); closeModal(); }
+function rateClick(btn, dim){
+  const n=parseInt(btn.dataset.val,10);
+  S._rateScores[dim]=n;
+  const row=btn.closest('.fld');
+  row.querySelectorAll('button').forEach(b=>b.classList.toggle('pri', parseInt(b.dataset.val,10)===n));
+  const val=row.querySelector('.dim-val'); if(val) val.textContent=n+' 分';
+}
+function submitRoomRate(){ wsSend({type:'roomRate',reservationId:S.lastRateId,scores:S._rateScores||{environment:3,equipment:3,service:3},comment:$('#rtComment').value||''}); closeModal(); }
 /* 会议室候补：时段冲突时加入队列，他人取消后自动晋升 */
 function openWaitlistModal(attempt){
   const room=(S.DB.rooms||[]).find(r=>r.id===attempt.roomId);
