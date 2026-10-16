@@ -133,7 +133,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }
 
     switch (msg.type) {
-      case 'roomCreate': case 'roomTag': case 'roomApproval': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'reservationCancelSeries': case 'reservationApprove': case 'reservationReject': case 'reservationReschedule': case 'roomWaitlist': case 'roomWaitlistCancel': case 'roomStart': case 'roomEnd': case 'roomRate': case 'roomFavorite':
+      case 'roomCreate': case 'roomTag': case 'roomApproval': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'reservationCancelSeries': case 'reservationApprove': case 'reservationReject': case 'reservationReschedule': case 'reservationAttendees': case 'roomWaitlist': case 'roomWaitlistCancel': case 'roomStart': case 'roomEnd': case 'meetingAttend': case 'roomRate': case 'roomFavorite':
         rooms.handleRooms(ws, user, space, msg); break;
       case 'toolCreate': case 'toolDelete': case 'toolAdjust': case 'toolBorrow': case 'toolReturn': case 'toolExtend': case 'toolWaitlist': case 'remindOverdue':
         tools.handleTools(ws, user, space, msg); break;
@@ -274,9 +274,8 @@ setInterval(() => {
       if (res.status === 'pending') {
         if (now >= res.endAt) { res.status = 'expired'; roomsChanged = true; api.saveEntity(sp.id, 'room_reservation', res.id, res); }
         else if (now >= res.startAt) {
-          res.status = 'active';
-          if (!res.actualStartAt) res.actualStartAt = now;
-          roomsChanged = true; api.saveEntity(sp.id, 'room_reservation', res.id, res);
+          if (rooms.startMeeting(sp, res, now)) roomsChanged = true;
+          api.saveEntity(sp.id, 'room_reservation', res.id, res);
         }
       } else if (res.status === 'active' && now >= res.endAt) {
         // 预约时段自然结束：自动置为已完成，避免「进行中」悬挂；同时持久化，防止重启后状态回退

@@ -196,6 +196,55 @@ rooms.handleRooms({}, ownerUser, rsvSpace, { type: 'roomEnd', reservationId: 'r1
 assertEq(ownerUser.stats.meetingDuration, 50, 'roomEnd 累计会议时长 50 分钟');
 assertEq(ownerUser.stats.meetingActualDuration, 30, 'roomEnd 累计实际到场时长 30 分钟');
 
+// ---------- 会议室参会人与到场确认 ----------
+console.log('\n📋 12b. 会议室参会人与到场确认');
+const attUser = { id: 'ru1', account: 'alice', nickname: '甲', currentSpace: 's12b', stats: {}, achievements: [] };
+const memberB = { id: 'ru2', account: 'bob', nickname: '乙', currentSpace: 's12b', stats: {}, achievements: [] };
+const memberC = { id: 'ru3', account: 'carol', nickname: '丙', currentSpace: 's12b', stats: {}, achievements: [] };
+const roomsOnline = [attUser, memberB, memberC];
+const sentTo = [];
+const roomAttApi = {
+  roomReservationsPublic: () => [],
+  roomWaitlistPublic: () => [],
+  roomPublic: (r) => r,
+  broadcast: () => {},
+  LIST_PAGE: 30,
+  isAdmin: () => false,
+  sendTo: (ws, obj) => { sentTo.push(obj); },
+  serError: (m) => ({ type: 'error', message: m }),
+  genId: () => 'x',
+  saveEntity: () => {},
+  deleteEntity: () => {},
+  recordWeekly: () => {},
+  getUserByAccount: (a) => roomsOnline.find((u) => u.account === a) || null,
+  sendToUser: () => {},
+  sendToAccount: (a, obj) => { sentTo.push(Object.assign({ account: a }, obj)); },
+  saveProfile: () => {},
+  broadcastLeaderboard: () => {},
+  roomStatsBroadcast: () => {},
+};
+const roomAttModule = roomsModule(roomAttApi);
+const attSpace = { id: 's12b', roomReservations: new Map(), rooms: [] };
+const attNow = Date.now();
+attSpace.roomReservations.set('ra1', { id: 'ra1', roomId: 'rmA', ownerAccount: 'alice', startAt: attNow - 1000, endAt: attNow + 90 * 60000, title: '参会会', participants: 3, attendees: ['bob', 'carol'], attendedAccounts: [], status: 'pending', remindAt: attNow, reminded: false });
+roomAttModule.handleRooms({}, attUser, attSpace, { type: 'roomStart', reservationId: 'ra1' });
+assert(attSpace.roomReservations.get('ra1').status === 'active', 'roomStart 后预约变为 active');
+assert(sentTo.some((m) => m.type === 'meetingStarted' && m.account === 'bob'), 'roomStart 向参会人下发 meetingStarted');
+assert(sentTo.some((m) => m.type === 'meetingStarted' && m.account === 'carol'), 'roomStart 向所有参会人下发 meetingStarted');
+roomAttModule.handleRooms({}, memberB, attSpace, { type: 'meetingAttend', reservationId: 'ra1' });
+assert(attSpace.roomReservations.get('ra1').attendedAccounts.includes('bob'), 'meetingAttend 记录 bob 到场');
+assert(!attSpace.roomReservations.get('ra1').attendedAccounts.includes('carol'), 'meetingAttend 未记录 carol');
+attSpace.roomReservations.set('ra2', { id: 'ra2', roomId: 'rmA', ownerAccount: 'alice', startAt: attNow + 60000, endAt: attNow + 90 * 60000, title: '改参会人', participants: 3, attendees: [], attendedAccounts: [], status: 'pending', remindAt: attNow, reminded: false });
+roomAttModule.handleRooms({}, attUser, attSpace, { type: 'reservationAttendees', reservationId: 'ra2', attendees: ['carol', 'bob', 'carol'] });
+assertEq(attSpace.roomReservations.get('ra2').attendees.join(','), 'carol,bob', 'reservationAttendees 去重并保留顺序');
+const errBefore = sentTo.filter((m) => m.type === 'error').length;
+roomAttModule.handleRooms({}, attUser, attSpace, { type: 'reservationAttendees', reservationId: 'ra2', attendees: ['dave'] });
+assertEq(sentTo.filter((m) => m.type === 'error').length - errBefore, 1, '非法参会人被拒');
+const rpAtt = api.reservationPublic({ id: 'rp1', ownerAccount: 'alice', attendees: ['bob', 'carol'], attendedAccounts: ['bob'] }, new Map([['alice', { display: '甲' }]]));
+assertEq(rpAtt.attendees.length, 2, 'reservationPublic 暴露 attendees');
+assertEq(rpAtt.attendedAccounts.length, 1, 'reservationPublic 暴露 attendedAccounts');
+assertEq(rpAtt.attendanceRate, 50, 'reservationPublic 计算 attendanceRate 50%');
+
 // ---------- 周期预约展开 ----------
 console.log('\n📋 13. 周期预约展开');
 const t0 = Date.now() + 3600000;

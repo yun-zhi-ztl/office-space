@@ -648,7 +648,9 @@ function createContext() {
   function roomPublic(space, r) { return { id: r.id, name: r.name, capacity: r.capacity, location: r.location, description: r.description, tags: r.tags || [], requireApproval: !!r.requireApproval, rating: roomRatingSummary(space, r.id) }; }
   function reservationPublic(res, info) {
     const who = info.get(res.ownerAccount);
-    return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status, repeat: res.repeat || null, seriesId: res.seriesId || null, remindAt: res.remindAt || null, participants: res.participants || null, actualStartAt: res.actualStartAt || null, actualEndAt: res.actualEndAt || null, rating: res.rating || null, ratedAt: res.ratedAt || null, ratingComment: res.ratingComment || '', ratings: res.ratings || null };
+    const attendees = res.attendees || [];
+    const attended = res.attendedAccounts || [];
+    return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status, repeat: res.repeat || null, seriesId: res.seriesId || null, remindAt: res.remindAt || null, participants: res.participants || null, attendees, attendedAccounts: attended, attendanceRate: attendees.length ? Math.round(attended.length / attendees.length * 100) : 0, actualStartAt: res.actualStartAt || null, actualEndAt: res.actualEndAt || null, rating: res.rating || null, ratedAt: res.ratedAt || null, ratingComment: res.ratingComment || '', ratings: res.ratings || null };
   }
   function roomWaitlistPublic(space, info) {
     if (!info) info = spaceUserInfo(space.id);

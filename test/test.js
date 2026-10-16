@@ -316,6 +316,38 @@ async function runTests() {
     wF.close();
   }
 
+  // ========== 测试3g: 会议室参会人名单与到场确认 ==========
+  console.log('\n📋 测试3g: 会议室参会人名单与到场确认');
+  {
+    const spG = (await httpJson('POST', '/api/spaces', { name: '参会人办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aG = 'org_' + runKey, bG = 'atte_' + runKey, ghostG = 'ghost_' + runKey;
+    await reg(aG, 'pw', '组织者'); await reg(bG, 'pw', '参会者');
+    const wOrg = await createWSClient(); await loginTo(wOrg, spG.id, aG, 'pw');
+    const wAte = await createWSClient(); await loginTo(wAte, spG.id, bG, 'pw');
+    await sendMsg(wOrg, { type: 'roomCreate', name: '参会会议室', capacity: 8 });
+    const ridG = last(wOrg, 'rooms').rooms[0].id;
+    const tG = Date.now() + 5 * 1000;
+    await sendMsg(wOrg, { type: 'roomBook', roomId: ridG, startAt: tG, endAt: tG + 30 * 60000, title: '周会', attendees: [bG] });
+    const rG = last(wOrg, 'rooms').reservations[0];
+    assert(rG && rG.attendees && rG.attendees.length === 1 && rG.attendees[0] === bG, '预约携带参会人名单');
+    assert(rG && rG.attendedAccounts && rG.attendedAccounts.length === 0, '初始已到场名单为空');
+    // 非在线成员的参会人被拒
+    await sendMsg(wOrg, { type: 'roomBook', roomId: ridG, startAt: tG + 10 * 60000, endAt: tG + 40 * 60000, title: '非法会', attendees: [ghostG] });
+    const errG = mk(wOrg, 'error').pop();
+    assert(errG && errG.message.includes('不是本空间在线成员'), '非在线成员的参会人被拒');
+    await new Promise((r) => setTimeout(r, 6000)); // 等待开始时间过去
+    await sendMsg(wOrg, { type: 'roomStart', reservationId: rG.id });
+    const startedG = (last(wOrg, 'rooms').reservations || []).find(r => r.id === rG.id);
+    assert(startedG && startedG.status === 'active', '会议开始');
+    const startedNotice = await waitFor(wAte, 'meetingStarted', (m) => m.reservationId === rG.id, 3000);
+    assert(startedNotice, '参会者收到会议开始通知');
+    await sendMsg(wAte, { type: 'meetingAttend', reservationId: rG.id });
+    const rnG = last(wAte, 'rooms').reservations.find(r => r.id === rG.id);
+    assert(rnG && (rnG.attendedAccounts || []).includes(bG), '参会者到场确认写入 attendedAccounts');
+    assert(rnG && rnG.attendanceRate === 100, '到场率计算正确');
+    wOrg.close(); wAte.close();
+  }
+
   // ========== 测试4: 工具借用 ==========
   console.log('\n📋 测试4: 工具借用（创建/借用/不足/归还）');
   await sendMsg(w1, { type: 'toolCreate', name: '测试机', category: '测试电脑', total: 2, location: '3F 机柜' });

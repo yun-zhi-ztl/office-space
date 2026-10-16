@@ -18,6 +18,47 @@ module.exports = function roomsModule(api) {
     return arr.map((t) => String(t == null ? '' : t).trim().slice(0, 12)).filter(Boolean).slice(0, 8);
   }
 
+  // 参会人名单规范化：去重、过滤空值、校验在线成员，最多 50 人
+  function normalizeAttendees(space, raw) {
+    if (raw == null || raw === '') return { ok: true, attendees: [] };
+    if (!Array.isArray(raw)) return { ok: false, message: '参会人名单格式错误' };
+    const seen = new Set();
+    const out = [];
+    for (const acc of raw) {
+      const a = String(acc == null ? '' : acc).trim();
+      if (!a) continue;
+      if (seen.has(a)) continue;
+      seen.add(a);
+      const u = getUserByAccount(a);
+      if (!u || u.currentSpace !== space.id) return { ok: false, message: `参会人「${a}」不是本空间在线成员` };
+      out.push(a);
+    }
+    if (out.length > 50) return { ok: false, message: '参会人名单最多 50 人' };
+    return { ok: true, attendees: out };
+  }
+
+  // 开始会议：设置进行中、记录准时/迟到、向参会人下发会议开始通知（手动 roomStart 与定时器自动开始共用）
+  function startMeeting(space, res, now) {
+    if (res.status !== 'pending') return false;
+    res.status = 'active';
+    res.actualStartAt = now;
+    const owner = getUserByAccount(res.ownerAccount);
+    if (owner) {
+      if (now - res.startAt <= MEETING_ONTIME_GRACE_MS) {
+        owner.stats.meetingOnTime = (owner.stats.meetingOnTime || 0) + 1;
+      } else {
+        owner.stats.meetingLate = (owner.stats.meetingLate || 0) + 1;
+      }
+      saveProfile(owner);
+      sendToUser(owner.id, { type: 'stats', stats: owner.stats, achievements: owner.achievements });
+      broadcastLeaderboard(space);
+    }
+    if ((res.attendees || []).length) {
+      for (const a of res.attendees) sendToAccount(a, { type: 'meetingStarted', reservationId: res.id, roomId: res.roomId, title: res.title, startAt: res.startAt });
+    }
+    return true;
+  }
+
   // 时段冲突检测：与现有 pending / pending_approval / active 预约是否重叠
   function slotClash(space, roomId, startAt, endAt) {
     return [...space.roomReservations.values()].some((r) => r.roomId === roomId && (r.status === 'pending' || r.status === 'pending_approval' || r.status === 'active') && startAt < r.endAt && endAt > r.startAt);
@@ -98,6 +139,8 @@ module.exports = function roomsModule(api) {
       const note = (msg.note || '').trim().slice(0, 120);
       const participants = Math.max(1, parseInt(msg.participants, 10) || 1);
       if (participants > room.capacity) return sendTo(ws, serError(`人数超过会议室容量（最多 ${room.capacity} 人）`));
+      const attendeesNorm = normalizeAttendees(space, msg.attendees);
+      if (!attendeesNorm.ok) return sendTo(ws, serError(attendeesNorm.message));
       const seriesId = repeat ? genId('ser', null) : null;
       const slots = expandRecurring(startAt, endAt, repeat, msg.repeatCount);
       const clash = slots.some((slot) => slotClash(space, room.id, slot.startAt, slot.endAt));
@@ -108,7 +151,7 @@ module.exports = function roomsModule(api) {
         return sendTo(ws, { type: 'error', message: '该时段已被预约，可加入候补或另选时间' + (suggest.length ? '；空闲：' + suggest.map((r) => r.name).join('、') : ''), code: 'roomConflict', suggestions: suggest });
       }
       slots.forEach((slot, i) => {
-        const res = { id: genId('res', null), roomId: room.id, ownerAccount: user.account, ownerName: user.nickname, title, startAt: slot.startAt, endAt: slot.endAt, note, participants, status: room.requireApproval ? 'pending_approval' : 'pending', repeat: repeat || null, seriesId: seriesId || null, seriesIndex: i, remindAt: Math.max(Date.now(), slot.startAt - ROOM_REMIND_WINDOW_MS), reminded: false, approvalRemindedAt: null };
+        const res = { id: genId('res', null), roomId: room.id, ownerAccount: user.account, ownerName: user.nickname, title, startAt: slot.startAt, endAt: slot.endAt, note, participants, attendees: attendeesNorm.attendees, attendedAccounts: [], status: room.requireApproval ? 'pending_approval' : 'pending', repeat: repeat || null, seriesId: seriesId || null, seriesIndex: i, remindAt: Math.max(Date.now(), slot.startAt - ROOM_REMIND_WINDOW_MS), reminded: false, approvalRemindedAt: null };
         space.roomReservations.set(res.id, res);
         saveEntity(space.id, 'room_reservation', res.id, res);
       });
@@ -176,6 +219,18 @@ module.exports = function roomsModule(api) {
       sendToAccount(res.ownerAccount, { type: 'reservationRescheduled', reservationId: res.id, roomId: res.roomId, startAt: res.startAt, endAt: res.endAt });
       roomsBroadcast(space);
       broadcastLeaderboard(space);
+    } else if (msg.type === 'reservationAttendees') {
+      const res = space.roomReservations.get(msg.reservationId);
+      if (!res) return sendTo(ws, serError('预约不存在'));
+      if (res.ownerAccount !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('只能修改自己的会议参会人'));
+      if (res.status !== 'pending' && res.status !== 'pending_approval') return sendTo(ws, serError('会议已开始或结束，不能再修改参会人'));
+      const norm = normalizeAttendees(space, msg.attendees);
+      if (!norm.ok) return sendTo(ws, serError(norm.message));
+      res.attendees = norm.attendees;
+      res.attendedAccounts = (res.attendedAccounts || []).filter((a) => norm.attendees.includes(a));
+      saveEntity(space.id, 'room_reservation', res.id, res);
+      roomsBroadcast(space);
+      sendTo(ws, { type: 'reservationAttendees', reservationId: res.id, attendees: res.attendees });
     } else if (msg.type === 'roomWaitlist') {
       if (space.paused) return sendTo(ws, serError('空间已暂停，暂不可预约'));
       const room = space.rooms.find((r) => r.id === msg.roomId);
@@ -209,19 +264,7 @@ module.exports = function roomsModule(api) {
       if (!res) return sendTo(ws, serError('预约不存在'));
       if (res.ownerAccount !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('只能操作自己的预约'));
       if (msg.type === 'roomStart' && res.status === 'pending' && res.startAt <= Date.now()) {
-        res.status = 'active';
-        res.actualStartAt = Date.now();
-        const owner = getUserByAccount(res.ownerAccount);
-        if (owner) {
-          if (res.actualStartAt - res.startAt <= MEETING_ONTIME_GRACE_MS) {
-            owner.stats.meetingOnTime = (owner.stats.meetingOnTime || 0) + 1;
-          } else {
-            owner.stats.meetingLate = (owner.stats.meetingLate || 0) + 1;
-          }
-          saveProfile(owner);
-          sendToUser(owner.id, { type: 'stats', stats: owner.stats, achievements: owner.achievements });
-          broadcastLeaderboard(space);
-        }
+        startMeeting(space, res, Date.now());
       }
       if (msg.type === 'roomEnd' && res.status === 'active') {
         res.status = 'completed';
@@ -239,6 +282,15 @@ module.exports = function roomsModule(api) {
       saveEntity(space.id, 'room_reservation', res.id, res);
       roomsBroadcast(space);
       broadcastLeaderboard(space);
+    } else if (msg.type === 'meetingAttend') {
+      const res = space.roomReservations.get(msg.reservationId);
+      if (!res) return sendTo(ws, serError('预约不存在'));
+      if (res.status !== 'active') return sendTo(ws, serError('会议进行中才可确认到场'));
+      if (!(res.attendees || []).includes(user.account)) return sendTo(ws, serError('你不是该会议的参会人'));
+      if (!(res.attendedAccounts || []).includes(user.account)) res.attendedAccounts = (res.attendedAccounts || []).concat(user.account);
+      saveEntity(space.id, 'room_reservation', res.id, res);
+      roomsBroadcast(space);
+      sendTo(ws, { type: 'meetingAttended', reservationId: res.id });
     } else if (msg.type === 'roomRate') {
       const res = space.roomReservations.get(msg.reservationId);
       if (!res) return sendTo(ws, serError('预约不存在'));
@@ -288,5 +340,5 @@ module.exports = function roomsModule(api) {
     }
   }
 
-  return { roomsBroadcast, handleRooms };
+  return { roomsBroadcast, startMeeting, handleRooms };
 };
