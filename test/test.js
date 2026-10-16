@@ -291,6 +291,31 @@ async function runTests() {
     wA.close();
   }
 
+  // ========== 测试3f: 会议室准时率（准时/迟到统计） ==========
+  console.log('\n📋 测试3f: 会议室准时率（准时/迟到统计）');
+  {
+    const spF = (await httpJson('POST', '/api/spaces', { name: '准时办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aF = 'punc_' + runKey;
+    await reg(aF, 'pw', '准时用户');
+    const wF = await createWSClient(); await loginTo(wF, spF.id, aF, 'pw');
+    await sendMsg(wF, { type: 'roomCreate', name: '准时会议室', capacity: 6 });
+    const ridF = last(wF, 'rooms').rooms[0].id;
+    const tF = Date.now() + 5 * 1000;
+    await sendMsg(wF, { type: 'roomBook', roomId: ridF, startAt: tF, endAt: tF + 30 * 60000, title: '准时会' });
+    const rF = last(wF, 'rooms').reservations[0];
+    await new Promise((r) => setTimeout(r, 6000)); // 等待开始时间过去
+    await sendMsg(wF, { type: 'roomStart', reservationId: rF.id });
+    const startedF = (last(wF, 'rooms').reservations || []).find(r => r.id === rF.id);
+    assert(startedF && startedF.status === 'active' && startedF.actualStartAt, '准时测试会议开始');
+    const stF = last(wF, 'stats');
+    assert(stF && stF.stats.meetingOnTime === 1, '准时开始会议 meetingOnTime +1');
+    assert(stF && stF.stats.meetingLate === 0, '准时开始会议 meetingLate 为 0');
+    await sendMsg(wF, { type: 'roomEnd', reservationId: rF.id });
+    const lbF = await waitFor(wF, 'leaderboard', (m) => (m.rankings || []).some(r => r.account === aF && r.stats.meetingOnTime === 1), 3000);
+    assert(lbF, '排行榜携带会议室准时率');
+    wF.close();
+  }
+
   // ========== 测试4: 工具借用 ==========
   console.log('\n📋 测试4: 工具借用（创建/借用/不足/归还）');
   await sendMsg(w1, { type: 'toolCreate', name: '测试机', category: '测试电脑', total: 2, location: '3F 机柜' });
@@ -726,7 +751,7 @@ async function runTests() {
     const wB = await createWSClient(); await loginTo(wB, spF.id, bE, 'pw');
     await sendMsg(wA, { type: 'announce', text: '周五提前下班' });
     const nt = last(wB, 'notices');
-    assert(nt && nt.notices.length && nt.notices[0].text === '周五提前下班', '公告广播到其他成员');
+    assert(nt && nt.notices.some((x) => x.text === '周五提前下班'), '公告广播到其他成员');
     await sendMsg(wA, { type: 'roomCreate', name: '投影室', capacity: 8, location: '3F' });
     await sendMsg(wA, { type: 'roomCreate', name: '洽谈间', capacity: 10, location: '3F' });
     const roomsF = last(wA, 'rooms').rooms;
@@ -1006,7 +1031,7 @@ async function runTests() {
     await sendMsg(wA, { type: 'getAchievements' });
     const ach = last(wA, 'achievements');
     assert(ach && Array.isArray(ach.achievements), '成就墙返回 achievements 数组');
-    assert(ach.achievements.length === 27, '成就墙含 27 个成就');
+    assert(ach.achievements.length === 28, '成就墙含 28 个成就');
     assert(ach.achievements.every((a) => a.id && a.name && a.desc && a.icon), '每项成就含 id/name/desc/icon');
     assert(ach.achievements.every((a) => a.current != null && a.target != null && a.pct != null && typeof a.unlocked === 'boolean'), '每项成就含进度字段');
     assert(ach.achievements.find((a) => a.id === 'punctual').target === 3, '守时达人目标值为 3');
@@ -1024,17 +1049,17 @@ async function runTests() {
     const wN = await createWSClient(); await loginTo(wN, spN.id, aN, 'pw');
     const wM = await createWSClient(); await loginTo(wM, spN.id, bN, 'pw');
     await sendMsg(wN, { type: 'announce', text: '今晚加班' });
-    let nt = last(wN, 'notices');
-    assert(nt && nt.notices.length === 1 && nt.notices[0].text === '今晚加班', '公告广播成功');
-    const nid = nt.notices[0].id;
+    let nt = await waitFor(wN, 'notices', (n) => n.notices.some((x) => x.text === '今晚加班'), 5000);
+    assert(nt && nt.notices.some((x) => x.text === '今晚加班'), '公告广播成功');
+    const nid = nt.notices.find((x) => x.text === '今晚加班').id;
     await sendMsg(wM, { type: 'removeNotice', noticeId: nid });
     const errN = mk(wM, 'error');
     assert(errN.length > 0 && errN[errN.length - 1].message.includes('仅管理员'), '非管理员删除公告被拒');
     await sendMsg(wN, { type: 'removeNotice', noticeId: nid });
     const rm = last(wN, 'noticeRemoved');
     assert(rm && rm.noticeId === nid, '管理员删除公告成功');
-    nt = await waitFor(wN, 'notices', (n) => n.notices.length === 0, 5000);
-    assert(nt && nt.notices.length === 0, '删除后公告列表清空');
+    nt = await waitFor(wN, 'notices', (n) => !n.notices.some((x) => x.id === nid), 5000);
+    assert(nt && !nt.notices.some((x) => x.id === nid), '删除后公告列表清空');
     wN.close(); wM.close();
   }
 

@@ -3,7 +3,7 @@
 //               / roomWaitlistCancel / reservationCancel / reservationCancelSeries / reservationApprove / reservationReject
 //               / roomStart / roomEnd / roomRate / roomFavorite
 module.exports = function roomsModule(api) {
-  const { roomReservationsPublic, roomPublic, roomWaitlistPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly, getUserByAccount, sendToUser, sendToAccount, saveProfile, broadcastLeaderboard, expandRecurring, roomStatsBroadcast, checkAchievements, pushNotification, ROOM_REMIND_WINDOW_MS } = api;
+  const { roomReservationsPublic, roomPublic, roomWaitlistPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly, getUserByAccount, sendToUser, sendToAccount, saveProfile, broadcastLeaderboard, expandRecurring, roomStatsBroadcast, checkAchievements, pushNotification, ROOM_REMIND_WINDOW_MS, MEETING_ONTIME_GRACE_MS } = api;
 
   function roomsBroadcast(space) {
     const reservations = roomReservationsPublic(space);
@@ -211,6 +211,17 @@ module.exports = function roomsModule(api) {
       if (msg.type === 'roomStart' && res.status === 'pending' && res.startAt <= Date.now()) {
         res.status = 'active';
         res.actualStartAt = Date.now();
+        const owner = getUserByAccount(res.ownerAccount);
+        if (owner) {
+          if (res.actualStartAt - res.startAt <= MEETING_ONTIME_GRACE_MS) {
+            owner.stats.meetingOnTime = (owner.stats.meetingOnTime || 0) + 1;
+          } else {
+            owner.stats.meetingLate = (owner.stats.meetingLate || 0) + 1;
+          }
+          saveProfile(owner);
+          sendToUser(owner.id, { type: 'stats', stats: owner.stats, achievements: owner.achievements });
+          broadcastLeaderboard(space);
+        }
       }
       if (msg.type === 'roomEnd' && res.status === 'active') {
         res.status = 'completed';

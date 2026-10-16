@@ -79,12 +79,17 @@ const p3 = api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id =
 assert(p3.unlocked === true, '累计 10 次解锁蹲坑之王');
 assertEq(p3.pct, 100, '蹲坑之王达成后进度 100');
 const pub = api.achievementDefsPublic(user);
-assertEq(pub.length, 27, '成就公开列表含 27 项');
+assertEq(pub.length, 28, '成就公开列表含 28 项');
 assert(pub.every((a) => a.id && a.name && a.desc && a.icon), '公开成就含 id/name/desc/icon');
 user.stats.borrowCount = 3;
 assert(api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'borrower')).unlocked === true, '借用 3 次解锁借阅达人');
 user.stats.meetingDuration = 60;
 assert(api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'meeter')).unlocked === true, '会议时长 60 分钟解锁会议达人');
+user.stats.meetingOnTime = 5;
+assert(api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'meetingPunctual')).unlocked === true, '5 次准时开会解锁会议守时');
+assert(api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'meetingPunctual')).pct === 100, '会议守时达成后进度 100');
+assertEq(api.newStats().meetingOnTime, 0, 'newStats 初始 meetingOnTime 为 0');
+assertEq(api.newStats().meetingLate, 0, 'newStats 初始 meetingLate 为 0');
 user.stats.helperCount = 5;
 assert(api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'logistician')).unlocked === true, '处理 5 次解锁后勤达人');
 assert(api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'logistician')).pct === 100, '后勤达人达成后进度 100');

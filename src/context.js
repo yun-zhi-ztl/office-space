@@ -35,6 +35,7 @@ function createContext() {
   const ROOM_REMIND_WINDOW_MS = 10 * 60000;
   const ROOM_APPROVAL_SLA_MS = 24 * 3600 * 1000;
   const LEAVE_APPROVAL_SLA_MS = 24 * 3600 * 1000;
+  const MEETING_ONTIME_GRACE_MS = 5 * 60000;
   const BORROW_SOON_WINDOW_MS = 24 * 3600 * 1000;
   const OOO_RETURN_WINDOW_MS = 30 * 60000;
   const OOO_RETURN_REMIND_THROTTLE_MS = 4 * 3600 * 1000;
@@ -350,7 +351,7 @@ function createContext() {
   // ---------- 空间 ----------
   function weekKey(ts) { const d = new Date(ts || Date.now()); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
   function newWeekly() { return { key: weekKey(), visits: 0, borrows: 0, requests: 0, repairs: 0, meetings: 0, attends: 0, desks: 0, ooo: 0, events: 0, polls: 0, tasks: 0 }; }
-  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, meetingActualDuration: 0, helperCount: 0, favoriteRooms: [], roomRatesGiven: 0, favoriteCount: 0, attendanceCount: 0, earlyCount: 0, deskCount: 0, oooCount: 0, eventCount: 0, eventAttendCount: 0, pollCreateCount: 0, pollVoteCount: 0, knowledgeCount: 0, knowledgeLikeCount: 0, taskCreateCount: 0, taskDoneCount: 0, attendanceStreak: 0, attendancePerfectMonths: 0, weekly: newWeekly() }; }
+  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, meetingActualDuration: 0, meetingOnTime: 0, meetingLate: 0, helperCount: 0, favoriteRooms: [], roomRatesGiven: 0, favoriteCount: 0, attendanceCount: 0, earlyCount: 0, deskCount: 0, oooCount: 0, eventCount: 0, eventAttendCount: 0, pollCreateCount: 0, pollVoteCount: 0, knowledgeCount: 0, knowledgeLikeCount: 0, taskCreateCount: 0, taskDoneCount: 0, attendanceStreak: 0, attendancePerfectMonths: 0, weekly: newWeekly() }; }
   function recordWeekly(user, field) { if (!user.stats.weekly || user.stats.weekly.key !== weekKey()) user.stats.weekly = newWeekly(); user.stats.weekly[field] = (user.stats.weekly[field] || 0) + 1; }
   function weeklyScore(stats) { const w = stats.weekly; if (!w || w.key !== weekKey()) return 0; return (w.visits || 0) + (w.borrows || 0) + (w.requests || 0) + (w.repairs || 0) + (w.meetings || 0) + (w.attends || 0) + (w.desks || 0) + (w.ooo || 0) + (w.events || 0) + (w.polls || 0) + (w.tasks || 0); }
   function borrowOverdue(b, now) {
@@ -823,7 +824,9 @@ function createContext() {
     const bySpace = profilesBySpace.get(sp.id);
     if (bySpace) {
       for (const [, p] of bySpace) {
-        rows.push({ account: p.account, username: p.nick || p.account, avatar: p.avatar || '🧑', stats: p.stats || {}, achievements: p.achievements || [], weekly: weeklyScore(p.stats || {}) });
+        const mt = p.stats || {};
+        const mtTotal = (mt.meetingOnTime || 0) + (mt.meetingLate || 0);
+        rows.push({ account: p.account, username: p.nick || p.account, avatar: p.avatar || '🧑', stats: mt, achievements: p.achievements || [], weekly: weeklyScore(p.stats || {}), meetingOnTimeRate: mtTotal ? Math.round((mt.meetingOnTime || 0) / mtTotal * 100) : 0 });
       }
     }
     const score = (s) => (s.totalVisits || 0) + (s.borrowCount || 0) + (s.requestCount || 0) + (s.repairCount || 0) + (s.meetingCount || 0);
@@ -1384,6 +1387,7 @@ function createContext() {
     { id: 'requester', name: '物资管家', desc: '累计申领物资超过3次', icon: '📦', check: (u) => (u.stats.requestCount || 0) >= 3 },
     { id: 'reporter', name: '热心市民', desc: '累计上报报修超过3次', icon: '🛠️', check: (u) => (u.stats.repairCount || 0) >= 3 },
     { id: 'meeter', name: '会议达人', desc: '累计会议时长超过60分钟', icon: '🗓️', check: (u) => (u.stats.meetingDuration || 0) >= 60 },
+    { id: 'meetingPunctual', name: '会议守时', desc: '累计5次准时开始会议', icon: '⏰', check: (u) => (u.stats.meetingOnTime || 0) >= 5 },
     { id: 'logistician', name: '后勤达人', desc: '处理申领或解决报修累计5次', icon: '🛎️', check: (u) => (u.stats.helperCount || 0) >= 5 },
     { id: 'roomGuide', name: '会议室向导', desc: '给会议室评分3次', icon: '📝', check: (u) => (u.stats.roomRatesGiven || 0) >= 3 },
     { id: 'collector', name: '收藏家', desc: '收藏3个会议室', icon: '⭐', check: (u) => (u.stats.favoriteCount || 0) >= 3 },
@@ -1421,6 +1425,7 @@ function createContext() {
     requester: { field: 'requestCount', target: 3 },
     reporter: { field: 'repairCount', target: 3 },
     meeter: { field: 'meetingDuration', target: 60 },
+    meetingPunctual: { field: 'meetingOnTime', target: 5 },
     logistician: { field: 'helperCount', target: 5 },
     roomGuide: { field: 'roomRatesGiven', target: 3 },
     collector: { field: 'favoriteCount', target: 3 },
@@ -1586,7 +1591,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, ROOM_APPROVAL_SLA_MS, LEAVE_APPROVAL_SLA_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, LEAVE_CATEGORIES, MEETING_NOTE_MAX_LEN, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, EVENT_CATEGORIES, POLL_MAX_OPTIONS, KNOWLEDGE_CATEGORIES, TASK_PRIORITIES, TASK_STATUSES, NOTIFICATION_LEVELS, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, ROOM_APPROVAL_SLA_MS, LEAVE_APPROVAL_SLA_MS, MEETING_ONTIME_GRACE_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, LEAVE_CATEGORIES, MEETING_NOTE_MAX_LEN, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, EVENT_CATEGORIES, POLL_MAX_OPTIONS, KNOWLEDGE_CATEGORIES, TASK_PRIORITIES, TASK_STATUSES, NOTIFICATION_LEVELS, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
