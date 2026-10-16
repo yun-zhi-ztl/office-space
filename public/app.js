@@ -30,9 +30,10 @@ const S = {
   favorites:[],
   weeklyReport:null,
   attendanceCalendar:null,
+  schedule:{days:1,items:[]},
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'],['schedule','我的日程','🗓️'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -87,6 +88,7 @@ function dispatch(m){
     case 'leaderboard': S.DB.leaderboard=m.rankings||[]; break;
     case 'achievements': S.DB.achievements=m.achievements||[]; break;
     case 'myReminders': S.DB.reminders=m.reminders||{}; break;
+    case 'mySchedule': S.DB.schedule={days:m.schedule?.days||1,items:m.schedule?.items||[]}; break;
     case 'spaceTrend': S.DB.trend=m.trend||[]; break;
     case 'notices': S.DB.notices=m.notices||[]; break;
     case 'digest': S.digest=m.digest; break;
@@ -191,17 +193,17 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','spaceTrend','notices','digest'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceTrend','notices','digest'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
   else { b.style.display='none'; }
 }
 function renderAll(){ render(); }
-function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); }
+function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); }
 
 /* 分页：广播已按最近 PAGE 下发，前端按 offset 加载更多 */
 const PAGE = 30;
@@ -522,10 +524,10 @@ function roomCard(r){
   const fav = (S.favorites||[]).includes(r.id);
   const rate = r.rating ? `<div class="meta">评分 ${'⭐'.repeat(Math.round(r.rating.avg))}${'☆'.repeat(5-Math.round(r.rating.avg))} ${r.rating.avg} (${r.rating.count})${r.rating.dimensions?` · 环境 ${r.rating.dimensions.environment.avg} 设备 ${r.rating.dimensions.equipment.avg} 服务 ${r.rating.dimensions.service.avg}`:''}</div>` : '';
   return `<div class="card"><h3>${esc(r.name)} <button class="btn sm ${fav?'pri':''}" title="收藏" onclick="toggleFavorite('${r.id}')">${fav?'⭐':'☆'}</button> ${S.admin?`<span></span><button class="btn danger sm" onclick="removeRoom('${r.id}')">删</button>`:''}</h3>
-    <div class="meta">容量 ${r.capacity} 人 · 预约 ${r.minMinutes||5}-${r.maxMinutes||720} 分钟${r.location?' · '+esc(r.location):''}${r.description?'<div>'+esc(r.description)+'</div>':''}${r.tags&&r.tags.length?'<div style="margin-top:4px">'+r.tags.map(t=>`<span class="badge grey">${esc(t)}</span>`).join('')+'</div>':''}${r.requireApproval?'<div style="margin-top:4px"><span class="badge warn">需审批</span></div>':''}</div>
+    <div class="meta">容量 ${r.capacity} 人 · 预约 ${r.minMinutes||5}-${r.maxMinutes||720} 分钟${r.location?' · '+esc(r.location):''}${r.description?'<div>'+esc(r.description)+'</div>':''}${r.tags&&r.tags.length?'<div style="margin-top:4px">'+r.tags.map(t=>`<span class="badge grey">${esc(t)}</span>`).join('')+'</div>':''}${r.equipment&&r.equipment.length?'<div style="margin-top:4px">'+r.equipment.map(e=>`<span class="badge grey">${esc(e)}</span>`).join('')+'</div>':''}${r.maintenance?'<div style="margin-top:4px"><span class="badge bad">维护中</span></div>':''}${r.requireApproval?'<div style="margin-top:4px"><span class="badge warn">需审批</span></div>':''}</div>
     ${rate}
     <div class="meta">${upcoming.length?upcoming.map(u=>`· ${fmtTime(u.startAt)} → ${fmtTime(u.endAt)} <b>${esc(u.title)}</b>${u.ownerAccount===me?'（你）':''}`).join('<br>'):'今日暂无预约'}</div>
-    <div class="foot"><button class="btn pri sm" onclick="openBook('${r.id}')">预约</button>${S.admin?`<button class="btn sm" onclick="openRoomTag('${r.id}')">标签</button><button class="btn ${r.requireApproval?'warn':''} sm" onclick="roomApproval('${r.id}',${!r.requireApproval})">${r.requireApproval?'审批关闭':'审批开启'}</button>`:''}</div></div>`;
+    <div class="foot"><button class="btn pri sm" onclick="openBook('${r.id}')">预约</button>${S.admin?`<button class="btn sm" onclick="openRoomTag('${r.id}')">标签</button><button class="btn sm" onclick="openRoomEquipment('${r.id}')">设备</button><button class="btn sm" onclick="openRoomMaintenance('${r.id}')">维护</button><button class="btn ${r.requireApproval?'warn':''} sm" onclick="roomApproval('${r.id}',${!r.requireApproval})">${r.requireApproval?'审批关闭':'审批开启'}</button>`:''}</div></div>`;
 }
 function openRoomTag(id){
   const r=(S.DB.rooms||[]).find(x=>x.id===id); if(!r) return;
@@ -534,6 +536,13 @@ function openRoomTag(id){
     <button class="btn pri" onclick="submitRoomTag('${id}')">保存</button></div>`);
 }
 function submitRoomTag(id){ wsSend({type:'roomTag',roomId:id,tags:$('#mrTags').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)}); closeModal(); }
+function openRoomEquipment(id){
+  const r=(S.DB.rooms||[]).find(x=>x.id===id); if(!r) return;
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>编辑设备 · ${esc(r.name)}</h2><div class="form">
+    <div class="fld"><label>设备清单（逗号分隔，最多 10 个）</label><input id="mrEquipment" value="${esc((r.equipment||[]).join(','))}"></div>
+    <button class="btn pri" onclick="submitRoomEquipment('${id}')">保存</button></div>`);
+}
+function submitRoomEquipment(id){ wsSend({type:'roomEquipment',roomId:id,equipment:$('#mrEquipment').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)}); closeModal(); }
 function openRoomCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>新增会议室</h2><div class="form">
   <div class="fld"><label>名称</label><input id="mrName" placeholder="如：3F 大会议室"></div>
   <div class="fld"><label>容纳人数</label><input id="mrCap" type="number" min="1" value="8"></div>
@@ -542,13 +551,34 @@ function openRoomCreate(){ openModal(`<span class="close" onclick="closeModal()"
   <div class="fld"><label>位置</label><input id="mrLoc" placeholder="如：三层东侧"></div>
   <div class="fld"><label>备注</label><input id="mrDesc" placeholder="可选"></div>
   <div class="fld"><label>标签（逗号分隔，最多 8 个）</label><input id="mrTags" placeholder="投影, 白板, 会议"></div>
+  <div class="fld"><label>设备（逗号分隔，最多 10 个）</label><input id="mrEquipment" placeholder="投影, 白板, 电话, 电视"></div>
   <button class="btn pri" onclick="submitRoomCreate()">创建</button></div>`); }
-function submitRoomCreate(){ wsSend({type:'roomCreate',name:$('#mrName').value,capacity:parseInt($('#mrCap').value,10),minMinutes:parseInt($('#mrMin').value,10),maxMinutes:parseInt($('#mrMax').value,10),location:$('#mrLoc').value,description:$('#mrDesc').value,tags:$('#mrTags')?$('#mrTags').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean):[]}); closeModal(); }
+function submitRoomCreate(){ wsSend({type:'roomCreate',name:$('#mrName').value,capacity:parseInt($('#mrCap').value,10),minMinutes:parseInt($('#mrMin').value,10),maxMinutes:parseInt($('#mrMax').value,10),location:$('#mrLoc').value,description:$('#mrDesc').value,tags:$('#mrTags')?$('#mrTags').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean):[],equipment:$('#mrEquipment')?$('#mrEquipment').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean):[]}); closeModal(); }
 function removeRoom(id){ if(confirm('确认删除该会议室？')) wsSend({type:'roomRemove',roomId:id}); }
+function openRoomMaintenance(id){
+  const r=(S.DB.rooms||[]).find(x=>x.id===id); if(!r) return;
+  const clearHtml = r.maintenanceUntil ? `<div style="margin-top:8px"><button class="btn" onclick="submitRoomMaintenanceClear('${id}')">解除维护</button></div>` : '';
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>维护设置 · ${esc(r.name)}</h2><div class="form">
+    <div class="fld"><label>维护截止时间</label><input id="mrMainUntil" type="datetime-local"></div>
+    <button class="btn pri" onclick="submitRoomMaintenance('${id}')">开始维护</button>
+    ${clearHtml}
+    <div class="hint">维护期间该会议室不可被预约</div></div>`);
+  const d=(ms)=>{ const x=new Date(ms), off=x.getTimezoneOffset(); return new Date(ms-off).toISOString().slice(0,16); };
+  $('#mrMainUntil').value=d((r.maintenanceUntil||Date.now())+3600*1000);
+}
+function submitRoomMaintenance(id){
+  const t=new Date($('#mrMainUntil').value).getTime();
+  if(!(t>Date.now())) return toast('维护截止时间必须晚于当前时间','error');
+  wsSend({type:'roomMaintenance',roomId:id,until:t});
+  closeModal();
+}
+function submitRoomMaintenanceClear(id){ wsSend({type:'roomMaintenance',roomId:id,clear:true}); closeModal(); }
 function toggleFavorite(id){ wsSend({type:'roomFavorite',roomId:id}); }
 function setRoomFavFilter(v){ S.favFilter=v; render(); }
 function openBook(roomId){
   const now=Date.now(), start=now+10*60000, end=start+60*60000;
+  const room=(S.DB.rooms||[]).find(x=>x.id===roomId);
+  const roomEquipmentList=room?(room.equipment||[]):[];
   openModal(`<span class="close" onclick="closeModal()">×</span><h2>预约会议室</h2><div class="form">
     <div class="fld"><label>会议标题</label><input id="bkTitle" value="会议"></div>
     <div class="fld"><label>参会人数</label><input id="bkPart" type="number" min="1" value="1"></div>
@@ -558,6 +588,7 @@ function openBook(roomId){
     <div class="fld"><label>重复</label><select id="bkRepeat" onchange="document.getElementById('bkCountWrap').style.display=this.value?'block':'none'"><option value="">不重复</option><option value="daily">每天</option><option value="weekly">每周</option></select></div>
     <div class="fld" id="bkCountWrap" style="display:none"><label>次数</label><input id="bkCount" type="number" min="1" max="52" value="8"></div>
     <div class="fld"><label>备注</label><input id="bkNote" placeholder="可选"></div>
+    ${(roomEquipmentList||[]).length?`<div class="fld"><label>使用设备</label>${roomEquipmentList.map((e,i)=>`<label class="check"><input class="bk-eq" type="checkbox" value="${esc(e)}"> ${esc(e)}</label>`).join('')}</div>`:''}
     <button class="btn pri" onclick="submitBook('${roomId}')">提交预约</button>
     <div class="hint">同一会议室时段不可重叠预约；周期预约会按天/周展开</div></div>`);
   const d=(ms)=>{ const x=new Date(ms), off=x.getTimezoneOffset(); return new Date(ms-off).toISOString().slice(0,16); };
@@ -570,8 +601,9 @@ function submitBook(roomId){
   const count=parseInt($('#bkCount').value,10)||1;
   const participants=Math.max(1, parseInt($('#bkPart').value,10)||1);
   const attendees=$('#bkAttend').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean);
-  S.lastRoomBook={roomId,startAt:st,endAt:en,title:$('#bkTitle').value,note:$('#bkNote').value,participants,attendees};
-  wsSend({type:'roomBook',roomId,startAt:st,endAt:en,title:$('#bkTitle').value,note:$('#bkNote').value,participants,attendees,repeat,repeatCount:count});
+  const equipment=[...document.querySelectorAll('input.bk-eq:checked')].map(c=>c.value);
+  S.lastRoomBook={roomId,startAt:st,endAt:en,title:$('#bkTitle').value,note:$('#bkNote').value,participants,attendees,equipment};
+  wsSend({type:'roomBook',roomId,startAt:st,endAt:en,title:$('#bkTitle').value,note:$('#bkNote').value,participants,attendees,equipment,repeat,repeatCount:count});
   closeModal();
 }
 function cancelReservation(id){ wsSend({type:'reservationCancel',reservationId:id}); }
@@ -1652,6 +1684,25 @@ function renderTrend(){
       <div class="chart">${list.map(b=>`<div class="barcol"><div class="barval">${b[k]||0}</div><div class="barwrap"><i style="height:${Math.round((b[k]||0)/maxVal*100)}%"></i></div><span class="xlab">${(b.date.getMonth()+1)}/${b.date.getDate()}</span></div>`).join('')}</div>`).join(''):'<div class="empty">暂无趋势数据</div>'}`;
 }
 function loadTrend(days){ wsSend({type:'getSpaceTrend',days}); }
+/* 我的日程：聚合未来 N 天的会议、工位、活动、请假 */
+function renderSchedule(){
+  const s = S.DB.schedule || {days:1,items:[]};
+  const items = s.items || [];
+  const groups = {};
+  for (const it of items) {
+    const day = new Date(it.startAt);
+    const key = `${day.getMonth()+1}/${day.getDate()}`;
+    (groups[key] = groups[key] || []).push(it);
+  }
+  const typeIcon = {meeting:'🏢',desk:'🪑',event:'🎉',leave:'📅'};
+  const typeLabel = {meeting:'会议',desk:'工位',event:'活动',leave:'请假'};
+  const statusBadge = (it) => { const k = {pending:'info',pending_approval:'warn',approved:'green',rejected:'bad',cancelled:'bad',upcoming:'info'}[it.status]||'info'; return `<span class="badge ${k}">${({pending:'待开始',pending_approval:'待审批',approved:'已批准',rejected:'已驳回',cancelled:'已取消',upcoming:'即将'}[it.status])||it.status}</span>`; };
+  const groupHtml = Object.keys(groups).sort().map((key) => `<div class="card"><h3>${key}</h3><div class="list">${groups[key].map(it=>`<div class="row"><span><span class="who">${typeIcon[it.type]||'📅'} ${esc(it.title)}</span> <span class="when">${fmtTime(it.startAt)} → ${fmtTime(it.endAt)}</span>${it.location?'<div class="when">'+esc(it.location)+(it.room?' · '+esc(it.room):'')+'</div>':''}</span><span class="fs">${statusBadge(it)}</span></div>`).join('')}</div></div>`).join('');
+  $('#main').innerHTML = `<div class="topbar"><div><h1>我的日程</h1><div class="sub">未来 ${s.days} 天与你相关的日程，按时间排序</div></div>
+    <div class="btn grp"><button class="btn" onclick="loadSchedule(7)">近7天</button><button class="btn pri" onclick="loadSchedule(14)">近14天</button><button class="btn" onclick="loadSchedule(30)">近30天</button></div></div>
+    ${items.length?groupHtml:'<div class="empty">🗓️ 近期暂无日程安排</div>'}`;
+}
+function loadSchedule(days){ wsSend({type:'getMySchedule',days}); }
 setInterval(()=>{ if(S.module==='stalls' && S.me && document.visibilityState==='visible') renderStalls(); }, 1000);
 function openReserve(id,type){
   const opts = type==='urinal' ? [['1分钟',1],['2分钟',2],['5分钟',5]] : [['15分钟',15],['30分钟',30],['45分钟',45]];

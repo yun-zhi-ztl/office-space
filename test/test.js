@@ -398,6 +398,54 @@ async function runTests() {
     wI.close();
   }
 
+  // ========== 测试3j: 会议室设备与维护 ==========
+  console.log('\n📋 测试3j: 会议室设备与维护（设备清单/维护期/设备过滤）');
+  {
+    const spM = (await httpJson('POST', '/api/spaces', { name: '设备维护办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aM = 'equip_' + runKey;
+    await reg(aM, 'pw', '设备管理员');
+    const wM = await createWSClient(); await loginTo(wM, spM.id, aM, 'pw');
+    await sendMsg(wM, { type: 'roomCreate', name: '设备间', capacity: 8, equipment: ['投影', '投影', '白板', '电视'] });
+    let roomM = last(wM, 'rooms').rooms[0];
+    assert(roomM && roomM.equipment.join(',') === '投影,白板,电视', 'roomCreate 设备清单去重');
+    await sendMsg(wM, { type: 'roomEquipment', roomId: roomM.id, equipment: ['投影', '白板', '新设备'] });
+    roomM = last(wM, 'rooms').rooms.find(r => r.id === roomM.id);
+    assert(roomM.equipment.join(',') === '投影,白板,新设备', 'roomEquipment 更新设备清单');
+    const untilM = Date.now() + 3600000;
+    await sendMsg(wM, { type: 'roomMaintenance', roomId: roomM.id, until: untilM });
+    roomM = last(wM, 'rooms').rooms.find(r => r.id === roomM.id);
+    assert(roomM.maintenance === true && roomM.maintenanceUntil === untilM, 'roomMaintenance 进入维护状态');
+    const tM = Date.now() + 10 * 60000;
+    await sendMsg(wM, { type: 'roomBook', roomId: roomM.id, startAt: tM, endAt: tM + 60 * 60000, equipment: ['投影'] });
+    const errM = mk(wM, 'error').pop();
+    assert(errM && errM.message.includes('维护中'), '维护期间预约被拒');
+    await sendMsg(wM, { type: 'roomMaintenance', roomId: roomM.id, clear: true });
+    roomM = last(wM, 'rooms').rooms.find(r => r.id === roomM.id);
+    assert(roomM.maintenance === false, '解除维护后 maintenance=false');
+    const tM2 = Date.now() + 20 * 60000;
+    await sendMsg(wM, { type: 'roomBook', roomId: roomM.id, startAt: tM2, endAt: tM2 + 60 * 60000, title: '设备会', equipment: ['投影', '不存在设备'] });
+    const resM = (last(wM, 'rooms').reservations || []).find(r => r.title === '设备会');
+    assert(resM && resM.equipment.join(',') === '投影', '预约仅保留会议室已有设备');
+    wM.close();
+  }
+
+  // ========== 测试3k: 我的日程 ==========
+  console.log('\n📋 测试3k: 我的日程（聚合未来会议）');
+  {
+    const spS = (await httpJson('POST', '/api/spaces', { name: '日程办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aS = 'sched_' + runKey;
+    await reg(aS, 'pw', '日程用户');
+    const wS = await createWSClient(); await loginTo(wS, spS.id, aS, 'pw');
+    await sendMsg(wS, { type: 'roomCreate', name: '日程室', capacity: 6 });
+    const roomS = last(wS, 'rooms').rooms[0];
+    await sendMsg(wS, { type: 'roomBook', roomId: roomS.id, startAt: Date.now() + 3600000, endAt: Date.now() + 4200000, title: '未来会' });
+    await sendMsg(wS, { type: 'getMySchedule', days: 7 });
+    const sch = last(wS, 'mySchedule');
+    assert(sch && sch.schedule.days === 7, 'mySchedule 返回天数 7');
+    assert(sch && sch.schedule.items.some(i => i.title === '未来会' && i.type === 'meeting'), 'mySchedule 聚合未来会议');
+    wS.close();
+  }
+
   // ========== 测试4: 工具借用 ==========
   console.log('\n📋 测试4: 工具借用（创建/借用/不足/归还）');
   await sendMsg(w1, { type: 'toolCreate', name: '测试机', category: '测试电脑', total: 2, location: '3F 机柜' });

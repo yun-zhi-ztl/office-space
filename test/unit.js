@@ -250,6 +250,56 @@ assertEq(rpAtt.attendees.length, 2, 'reservationPublic 暴露 attendees');
 assertEq(rpAtt.attendedAccounts.length, 1, 'reservationPublic 暴露 attendedAccounts');
 assertEq(rpAtt.attendanceRate, 50, 'reservationPublic 计算 attendanceRate 50%');
 
+// ---------- 会议室设备与维护 ----------
+console.log('\n📋 12c. 会议室设备与维护');
+const roomEqUser = { id: 'q1', account: 'admin', nickname: '管理员', stats: {}, achievements: [] };
+const roomEqSent = [];
+let roomEqSeq = 0;
+const roomEqApi = {
+  roomReservationsPublic: () => [],
+  roomWaitlistPublic: () => [],
+  roomPublic: (r) => r,
+  roomInsights: () => ({ ratingRanking: [], usageRanking: [] }),
+  broadcast: () => {},
+  LIST_PAGE: 30,
+  isAdmin: () => true,
+  sendTo: (ws, obj) => { roomEqSent.push(obj); },
+  serError: (m) => ({ type: 'error', message: m }),
+  genId: (prefix) => (prefix === 'res' ? `res${roomEqSeq++}` : 'x'),
+  saveEntity: () => {},
+  deleteEntity: () => {},
+  recordWeekly: () => {},
+  getUserByAccount: () => null,
+  sendToUser: () => {},
+  sendToAccount: () => {},
+  saveProfile: () => {},
+  broadcastLeaderboard: () => {},
+  expandRecurring: api.expandRecurring,
+  roomStatsBroadcast: () => {},
+  checkAchievements: () => {},
+  pushNotification: () => {},
+  ROOM_REMIND_WINDOW_MS: 30 * 60000,
+  MEETING_ONTIME_GRACE_MS: 60 * 60000,
+  genDoorCode: () => '000001',
+};
+const roomEqModule = roomsModule(roomEqApi);
+const eqSpace = { id: 's12c', rooms: [], roomReservations: new Map(), roomWaitlist: new Map(), paused: false };
+eqSpace.rooms.push({ id: 'rmEq', name: '设备间', capacity: 8, minMinutes: 5, maxMinutes: 720, tags: [], equipment: [] });
+roomEqModule.handleRooms({}, roomEqUser, eqSpace, { type: 'roomEquipment', roomId: 'rmEq', equipment: ['投影', '投影', '白板', '电视', 'x'.repeat(20), ''] });
+assertEq(eqSpace.rooms[0].equipment, ['投影', '白板', '电视', 'xxxxxxxxxxxx'], 'roomEquipment 去重、保序并截断超长项为 12 字符');
+const nowEq = Date.now() + 3600000;
+roomEqModule.handleRooms({}, roomEqUser, eqSpace, { type: 'roomMaintenance', roomId: 'rmEq', until: nowEq });
+assertEq(eqSpace.rooms[0].maintenanceUntil, nowEq, 'roomMaintenance 设置维护截止时间');
+roomEqModule.handleRooms({}, roomEqUser, eqSpace, { type: 'roomBook', roomId: 'rmEq', startAt: nowEq - 1000, endAt: nowEq + 60000, participants: 2, equipment: ['投影'] });
+assertEq(roomEqSent[roomEqSent.length - 1].message, '该会议室维护中，暂不可预约', '维护期内预约被拒绝');
+roomEqModule.handleRooms({}, roomEqUser, eqSpace, { type: 'roomMaintenance', roomId: 'rmEq', clear: true });
+assertEq(eqSpace.rooms[0].maintenanceUntil, null, 'roomMaintenance clear 解除维护');
+const eqNow = Date.now() + 3600000;
+roomEqModule.handleRooms({}, roomEqUser, eqSpace, { type: 'roomBook', roomId: 'rmEq', startAt: eqNow, endAt: eqNow + 3600000, participants: 2, equipment: ['投影', '白板', '不存在设备'] });
+const eqRes = [...eqSpace.roomReservations.values()].pop();
+assert(eqRes, '解除维护后可预约');
+assertEq(eqRes.equipment, ['投影', '白板'], '预约设备仅保留会议室已有设备');
+
 // ---------- 周期预约展开 ----------
 console.log('\n📋 13. 周期预约展开');
 const t0 = Date.now() + 3600000;
@@ -453,6 +503,30 @@ assertEq(myRem.pendingVisitorCount, 1, '我的待办统计待接待访客');
 assertEq(myRem.assignedMaterialCount, 1, '我的待办统计指派申领');
 assertEq(myRem.assignedRepairCount, 1, '我的待办统计指派报修');
 assertEq(api.buildMyReminders(spRem2, { account: 'bob' }, nowR2).overdueCount, 0, '他人不统计我的逾期');
+
+// ---------- 我的日程 ----------
+console.log('\n📋 21b. 我的日程');
+const spSch = api.createSpace('s13b', '日程空间', 1, 0);
+const nowS = Date.now();
+spSch.rooms.push({ id: 'rm1', name: '大会议室', location: '3F', capacity: 10 });
+spSch.desks.push({ id: 'ds1', name: '工位A' });
+spSch.roomReservations.set('rs1', { id: 'rs1', roomId: 'rm1', ownerAccount: 'alice', startAt: nowS + 3600000, endAt: nowS + 7200000, status: 'pending', title: '评审' });
+spSch.roomReservations.set('rs2', { id: 'rs2', roomId: 'rm1', ownerAccount: 'alice', startAt: nowS - 3600000, endAt: nowS, status: 'pending', title: '已过会议' });
+spSch.roomReservations.set('rs3', { id: 'rs3', roomId: 'rm1', ownerAccount: 'bob', startAt: nowS + 7200000, endAt: nowS + 10800000, status: 'pending', title: '别人会议' });
+spSch.deskReservations.set('rd1', { id: 'rd1', deskId: 'ds1', account: 'alice', startAt: nowS + 10800000, endAt: nowS + 14400000, status: 'pending' });
+spSch.events.set('ev1', { id: 'ev1', hostAccount: 'alice', title: '团建', startAt: nowS + 1800000, endAt: nowS + 2160000, location: '操场', rsvps: new Map() });
+spSch.events.set('ev2', { id: 'ev2', hostAccount: 'bob', title: '分享会', startAt: nowS + 14400000, endAt: nowS + 18000000, rsvps: new Map([['alice', 'going']]) });
+spSch.leaves.set('lv1', { id: 'lv1', account: 'alice', category: '年假', startAt: nowS + 21600000, endAt: nowS + 86400000 + 21600000, status: 'approved' });
+spSch.leaves.set('lv2', { id: 'lv2', account: 'alice', category: '调休', startAt: nowS + 21600000, endAt: nowS + 86400000 + 21600000, status: 'pending' });
+const sch = api.buildMySchedule(spSch, { account: 'alice' }, 7);
+assertEq(sch.days, 7, '我的日程返回 7 天');
+const schIds = sch.items.map((i) => i.id);
+assertEq(schIds, ['ev1', 'rs1', 'rd1', 'ev2', 'lv1'], '我的日程按开始时间排序并聚合');
+assert(!schIds.includes('rs2'), '已过期会议不进入日程');
+assert(!schIds.includes('rs3'), '他人会议不进入我的日程');
+assert(!schIds.includes('lv2'), '未批准请假不进入日程');
+const schType = { ev1: 'event', rs1: 'meeting', rd1: 'desk', ev2: 'event', lv1: 'leave' };
+for (const it of sch.items) assertEq(it.type, schType[it.id], '日程类型 ' + it.id + ' 正确');
 
 // ---------- 空间活跃趋势 ----------
 console.log('\n📋 22. 空间活跃趋势');
@@ -686,9 +760,21 @@ assertEq(api.roomPublic(spRoomRate, spRoomRate.rooms[0]).rating.avg, 4, 'roomPub
 assertEq(api.roomPublic(spRoomRate, spRoomRate.rooms[0]).tags.length, 2, 'roomPublic 暴露会议室标签');
 assertEq(api.roomPublic(spRoomRate, spRoomRate.rooms[0]).minMinutes, 5, 'roomPublic 默认最短预约时长 5 分钟');
 assertEq(api.roomPublic(spRoomRate, spRoomRate.rooms[0]).maxMinutes, 720, 'roomPublic 默认最长预约时长 720 分钟');
+spRoomRate.rooms[0].equipment = ['投影', '白板'];
+spRoomRate.rooms[0].maintenanceUntil = null;
+const roomPub = api.roomPublic(spRoomRate, spRoomRate.rooms[0]);
+assertEq(roomPub.equipment, ['投影', '白板'], 'roomPublic 暴露会议室设备清单');
+assertEq(roomPub.maintenance, false, 'roomPublic 无维护截止时 maintenance=false');
+const maintUntil = Date.now() + 3600000;
+spRoomRate.rooms[0].maintenanceUntil = maintUntil;
+const roomPubMaint = api.roomPublic(spRoomRate, spRoomRate.rooms[0]);
+assertEq(roomPubMaint.maintenanceUntil, maintUntil, 'roomPublic 暴露维护截止时间');
+assertEq(roomPubMaint.maintenance, true, 'roomPublic 维护期内 maintenance=true');
 const resRatePub = api.reservationPublic(spRoomRate.roomReservations.get('rr1'), new Map());
 assertEq(resRatePub.rating, 5, 'reservationPublic 暴露评分');
 assertEq(resRatePub.ratedAt, nowRate - 50000, 'reservationPublic 暴露评分时间');
+spRoomRate.roomReservations.get('rr1').equipment = ['投影', '白板'];
+assertEq(api.reservationPublic(spRoomRate.roomReservations.get('rr1'), new Map()).equipment, ['投影', '白板'], 'reservationPublic 暴露预约设备清单');
 
 // ---------- 报修升级 ----------
 console.log('\n📋 33. 报修升级');

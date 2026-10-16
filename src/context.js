@@ -751,12 +751,12 @@ function createContext() {
     }
     return { avg, count, dimensions, ratings: list.slice(-8).reverse() };
   }
-  function roomPublic(space, r) { return { id: r.id, name: r.name, capacity: r.capacity, location: r.location, description: r.description, tags: r.tags || [], requireApproval: !!r.requireApproval, minMinutes: r.minMinutes || 5, maxMinutes: r.maxMinutes || 720, rating: roomRatingSummary(space, r.id) }; }
+  function roomPublic(space, r) { return { id: r.id, name: r.name, capacity: r.capacity, location: r.location, description: r.description, tags: r.tags || [], equipment: r.equipment || [], requireApproval: !!r.requireApproval, minMinutes: r.minMinutes || 5, maxMinutes: r.maxMinutes || 720, maintenanceUntil: r.maintenanceUntil || null, maintenance: r.maintenanceUntil ? Date.now() < r.maintenanceUntil : false, rating: roomRatingSummary(space, r.id) }; }
   function reservationPublic(res, info) {
     const who = info.get(res.ownerAccount);
     const attendees = res.attendees || [];
     const attended = res.attendedAccounts || [];
-    return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status, repeat: res.repeat || null, seriesId: res.seriesId || null, remindAt: res.remindAt || null, participants: res.participants || null, attendees, attendedAccounts: attended, attendanceRate: attendees.length ? Math.round(attended.length / attendees.length * 100) : 0, actualStartAt: res.actualStartAt || null, actualEndAt: res.actualEndAt || null, rating: res.rating || null, ratedAt: res.ratedAt || null, ratingComment: res.ratingComment || '', ratings: res.ratings || null };
+    return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status, repeat: res.repeat || null, seriesId: res.seriesId || null, remindAt: res.remindAt || null, participants: res.participants || null, attendees, attendedAccounts: attended, attendanceRate: attendees.length ? Math.round(attended.length / attendees.length * 100) : 0, actualStartAt: res.actualStartAt || null, actualEndAt: res.actualEndAt || null, rating: res.rating || null, ratedAt: res.ratedAt || null, ratingComment: res.ratingComment || '', ratings: res.ratings || null, equipment: res.equipment || [] };
   }
   function roomWaitlistPublic(space, info) {
     if (!info) info = spaceUserInfo(space.id);
@@ -1725,6 +1725,44 @@ function createContext() {
     };
   }
 
+  // ---------- 我的日程 ----------
+  // 聚合当前用户未来 N 天的日程：会议、工位、活动、请假，按时间排序，供「我的日程」看板展示
+  function buildMySchedule(space, user, days) {
+    const n = Math.max(1, Math.min(14, parseInt(days, 10) || 1));
+    const now = Date.now();
+    const endAt = now + n * 86400000;
+    const items = [];
+    for (const r of space.roomReservations.values()) {
+      if (r.ownerAccount !== user.account) continue;
+      if (r.status === 'cancelled' || r.status === 'expired') continue;
+      if (r.startAt < now || r.startAt >= endAt) continue;
+      const room = space.rooms.find((x) => x.id === r.roomId);
+      items.push({ id: r.id, type: 'meeting', module: 'rooms', title: r.title || '会议', startAt: r.startAt, endAt: r.endAt, room: room ? room.name : '', location: room ? room.location || '' : '', status: r.status });
+    }
+    for (const r of space.deskReservations.values()) {
+      if (r.account !== user.account) continue;
+      if (r.status === 'cancelled' || r.status === 'expired') continue;
+      if (r.startAt < now || r.startAt >= endAt) continue;
+      const desk = space.desks.find((d) => d.id === r.deskId);
+      items.push({ id: r.id, type: 'desk', module: 'desks', title: '工位', startAt: r.startAt, endAt: r.endAt, room: desk ? desk.name : '', location: '', status: r.status });
+    }
+    for (const e of space.events.values()) {
+      if (e.cancelled) continue;
+      if (e.startAt < now || e.startAt >= endAt) continue;
+      const isAttendee = e.rsvps && e.rsvps.get(user.account) === 'going';
+      if (!isAttendee && e.hostAccount !== user.account) continue;
+      items.push({ id: e.id, type: 'event', module: 'events', title: e.title, startAt: e.startAt, endAt: e.endAt, room: '', location: e.location || '', status: 'upcoming' });
+    }
+    for (const lv of space.leaves.values()) {
+      if (lv.account !== user.account) continue;
+      if (lv.status !== 'approved') continue;
+      if (lv.startAt < now || lv.startAt >= endAt) continue;
+      items.push({ id: lv.id, type: 'leave', module: 'leaves', title: '请假·' + (lv.category || ''), startAt: lv.startAt, endAt: lv.endAt, room: '', location: '', status: lv.status });
+    }
+    items.sort((a, b) => a.startAt - b.startAt);
+    return { days: n, items };
+  }
+
   // ---------- 空间活跃趋势 ----------
   // 按天聚合会议室 / 借用 / 申领 / 报修 / 访客的活动量，供空间趋势看板展示
   function buildSpaceTrend(space, days) {
@@ -1820,6 +1858,8 @@ function createContext() {
     buildDigest, buildWeeklyReport,
     // 我的待办
     buildMyReminders,
+    // 我的日程
+    buildMySchedule,
     // 空间活跃趋势
     buildSpaceTrend,
   };

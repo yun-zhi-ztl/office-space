@@ -130,12 +130,13 @@ wss.on('connection', (ws) => {
     if (msg.type === 'getStats') { api.sendToUser(user.id, { type: 'stats', stats: user.stats }); return; }
     if (msg.type === 'getAchievements') { api.sendTo(ws, { type: 'achievements', achievements: api.achievementDefsPublic(user) }); return; }
     if (msg.type === 'getMyReminders') { api.sendTo(ws, { type: 'myReminders', reminders: api.buildMyReminders(space, user) }); return; }
+    if (msg.type === 'getMySchedule') { api.sendTo(ws, { type: 'mySchedule', schedule: api.buildMySchedule(space, user, msg.days) }); return; }
     if (msg.type === 'getSpaceTrend') { api.sendTo(ws, { type: 'spaceTrend', trend: api.buildSpaceTrend(space, msg.days) }); return; }
     if (msg.type === 'getAttendanceCalendar') { api.sendTo(ws, { type: 'attendanceCalendar', calendar: api.attendanceCalendar(space, user.account, msg.year, msg.month) }); return; }
     if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }
 
     switch (msg.type) {
-      case 'roomCreate': case 'roomTag': case 'roomApproval': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'reservationCancelSeries': case 'reservationApprove': case 'reservationReject': case 'reservationReschedule': case 'reservationAttendees': case 'roomWaitlist': case 'roomWaitlistCancel': case 'roomStart': case 'roomEnd': case 'roomExtend': case 'roomDoorCodeRequest': case 'meetingAttend': case 'roomRate': case 'roomFavorite':
+      case 'roomCreate': case 'roomTag': case 'roomApproval': case 'roomEquipment': case 'roomMaintenance': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'reservationCancelSeries': case 'reservationApprove': case 'reservationReject': case 'reservationReschedule': case 'reservationAttendees': case 'roomWaitlist': case 'roomWaitlistCancel': case 'roomStart': case 'roomEnd': case 'roomExtend': case 'roomDoorCodeRequest': case 'meetingAttend': case 'roomRate': case 'roomFavorite':
         rooms.handleRooms(ws, user, space, msg); break;
       case 'toolCreate': case 'toolDelete': case 'toolAdjust': case 'toolBorrow': case 'toolReturn': case 'toolExtend': case 'toolWaitlist': case 'remindOverdue':
         tools.handleTools(ws, user, space, msg); break;

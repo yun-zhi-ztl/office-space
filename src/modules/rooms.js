@@ -18,6 +18,27 @@ module.exports = function roomsModule(api) {
     return arr.map((t) => String(t == null ? '' : t).trim().slice(0, 12)).filter(Boolean).slice(0, 8);
   }
 
+  // 会议室设备清单规范化：最多 10 项，每项 ≤12 字符，去重保序
+  function normalizeRoomEquipment(raw) {
+    const arr = Array.isArray(raw) ? raw : [];
+    const seen = new Set();
+    const out = [];
+    for (const e of arr) {
+      const v = String(e == null ? '' : e).trim().slice(0, 12);
+      if (!v || seen.has(v)) continue;
+      seen.add(v);
+      out.push(v);
+      if (out.length >= 10) break;
+    }
+    return out;
+  }
+
+  // 维护时段是否覆盖预约时段（维护中不可预约）
+  function roomUnderMaintenance(room, startAt, endAt) {
+    if (!room.maintenanceUntil) return false;
+    return startAt < room.maintenanceUntil;
+  }
+
   // 会议室预约时长限制规范化：min 默认 5 分钟、max 默认 720 分钟，保证 min <= max
   function normalizeRoomDuration(minRaw, maxRaw) {
     const min = Math.max(1, Math.min(1440, parseInt(minRaw, 10) || 5));
@@ -118,8 +139,9 @@ module.exports = function roomsModule(api) {
       if (!name) return sendTo(ws, serError('请输入会议室名称'));
       if (!Number.isInteger(capacity) || capacity < 1) return sendTo(ws, serError('请输入有效容纳人数'));
       const tags = normalizeRoomTags(msg.tags);
+      const equipment = normalizeRoomEquipment(msg.equipment);
       const duration = normalizeRoomDuration(msg.minMinutes, msg.maxMinutes);
-      const room = { id: genId('rm', null), name, capacity, location: (msg.location || '').trim().slice(0, 40), description: (msg.description || '').trim().slice(0, 100), tags, minMinutes: duration.minMinutes, maxMinutes: duration.maxMinutes };
+      const room = { id: genId('rm', null), name, capacity, location: (msg.location || '').trim().slice(0, 40), description: (msg.description || '').trim().slice(0, 100), tags, equipment, minMinutes: duration.minMinutes, maxMinutes: duration.maxMinutes };
       space.rooms.push(room);
       saveEntity(space.id, 'room', room.id, room);
       roomsBroadcast(space);
@@ -136,6 +158,25 @@ module.exports = function roomsModule(api) {
       const room = space.rooms.find((r) => r.id === msg.roomId);
       if (!room) return sendTo(ws, serError('会议室不存在'));
       room.requireApproval = !!msg.requireApproval;
+      saveEntity(space.id, 'room', room.id, room);
+      roomsBroadcast(space);
+    } else if (msg.type === 'roomEquipment') {
+      if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可设置会议室设备'));
+      const room = space.rooms.find((r) => r.id === msg.roomId);
+      if (!room) return sendTo(ws, serError('会议室不存在'));
+      room.equipment = normalizeRoomEquipment(msg.equipment);
+      saveEntity(space.id, 'room', room.id, room);
+      roomsBroadcast(space);
+    } else if (msg.type === 'roomMaintenance') {
+      if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可设置会议室维护'));
+      const room = space.rooms.find((r) => r.id === msg.roomId);
+      if (!room) return sendTo(ws, serError('会议室不存在'));
+      if (msg.clear) { room.maintenanceUntil = null; }
+      else {
+        const until = Math.floor(+msg.until || 0);
+        if (!(until > Date.now())) return sendTo(ws, serError('维护结束时间必须晚于当前时间'));
+        room.maintenanceUntil = until;
+      }
       saveEntity(space.id, 'room', room.id, room);
       roomsBroadcast(space);
     } else if (msg.type === 'roomRemove') {
@@ -157,6 +198,7 @@ module.exports = function roomsModule(api) {
       const endAt = Math.floor(+msg.endAt || 0);
       if (!(startAt > 0) || !(endAt > startAt)) return sendTo(ws, serError('请选择有效的时间段'));
       if (startAt < Date.now()) return sendTo(ws, serError('预约开始时间不能早于当前时间'));
+      if (roomUnderMaintenance(room, startAt, endAt)) return sendTo(ws, serError('该会议室维护中，暂不可预约'));
       const durationMs = endAt - startAt;
       if (durationMs < (room.minMinutes || 5) * 60000) return sendTo(ws, { type: 'error', message: `预约时长至少 ${room.minMinutes || 5} 分钟`, code: 'roomDuration' });
       if (durationMs > (room.maxMinutes || 720) * 60000) return sendTo(ws, { type: 'error', message: `预约时长最多 ${room.maxMinutes || 720} 分钟`, code: 'roomDuration' });
@@ -167,6 +209,7 @@ module.exports = function roomsModule(api) {
       if (participants > room.capacity) return sendTo(ws, serError(`人数超过会议室容量（最多 ${room.capacity} 人）`));
       const attendeesNorm = normalizeAttendees(space, msg.attendees);
       if (!attendeesNorm.ok) return sendTo(ws, serError(attendeesNorm.message));
+      const equipment = normalizeRoomEquipment(msg.equipment).filter((e) => (room.equipment || []).includes(e));
       const seriesId = repeat ? genId('ser', null) : null;
       const slots = expandRecurring(startAt, endAt, repeat, msg.repeatCount);
       const clash = slots.some((slot) => slotClash(space, room.id, slot.startAt, slot.endAt));
@@ -177,7 +220,7 @@ module.exports = function roomsModule(api) {
         return sendTo(ws, { type: 'error', message: '该时段已被预约，可加入候补或另选时间' + (suggest.length ? '；空闲：' + suggest.map((r) => r.name).join('、') : ''), code: 'roomConflict', suggestions: suggest });
       }
       slots.forEach((slot, i) => {
-        const res = { id: genId('res', null), roomId: room.id, ownerAccount: user.account, ownerName: user.nickname, title, startAt: slot.startAt, endAt: slot.endAt, note, participants, attendees: attendeesNorm.attendees, attendedAccounts: [], status: room.requireApproval ? 'pending_approval' : 'pending', repeat: repeat || null, seriesId: seriesId || null, seriesIndex: i, remindAt: Math.max(Date.now(), slot.startAt - ROOM_REMIND_WINDOW_MS), reminded: false, approvalRemindedAt: null };
+        const res = { id: genId('res', null), roomId: room.id, ownerAccount: user.account, ownerName: user.nickname, title, startAt: slot.startAt, endAt: slot.endAt, note, participants, attendees: attendeesNorm.attendees, attendedAccounts: [], equipment, status: room.requireApproval ? 'pending_approval' : 'pending', repeat: repeat || null, seriesId: seriesId || null, seriesIndex: i, remindAt: Math.max(Date.now(), slot.startAt - ROOM_REMIND_WINDOW_MS), reminded: false, approvalRemindedAt: null };
         space.roomReservations.set(res.id, res);
         saveEntity(space.id, 'room_reservation', res.id, res);
       });

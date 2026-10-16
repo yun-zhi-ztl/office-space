@@ -38,8 +38,10 @@
 - `space.members`: 在线成员由其连接携带
 
 ### 会议室（conference rooms）
-- `room`: `{ id, name, capacity, location, description, tags?, requireApproval, minMinutes, maxMinutes }`
-- `room_reservation`: `{ id, roomId, ownerAccount, title, startAt, endAt, note, status, repeat?, seriesId?, seriesIndex?, participants?, attendees?, attendedAccounts?, actualStartAt?, actualEndAt?, rating?, ratingComment?, ratedAt? }`
+- `room`: `{ id, name, capacity, location, description, tags?, equipment?, requireApproval, minMinutes, maxMinutes, maintenanceUntil? }`
+  - `equipment`: 会议室固定设备清单（如投影 / 白板 / 电视 / 电话），最多 10 项、每项 ≤12 字符、去重保序；预约时可勾选实际使用设备，服务端仅保留会议室已有设备并写入预约 `equipment`。
+  - `maintenanceUntil`: 维护截止时间戳（毫秒），维护期间 `roomPublic` 输出 `maintenance=true`，预约会被拒绝；管理员可设置或 `clear` 解除。
+- `room_reservation`: `{ id, roomId, ownerAccount, title, startAt, endAt, note, status, repeat?, seriesId?, seriesIndex?, participants?, attendees?, attendedAccounts?, actualStartAt?, actualEndAt?, rating?, ratingComment?, ratedAt?, equipment? }`
   - 状态：`pending`(已约) / `pending_approval`(待审批) / `active`(进行中) / `completed` / `cancelled` / `expired`
   - 约束：同一房间在 `[startAt, endAt)` 内不得与他人预约重叠（冲突检测）。
   - 时长限制：每间会议室可配置 `minMinutes`（默认 5）与 `maxMinutes`（默认 720），预约时长必须落在区间内；超出返回 `roomDuration` 错误。
@@ -59,6 +61,11 @@
 
 - `room_waitlist`: `{ id, roomId, ownerAccount, ownerName, title, startAt, endAt, note, status, createdAt }`
   - 状态：`waiting`（候补中）/ `promoted`（已晋升，即转为真实预约）/ `cancelled`（已取消）/ `expired`（已过期）。
+
+### 我的日程（my schedule）
+- 聚合当前用户未来 N 天的日程：自己的会议室预约、工位预约、活动（作为组织者或已 RSVP「参加」）、已批准请假，按 `startAt` 升序排列，对外输出 `{ days, items[] }`。
+- `items` 每项含 `{ id, type, module, title, startAt, endAt, room, location, status }`；`type` 为 `meeting` / `desk` / `event` / `leave`，前端「我的日程」按日期分组展示。
+- 查询消息 `getMySchedule`，服务端返回 `mySchedule`，前端按 7 / 14 / 30 天切换。
 
 ### 工具借用（tools）
 - `tool`: `{ id, name, category, total, available, minAvailable, location, description }`
@@ -244,8 +251,8 @@
 | --- | --- | --- |
 | `join` | 进入空间（首步 / 切换） | - |
 | `login` / `logout` | 账号+密码 或 token 恢复 / 退出 | - |
-| `roomCreate` / `roomTag` / `roomApproval` / `roomRemove` | 新增 / 编辑标签 / 开启或关闭预约审批 / 删除会议室 | admin |
-| `roomBook` | 预约会议室（含冲突检测），可带 `repeat`=`daily`/`weekly` + `repeatCount` 创建周期预约；会议室开启审批时预约进入 `pending_approval` | member |
+| `roomCreate` / `roomTag` / `roomEquipment` / `roomMaintenance` / `roomApproval` / `roomRemove` | 新增 / 编辑标签 / 设置设备清单 / 设置或解除维护 / 开启或关闭预约审批 / 删除会议室 | admin |
+| `roomBook` | 预约会议室（含冲突检测），可带 `repeat`=`daily`/`weekly` + `repeatCount` 创建周期预约；可带 `equipment` 勾选实际使用设备（仅保留会议室已有设备）；会议室开启审批时预约进入 `pending_approval` | member |
 | `reservationCancel` | 取消自己的单次预约（`pending` 或 `pending_approval`） | owner |
 | `reservationReschedule` | 改期自己的（或管理员代改）待开始预约 | owner / admin |
 | `reservationCancelSeries` | 取消自己的周期预约全部待开始场次（含 `pending_approval`） | owner |
@@ -301,18 +308,19 @@
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，
 以及 `rooms`（含 `rooms` / `reservations` / `waitlist` / `waitlistTotal`）、`tools`、`materials`（含 `requests` / `templates`）、`repairs`、`visitors`、`stalls`、`attendance`（含 `records` / `stats` / `config`）、`desks`（含 `desks` / `reservations` / `reservationTotal`）、`deskStats`、`ooo`（含 `records` / `stats`）、`leaves`（含 `leaves` / `total` / `stats`）、`meetingNotes`（含 `notes` / `stats`）、`feedback`（含 `records` / `stats`）、`mood`（含 `records` / `stats`）、`events`（含 `events` / `total` / `stats`）、`polls`（含 `polls` / `total` / `stats`）、`knowledge`（含 `knowledge` / `total` / `stats`）、`tasks`（含 `tasks` / `total` / `stats`）、`notifications`（含 `notifications` / `total` / `unreadCount`）、`users`、`leaderboard`（含 `account`、`role`、`display`），
-另有 `roomStats`、`spacePaused`、`roomWaitlistPromoted`、`roomRated`、`roomFavorites`、`repairEscalated`、`repairRated`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendanceCheckedIn`、`attendanceCheckedOut`、`attendanceCalendar`、`eventReminder`、`eventRsvpChanged`、`pollVoted`、`pollClosed`、`knowledgeLiked`、`knowledgeCommented`、`taskCreated`、`taskAssigned`、`taskCompleted`、`taskCommented`、`leaveCreated`、`leaveApproved`、`leaveRejected`、`leaveSla`、`meetingNoteCreated`、`meetingNoteUpdated` 等即时广播，另有 `oooBacked`、`oooReturnSoon`、`moodCheckedIn`；全量广播含 `inventory`（物资库存台账，随 `broadcastAll` 下发）；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows` / `feedback` / `events` / `polls` / `knowledge` / `tasks`）。
+另有 `roomStats`、`spaceTrend`、`mySchedule`、`roomWaitlistPromoted`、`roomRated`、`roomFavorites`、`repairEscalated`、`repairRated`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendanceCheckedIn`、`attendanceCheckedOut`、`attendanceCalendar`、`eventReminder`、`eventRsvpChanged`、`pollVoted`、`pollClosed`、`knowledgeLiked`、`knowledgeCommented`、`taskCreated`、`taskAssigned`、`taskCompleted`、`taskCommented`、`leaveCreated`、`leaveApproved`、`leaveRejected`、`leaveSla`、`meetingNoteCreated`、`meetingNoteUpdated` 等即时广播，另有 `oooBacked`、`oooReturnSoon`、`moodCheckedIn`；全量广播含 `inventory`（物资库存台账，随 `broadcastAll` 下发）；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows` / `feedback` / `events` / `polls` / `knowledge` / `tasks`）。
 
 ## 5. 前端
 
-单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 物资库存 / 报修 / 访客登记 / 考勤打卡 / 工位预约 / 外出登记 / 请假审批 / 会议纪要 / 意见反馈 / 心情打卡 / 活动管理 / 投票 / 知识库 / 待办任务 / 通知中心 / 坑位看板），
+单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 物资库存 / 报修 / 访客登记 / 考勤打卡 / 工位预约 / 外出登记 / 请假审批 / 会议纪要 / 意见反馈 / 心情打卡 / 活动管理 / 投票 / 知识库 / 待办任务 / 通知中心 / 坑位看板 / 我的日程 / 空间趋势），
 个人资料入口位于侧栏底部；桌面与移动端响应式，原生 HTML/CSS/JS，无构建步骤；静态文件由 Express 托管；
 会议室预约支持每天 / 每周周期预约（列表按 `seriesId` 聚合展示并整组取消）；
+会议室卡片展示设备清单徽标与「维护中」标记；管理员可为会议室设置设备清单、维护时段（维护期间不可预约）；预约时可勾选实际使用设备（仅保留会议室已有设备）；
 报修列表展示工单号 `RP-日期-编号` 并可调整高 / 中 / 低优先级；空间暂停时顶部展示暂停横幅并限制对应创建操作；
 物资申领支持管理员维护常用模板、成员选模板快捷提交；物资库存支持管理员维护台账、成员领用/归还与库存告急标记；公告支持 👍 / 🎉 / 😮 / 🤝 / 🔥 回应并可取消；
 物资 / 报修 / 访客 / 会议室预约 / 借用记录列表支持一键导出 CSV（自动拉取全部分页）；
 会议室卡片展示平均评分与维度分（环境 / 设备 / 服务），成员可收藏会议室并在「我的收藏」中过滤；已结束的会议可一键三维评分（各 1-5 星 + 评价）；报修列表展示「已升级」标记；
-工位预约支持热力时间轴与「签到 / 签退」按钮，成员可查看今日工位占用与占用率；外出登记同步在线状态、同事可见外出中与预计返回时间；意见反馈支持匿名 / 实名提交与管理员回复闭环；物资申领支持设置高 / 普通 / 低优先级并一键调整；心情打卡支持 emoji 选择与今日心情分布看板。
+我的日程按日期分组展示未来会议 / 工位 / 活动 / 请假；工位预约支持热力时间轴与「签到 / 签退」按钮，成员可查看今日工位占用与占用率；外出登记同步在线状态、同事可见外出中与预计返回时间；意见反馈支持匿名 / 实名提交与管理员回复闭环；物资申领支持设置高 / 普通 / 低优先级并一键调整；心情打卡支持 emoji 选择与今日心情分布看板。
 
 ## 6. 非目标（本版本暂不实现）
 - 复杂审批流、权限细粒度分级、通知系统、文件上传、消息私聊。
