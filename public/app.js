@@ -135,6 +135,9 @@ function dispatch(m){
     case 'urgeNotification': toast('📣 有人催促你了（'+m.count+' 人）','urge'); break;
     case 'reservation': toast('✔ 预约成功','success'); break;
     case 'cancelSuccess': toast('✔ 已取消','success'); break;
+    case 'reservationApproved': toast('✔ 会议室预约已批准：'+fmtTime(m.startAt),'success'); render(); break;
+    case 'reservationRejected': toast('✘ 会议室预约已被驳回：'+(m.title||''),'warn'); render(); break;
+    case 'roomApprovalRequested': if(S.admin) toast('📋 有会议室预约待审批','info'); break;
     case 'roomWaitlistPromoted': toast('🎉 候补已晋升：预约已自动创建（'+fmtTime(m.startAt)+'）','success'); render(); break;
     case 'reservationRescheduled': toast('✔ 改期成功：'+fmtTime(m.startAt)+' → '+fmtTime(m.endAt),'success'); render(); break;
     case 'roomRated': toast('✔ 会议室评分已提交：'+m.score+' 分','success'); render(); break;
@@ -398,7 +401,7 @@ function remindReturn(id){ wsSend({type:'remindReturn',borrowId:id}); }
 function remindOverdue(){ wsSend({type:'remindOverdue'}); }
 
 /* ============ 会议室 ============ */
-function roomResBadge(st){ return st==='pending'?'<span class="badge warn">待开始</span>':st==='active'?'<span class="badge info">进行中</span>':'<span class="badge grey">'+st+'</span>'; }
+function roomResBadge(st){ return st==='pending'?'<span class="badge warn">待开始</span>':st==='pending_approval'?'<span class="badge warn">待审批</span>':st==='active'?'<span class="badge info">进行中</span>':'<span class="badge grey">'+st+'</span>'; }
 function repeatLabel(repeat, first){
   if(repeat==='daily') return '每天';
   if(repeat==='weekly') return '每周' + '日一二三四五六'[new Date(first.startAt).getDay()];
@@ -422,7 +425,8 @@ function roomReservationListHtml(d, me){
   return roomReservationGroups(list).map(g=>{
     if(g.single){
       const r=g.single; const rm=d.rooms.find(x=>x.id===r.roomId);
-      return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(r.title)} <span class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}</span>${r.actualStartAt&&r.actualEndAt?` <span class="hint">⏱️ 到场 ${Math.max(0,Math.round((r.actualEndAt-r.actualStartAt)/60000))} 分钟</span>`:''}</span><span class="fs">${roomResBadge(r.status)}${(r.ownerAccount===me||S.admin)&&r.status==='pending'?`<button class="btn sm" onclick="openReschedule('${r.id}')">改期</button>${r.ownerAccount===me?`<button class="btn danger sm" onclick="cancelReservation('${r.id}')">取消</button>`:''}`:''}${(r.ownerAccount===me||S.admin)&&r.status==='completed'&&!r.rating?`<button class="btn sm" onclick="openRoomRate('${r.id}')">评分</button>`:''}${r.rating?`<span class="badge ok">已评 ${r.rating}⭐</span>`:''}</span></div>`;
+      const action = r.status==='pending_approval' ? `${S.admin?`<button class="btn green sm" onclick="reservationApprove('${r.id}')">批准</button><button class="btn danger sm" onclick="reservationReject('${r.id}')">驳回</button>`:''}${r.ownerAccount===me?`<button class="btn danger sm" onclick="cancelReservation('${r.id}')">取消</button>`:''}` : ((r.ownerAccount===me||S.admin)&&r.status==='pending') ? `<button class="btn sm" onclick="openReschedule('${r.id}')">改期</button>${r.ownerAccount===me?`<button class="btn danger sm" onclick="cancelReservation('${r.id}')">取消</button>`:''}` : '';
+      return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(r.title)} <span class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}</span>${r.actualStartAt&&r.actualEndAt?` <span class="hint">⏱️ 到场 ${Math.max(0,Math.round((r.actualEndAt-r.actualStartAt)/60000))} 分钟</span>`:''}</span><span class="fs">${roomResBadge(r.status)}${action}${(r.ownerAccount===me||S.admin)&&r.status==='completed'&&!r.rating?`<button class="btn sm" onclick="openRoomRate('${r.id}')">评分</button>`:''}${r.rating?`<span class="badge ok">已评 ${r.rating}⭐</span>`:''}</span></div>`;
     }
     const first=g.items[0]; const rm=d.rooms.find(x=>x.id===first.roomId);
     const pat=repeatLabel(g.repeat, first);
@@ -451,10 +455,10 @@ function roomCard(r){
   const fav = (S.favorites||[]).includes(r.id);
   const rate = r.rating ? `<div class="meta">评分 ${'⭐'.repeat(Math.round(r.rating.avg))}${'☆'.repeat(5-Math.round(r.rating.avg))} ${r.rating.avg} (${r.rating.count})${r.rating.dimensions?` · 环境 ${r.rating.dimensions.environment.avg} 设备 ${r.rating.dimensions.equipment.avg} 服务 ${r.rating.dimensions.service.avg}`:''}</div>` : '';
   return `<div class="card"><h3>${esc(r.name)} <button class="btn sm ${fav?'pri':''}" title="收藏" onclick="toggleFavorite('${r.id}')">${fav?'⭐':'☆'}</button> ${S.admin?`<span></span><button class="btn danger sm" onclick="removeRoom('${r.id}')">删</button>`:''}</h3>
-    <div class="meta">容量 ${r.capacity} 人${r.location?' · '+esc(r.location):''}${r.description?'<div>'+esc(r.description)+'</div>':''}${r.tags&&r.tags.length?'<div style="margin-top:4px">'+r.tags.map(t=>`<span class="badge grey">${esc(t)}</span>`).join('')+'</div>':''}</div>
+    <div class="meta">容量 ${r.capacity} 人${r.location?' · '+esc(r.location):''}${r.description?'<div>'+esc(r.description)+'</div>':''}${r.tags&&r.tags.length?'<div style="margin-top:4px">'+r.tags.map(t=>`<span class="badge grey">${esc(t)}</span>`).join('')+'</div>':''}${r.requireApproval?'<div style="margin-top:4px"><span class="badge warn">需审批</span></div>':''}</div>
     ${rate}
     <div class="meta">${upcoming.length?upcoming.map(u=>`· ${fmtTime(u.startAt)} → ${fmtTime(u.endAt)} <b>${esc(u.title)}</b>${u.ownerAccount===me?'（你）':''}`).join('<br>'):'今日暂无预约'}</div>
-    <div class="foot"><button class="btn pri sm" onclick="openBook('${r.id}')">预约</button>${S.admin?`<button class="btn sm" onclick="openRoomTag('${r.id}')">标签</button>`:''}</div></div>`;
+    <div class="foot"><button class="btn pri sm" onclick="openBook('${r.id}')">预约</button>${S.admin?`<button class="btn sm" onclick="openRoomTag('${r.id}')">标签</button><button class="btn ${r.requireApproval?'warn':''} sm" onclick="roomApproval('${r.id}',${!r.requireApproval})">${r.requireApproval?'审批关闭':'审批开启'}</button>`:''}</div></div>`;
 }
 function openRoomTag(id){
   const r=(S.DB.rooms||[]).find(x=>x.id===id); if(!r) return;
@@ -501,6 +505,9 @@ function submitBook(roomId){
 }
 function cancelReservation(id){ wsSend({type:'reservationCancel',reservationId:id}); }
 function cancelSeries(seriesId){ if(confirm('确认取消该周期预约的全部待开始场次？')) wsSend({type:'reservationCancelSeries',seriesId}); }
+function roomApproval(id, v){ wsSend({type:'roomApproval',roomId:id,requireApproval:!!v}); }
+function reservationApprove(id){ wsSend({type:'reservationApprove',reservationId:id}); }
+function reservationReject(id){ wsSend({type:'reservationReject',reservationId:id}); }
 /* 会议室改期：待开始的预约可调整时段（冲突自动检测） */
 function openReschedule(id){
   const r=(S.DB.reservations||[]).find(x=>x.id===id); if(!r) return;

@@ -1,8 +1,9 @@
 'use strict';
-// 会议室模块：roomCreate / roomRemove / roomBook / roomWaitlist / roomWaitlistCancel
-//               / reservationCancel / reservationCancelSeries / roomStart / roomEnd
+// 会议室模块：roomCreate / roomTag / roomApproval / roomRemove / roomBook / roomWaitlist
+//               / roomWaitlistCancel / reservationCancel / reservationCancelSeries / reservationApprove / reservationReject
+//               / roomStart / roomEnd / roomRate / roomFavorite
 module.exports = function roomsModule(api) {
-  const { roomReservationsPublic, roomPublic, roomWaitlistPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly, getUserByAccount, sendToUser, sendToAccount, saveProfile, broadcastLeaderboard, expandRecurring, roomStatsBroadcast, checkAchievements, ROOM_REMIND_WINDOW_MS } = api;
+  const { roomReservationsPublic, roomPublic, roomWaitlistPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly, getUserByAccount, sendToUser, sendToAccount, saveProfile, broadcastLeaderboard, expandRecurring, roomStatsBroadcast, checkAchievements, pushNotification, ROOM_REMIND_WINDOW_MS } = api;
 
   function roomsBroadcast(space) {
     const reservations = roomReservationsPublic(space);
@@ -17,9 +18,9 @@ module.exports = function roomsModule(api) {
     return arr.map((t) => String(t == null ? '' : t).trim().slice(0, 12)).filter(Boolean).slice(0, 8);
   }
 
-  // 时段冲突检测：与现有 pending/active 预约是否重叠
+  // 时段冲突检测：与现有 pending / pending_approval / active 预约是否重叠
   function slotClash(space, roomId, startAt, endAt) {
-    return [...space.roomReservations.values()].some((r) => r.roomId === roomId && (r.status === 'pending' || r.status === 'active') && startAt < r.endAt && endAt > r.startAt);
+    return [...space.roomReservations.values()].some((r) => r.roomId === roomId && (r.status === 'pending' || r.status === 'pending_approval' || r.status === 'active') && startAt < r.endAt && endAt > r.startAt);
   }
 
   // 晋升候补第一位：找到与释放时段对应的最早候补条目，若其时段已无冲突则转为真实预约并通知
@@ -62,12 +63,19 @@ module.exports = function roomsModule(api) {
       room.tags = tags;
       saveEntity(space.id, 'room', room.id, room);
       roomsBroadcast(space);
+    } else if (msg.type === 'roomApproval') {
+      if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可设置会议室审批'));
+      const room = space.rooms.find((r) => r.id === msg.roomId);
+      if (!room) return sendTo(ws, serError('会议室不存在'));
+      room.requireApproval = !!msg.requireApproval;
+      saveEntity(space.id, 'room', room.id, room);
+      roomsBroadcast(space);
     } else if (msg.type === 'roomRemove') {
       if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可删除会议室'));
       const idx = space.rooms.findIndex((r) => r.id === msg.roomId);
       if (idx < 0) return sendTo(ws, serError('会议室不存在'));
       const room = space.rooms[idx];
-      const hasActive = [...space.roomReservations.values()].some((r) => r.roomId === room.id && (r.status === 'pending' || r.status === 'active'));
+      const hasActive = [...space.roomReservations.values()].some((r) => r.roomId === room.id && (r.status === 'pending' || r.status === 'pending_approval' || r.status === 'active'));
       if (hasActive) return sendTo(ws, serError('该会议室仍有进行/待开始的预约，无法删除'));
       space.rooms.splice(idx, 1);
       for (const r of [...space.roomReservations.values()]) if (r.roomId === room.id) { space.roomReservations.delete(r.id); deleteEntity(space.id, 'room_reservation', r.id); }
@@ -97,17 +105,18 @@ module.exports = function roomsModule(api) {
         return sendTo(ws, { type: 'error', message: '该时段已被预约，可加入候补或另选时间' + (suggest.length ? '；空闲：' + suggest.map((r) => r.name).join('、') : ''), code: 'roomConflict', suggestions: suggest });
       }
       slots.forEach((slot, i) => {
-        const res = { id: genId('res', null), roomId: room.id, ownerAccount: user.account, ownerName: user.nickname, title, startAt: slot.startAt, endAt: slot.endAt, note, participants, status: 'pending', repeat: repeat || null, seriesId: seriesId || null, seriesIndex: i, remindAt: Math.max(Date.now(), slot.startAt - ROOM_REMIND_WINDOW_MS), reminded: false };
+        const res = { id: genId('res', null), roomId: room.id, ownerAccount: user.account, ownerName: user.nickname, title, startAt: slot.startAt, endAt: slot.endAt, note, participants, status: room.requireApproval ? 'pending_approval' : 'pending', repeat: repeat || null, seriesId: seriesId || null, seriesIndex: i, remindAt: Math.max(Date.now(), slot.startAt - ROOM_REMIND_WINDOW_MS), reminded: false };
         space.roomReservations.set(res.id, res);
         saveEntity(space.id, 'room_reservation', res.id, res);
       });
       recordWeekly(user, 'meetings');
       roomsBroadcast(space);
+      if (room.requireApproval) pushNotification(space, { type: 'roomApprovalRequested', level: 'info', title: '会议室预约待审批', body: room.name + ' · ' + title });
     } else if (msg.type === 'reservationCancel') {
       const res = space.roomReservations.get(msg.reservationId);
       if (!res) return sendTo(ws, serError('预约不存在'));
       if (res.ownerAccount !== user.account) return sendTo(ws, serError('只能取消自己的预约'));
-      if (res.status !== 'pending') return sendTo(ws, serError('该预约已不能取消'));
+      if (res.status !== 'pending' && res.status !== 'pending_approval') return sendTo(ws, serError('该预约已不能取消'));
       res.status = 'cancelled';
       saveEntity(space.id, 'room_reservation', res.id, res);
       promoteWaitlist(space);
@@ -116,10 +125,28 @@ module.exports = function roomsModule(api) {
       const series = [...space.roomReservations.values()].filter((r) => r.seriesId === msg.seriesId);
       if (!series.length) return sendTo(ws, serError('该周期预约不存在'));
       if (series[0].ownerAccount !== user.account) return sendTo(ws, serError('只能取消自己的周期预约'));
-      const pending = series.filter((r) => r.status === 'pending');
+      const pending = series.filter((r) => r.status === 'pending' || r.status === 'pending_approval');
       if (!pending.length) return sendTo(ws, serError('该周期预约已没有待开始的场次'));
       for (const r of pending) { r.status = 'cancelled'; saveEntity(space.id, 'room_reservation', r.id, r); promoteWaitlist(space); }
       roomsBroadcast(space);
+    } else if (msg.type === 'reservationApprove') {
+      if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可审批会议室预约'));
+      const res = space.roomReservations.get(msg.reservationId);
+      if (!res) return sendTo(ws, serError('预约不存在'));
+      if (res.status !== 'pending_approval') return sendTo(ws, serError('仅待审批预约可批准'));
+      res.status = 'pending';
+      saveEntity(space.id, 'room_reservation', res.id, res);
+      roomsBroadcast(space);
+      sendToAccount(res.ownerAccount, { type: 'reservationApproved', reservationId: res.id, roomId: res.roomId, title: res.title, startAt: res.startAt, endAt: res.endAt });
+    } else if (msg.type === 'reservationReject') {
+      if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可审批会议室预约'));
+      const res = space.roomReservations.get(msg.reservationId);
+      if (!res) return sendTo(ws, serError('预约不存在'));
+      if (res.status !== 'pending_approval') return sendTo(ws, serError('仅待审批预约可驳回'));
+      res.status = 'cancelled';
+      saveEntity(space.id, 'room_reservation', res.id, res);
+      roomsBroadcast(space);
+      sendToAccount(res.ownerAccount, { type: 'reservationRejected', reservationId: res.id, roomId: res.roomId, title: res.title });
     } else if (msg.type === 'reservationReschedule') {
       const res = space.roomReservations.get(msg.reservationId);
       if (!res) return sendTo(ws, serError('预约不存在'));

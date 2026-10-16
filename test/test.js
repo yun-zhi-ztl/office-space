@@ -1690,6 +1690,64 @@ async function runTests() {
     assert(rooms1 && rooms1.rooms.find((x) => x.id === roomId).tags.length === 3, '管理员改标签成功');
     wA.close(); wB.close();
   }
+
+  // ========== 测试41: 会议室预约审批流 ==========
+  console.log('\n📋 测试41: 会议室预约审批流');
+  {
+    const spP = (await httpJson('POST', '/api/spaces', { name: '审批办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aP = 'apv_' + runKey, bP = 'apvm_' + runKey;
+    await reg(aP, 'pw', '审批管理员'); await reg(bP, 'pw', '审批成员');
+    const wA = await createWSClient(); await loginTo(wA, spP.id, aP, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spP.id, bP, 'pw');
+    const findRes = (msg, id) => (msg.reservations || []).find((r) => r.id === id);
+    const findRoom = (msg, id) => (msg.rooms || []).find((r) => r.id === id);
+    const base = Date.now();
+    // 管理员创建会议室
+    await sendMsg(wA, { type: 'roomCreate', name: '审批会议室', capacity: 6 });
+    const rooms0 = await waitFor(wA, 'rooms', (r) => r.rooms && r.rooms.length === 1, 3000);
+    const roomId = rooms0.rooms[0].id;
+    assert(rooms0 && rooms0.rooms[0].requireApproval === false, '默认会议室无需审批');
+    // 成员预约 → pending
+    await sendMsg(wB, { type: 'roomBook', roomId, startAt: base + 10 * 60000, endAt: base + 40 * 60000, title: '普通会' });
+    const rNormal = await waitFor(wB, 'rooms', (r) => r.reservations && r.reservations.some((x) => x.title === '普通会'), 3000);
+    assert(rNormal && rNormal.reservations[0].status === 'pending', '未开启审批时预约为 pending');
+    await sendMsg(wB, { type: 'reservationCancel', reservationId: rNormal.reservations[0].id });
+    // 管理员开启审批
+    await sendMsg(wA, { type: 'roomApproval', roomId, requireApproval: true });
+    const roomsApproval = await waitFor(wA, 'rooms', (r) => r.rooms && r.rooms.some((x) => x.id === roomId && x.requireApproval === true), 3000);
+    assert(roomsApproval && findRoom(roomsApproval, roomId).requireApproval === true, '管理员开启审批成功');
+    // 成员预约 → pending_approval
+    await sendMsg(wB, { type: 'roomBook', roomId, startAt: base + 50 * 60000, endAt: base + 80 * 60000, title: '需审批会' });
+    const rNeed = await waitFor(wB, 'rooms', (r) => r.reservations && r.reservations.some((x) => x.title === '需审批会' && x.status === 'pending_approval'), 3000);
+    assert(rNeed, '开启审批后预约进入 pending_approval');
+    const resNeed = findRes(rNeed, rNeed.reservations.find((x) => x.title === '需审批会').id);
+    // 成员不能审批
+    await sendMsg(wB, { type: 'reservationApprove', reservationId: resNeed.id });
+    const errApprove = mk(wB, 'error').pop();
+    assert(errApprove && errApprove.message.includes('仅管理员'), '成员审批被拒');
+    // 审批通知已产生
+    const notif = await waitFor(wB, 'notifications', (n) => n.notifications && n.notifications.some((x) => x.type === 'roomApprovalRequested'), 3000);
+    assert(notif, '待审批预约产生通知');
+    // 管理员批准 → pending
+    await sendMsg(wA, { type: 'reservationApprove', reservationId: resNeed.id });
+    const rApproved = await waitFor(wA, 'rooms', (r) => r.reservations && r.reservations.some((x) => x.id === resNeed.id && x.status === 'pending'), 3000);
+    assert(rApproved, '管理员批准后状态变为 pending');
+    // 取消已批准的预约，再预约一次用于测试驳回
+    await sendMsg(wB, { type: 'reservationCancel', reservationId: resNeed.id });
+    await sendMsg(wB, { type: 'roomBook', roomId, startAt: base + 90 * 60000, endAt: base + 120 * 60000, title: '再审批会' });
+    const rAgain = await waitFor(wB, 'rooms', (r) => r.reservations && r.reservations.some((x) => x.title === '再审批会' && x.status === 'pending_approval'), 3000);
+    assert(rAgain, '再次预约进入 pending_approval');
+    const resAgain = findRes(rAgain, rAgain.reservations.find((x) => x.title === '再审批会').id);
+    // 管理员驳回 → cancelled
+    await sendMsg(wA, { type: 'reservationReject', reservationId: resAgain.id });
+    const rRejected = await waitFor(wA, 'rooms', (r) => r.reservations && r.reservations.some((x) => x.id === resAgain.id && x.status === 'cancelled'), 3000);
+    assert(rRejected, '管理员驳回后状态变为 cancelled');
+    // 管理员关闭审批
+    await sendMsg(wA, { type: 'roomApproval', roomId, requireApproval: false });
+    const roomsOff = await waitFor(wA, 'rooms', (r) => r.rooms && r.rooms.some((x) => x.id === roomId && x.requireApproval === false), 3000);
+    assert(roomsOff && findRoom(roomsOff, roomId).requireApproval === false, '管理员关闭审批成功');
+    wA.close(); wB.close();
+  }
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

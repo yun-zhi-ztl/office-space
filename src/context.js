@@ -518,7 +518,7 @@ function createContext() {
     const rooms = space.rooms.map((r) => {
       const res = [...space.roomReservations.values()].filter((x) => x.roomId === r.id && x.status !== 'cancelled' && x.status !== 'expired');
       const today = res.filter((x) => x.startAt >= dStart && x.startAt < dEnd);
-      const upcoming = res.filter((x) => x.startAt >= nowMs && x.status === 'pending');
+      const upcoming = res.filter((x) => x.startAt >= nowMs && (x.status === 'pending' || x.status === 'pending_approval'));
       const todayMinutes = today.reduce((s, x) => s + Math.max(0, Math.round((Math.min(x.endAt, dEnd) - x.startAt) / 60000)), 0);
       const actualMinutes = today.reduce((s, x) => {
         if (!x.actualStartAt || !x.actualEndAt) return s;
@@ -618,7 +618,7 @@ function createContext() {
     }
     return { avg, count, dimensions, ratings: list.slice(-8).reverse() };
   }
-  function roomPublic(space, r) { return { id: r.id, name: r.name, capacity: r.capacity, location: r.location, description: r.description, tags: r.tags || [], rating: roomRatingSummary(space, r.id) }; }
+  function roomPublic(space, r) { return { id: r.id, name: r.name, capacity: r.capacity, location: r.location, description: r.description, tags: r.tags || [], requireApproval: !!r.requireApproval, rating: roomRatingSummary(space, r.id) }; }
   function reservationPublic(res, info) {
     const who = info.get(res.ownerAccount);
     return { id: res.id, roomId: res.roomId, ownerAccount: res.ownerAccount, ownerName: who ? who.display : res.ownerName, title: res.title, startAt: res.startAt, endAt: res.endAt, note: res.note, status: res.status, repeat: res.repeat || null, seriesId: res.seriesId || null, remindAt: res.remindAt || null, participants: res.participants || null, actualStartAt: res.actualStartAt || null, actualEndAt: res.actualEndAt || null, rating: res.rating || null, ratedAt: res.ratedAt || null, ratingComment: res.ratingComment || '', ratings: res.ratings || null };
