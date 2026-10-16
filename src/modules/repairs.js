@@ -1,12 +1,12 @@
 'use strict';
 // 报修模块：repairCreate / repairAssign / repairUpdate / repairComment
 module.exports = function repairsModule(api) {
-  const { spaceUserInfo, repairsPublic, broadcast, LIST_PAGE, REPAIR_CATEGORIES, REPAIR_PRIORITIES, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToAccount, sendToUser, checkAchievements, isAdmin, findDuplicateRepair, pushNotification } = api;
+  const { spaceUserInfo, repairsPublic, repairsStats, broadcast, LIST_PAGE, REPAIR_CATEGORIES, REPAIR_PRIORITIES, sendTo, serError, genId, saveEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToAccount, sendToUser, checkAchievements, isAdmin, findDuplicateRepair, pushNotification } = api;
 
   function repairsBroadcast(space) {
     const info = spaceUserInfo(space.id);
     const all = repairsPublic(space, info);
-    broadcast(space.id, 'repairs', { repairs: all.slice(0, LIST_PAGE), total: all.length });
+    broadcast(space.id, 'repairs', { repairs: all.slice(0, LIST_PAGE), total: all.length, stats: repairsStats(space) });
   }
 
   function handleRepairs(ws, user, space, msg) {

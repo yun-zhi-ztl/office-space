@@ -769,6 +769,44 @@ function createContext() {
       comments: (r.comments || []).map((c) => ({ id: c.id, account: c.account, name: c.name, text: c.text || '', createdAt: c.createdAt || 0 })).reverse().slice(0, 20),
     })).sort((a, b) => (b.createdAt - a.createdAt));
   }
+  // 报修满意度统计：聚合已解决报修的满意度、低分工单与高频故障位置，形成服务闭环
+  function repairsStats(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const all = [...space.repairs.values()];
+    const resolved = all.filter((r) => r.status === 'resolved');
+    const open = all.filter((r) => r.status === 'reported' || r.status === 'in_progress');
+    const rated = resolved.filter((r) => r.satisfaction);
+    const sum = rated.reduce((s, r) => s + (r.satisfaction || 0), 0);
+    const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    for (const r of rated) distribution[r.satisfaction] = (distribution[r.satisfaction] || 0) + 1;
+    // 平均处理时长（已解决且带 handledAt 的报修）
+    const handled = resolved.filter((r) => r.handledAt && r.createdAt);
+    const avgHandled = handled.length ? Math.round(handled.reduce((s, r) => s + Math.max(0, r.handledAt - r.createdAt), 0) / handled.length / 60000) : 0;
+    // 高频故障位置（已解决报修出现 ≥2 次）
+    const byLoc = new Map();
+    for (const r of resolved) {
+      const loc = r.location || '未填位置';
+      byLoc.set(loc, (byLoc.get(loc) || 0) + 1);
+    }
+    const hotspots = [...byLoc.entries()].filter((e) => e[1] >= 2).sort((a, b) => b[1] - a[1]).slice(0, 3).map((e) => ({ location: e[0], count: e[1] }));
+    // 故障类别分布
+    const byCat = new Map();
+    for (const r of resolved) byCat.set(r.category, (byCat.get(r.category) || 0) + 1);
+    const byCategory = [...byCat.entries()].sort((a, b) => b[1] - a[1]).map((e) => ({ category: e[0], count: e[1] }));
+    return {
+      total: all.length,
+      resolved: resolved.length,
+      open: open.length,
+      rated: rated.length,
+      ratedPct: resolved.length ? Math.round((rated.length / resolved.length) * 100) : 0,
+      avgSatisfaction: rated.length ? +(sum / rated.length).toFixed(1) : 0,
+      lowSatisfaction: rated.filter((r) => r.satisfaction <= 2).length,
+      distribution,
+      avgHandledMinutes: avgHandled,
+      hotspots,
+      byCategory,
+    };
+  }
   function borrowsPublic(sp, info) {
     return [...sp.borrows.values()].map((b) => {
       const tool = sp.tools.find((t) => t.id === b.toolId);
@@ -1353,7 +1391,7 @@ function createContext() {
     broadcast(sp.id, 'tools', { tools: toolsPublic(sp, info) });
     broadcast(sp.id, 'inventory', { items: inventoryPublic(sp, info), issues: inventoryIssuesPublic(sp, info) });
     broadcast(sp.id, 'materials', { requests: materials.slice(0, LIST_PAGE), total: materials.length });
-    broadcast(sp.id, 'repairs', { repairs: repairs.slice(0, LIST_PAGE), total: repairs.length });
+    broadcast(sp.id, 'repairs', { repairs: repairs.slice(0, LIST_PAGE), total: repairs.length, stats: repairsStats(sp) });
     broadcast(sp.id, 'visitors', { visitors: visitors.slice(0, LIST_PAGE), total: visitors.length });
     broadcast(sp.id, 'stalls', { squat_count: sp.squatCount, urinal_count: sp.urinalCount, stalls: stallsPublic(sp, info) });
     broadcast(sp.id, 'notices', { notices: sp.notices });
@@ -1610,7 +1648,7 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueRoomApprovalReminders, dueLeaveSlaReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
     // 广播
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, eventsBroadcast, pollsBroadcast, knowledgeBroadcast, tasksBroadcast, leavesBroadcast, meetingNotesBroadcast, notificationsBroadcast, noticesBroadcast, pushNotification, pushNotice, visitorsBroadcast,
     // 坑位辅助

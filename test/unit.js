@@ -299,6 +299,24 @@ assertEq(rpS.satisfaction, 4, 'repairsPublic 暴露 satisfaction');
 assertEq(rpS.satisfactionComment, '修得很快', 'repairsPublic 暴露 satisfactionComment');
 assert(rpS.satisfiedAt > 0, 'repairsPublic 暴露 satisfiedAt');
 
+// ---------- 报修满意度统计 ----------
+console.log('\n📋 16b. 报修满意度统计');
+const spSt = api.createSpace('s8b', '报修统计空间', 1, 0);
+const stBase = Date.now();
+spSt.repairs.set('st1', { id: 'st1', category: '灯光', location: '走廊', status: 'resolved', reporterAccount: 'alice', createdAt: stBase, updatedAt: stBase, handledAt: stBase + 600000, satisfaction: 5 });
+spSt.repairs.set('st2', { id: 'st2', category: '灯光', location: '走廊', status: 'resolved', reporterAccount: 'bob', createdAt: stBase + 1, updatedAt: stBase + 1, handledAt: stBase + 1 + 1800000, satisfaction: 2 });
+spSt.repairs.set('st3', { id: 'st3', category: '空调', location: '会议室', status: 'resolved', reporterAccount: 'carol', createdAt: stBase + 2, updatedAt: stBase + 2, handledAt: stBase + 2 + 1200000, satisfaction: 4 });
+spSt.repairs.set('st4', { id: 'st4', category: '厕所', location: '厕所', status: 'reported', reporterAccount: 'dave', createdAt: stBase + 3, updatedAt: stBase + 3 });
+const rs = api.repairsStats(spSt);
+assertEq(rs.total, 4, 'repairsStats 统计总数');
+assertEq(rs.resolved, 3, 'repairsStats 统计已解决数');
+assertEq(rs.open, 1, 'repairsStats 统计待处理数');
+assertEq(rs.rated, 3, 'repairsStats 统计已评价数');
+assertEq(rs.avgSatisfaction, +((5 + 2 + 4) / 3).toFixed(1), 'repairsStats 计算平均满意度');
+assertEq(rs.lowSatisfaction, 1, 'repairsStats 统计低分工单（≤2星）');
+assertEq(rs.hotspots, [{ location: '走廊', count: 2 }], 'repairsStats 识别高频故障位置');
+assertEq(rs.avgHandledMinutes, 20, 'repairsStats 计算平均处理时长');
+
 // ---------- 借用记录序列化 ----------
 console.log('\n📋 17. 借用记录序列化');
 const spBw = api.createSpace('s9', '借用空间', 1, 0);

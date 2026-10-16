@@ -75,7 +75,7 @@ function dispatch(m){
     case 'tasks': S.DB.tasks=m.tasks||[]; S.taskTotal=m.total||0; S.taskStats=m.stats||{}; break;
     case 'notifications': S.DB.notifications=m.notifications||[]; S.notificationTotal=m.total||0; S.notificationUnread=m.unreadCount||0; renderSidebar(); break;
     case 'materials': S.DB.requests=m.requests; S.DB.materialTemplates=m.templates||[]; S.DB.matTotal=m.total||0; S.DB.matOffset=S.DB.requests.length; break;
-    case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; break;
+    case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; S.DB.repairStats=m.stats||null; break;
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
     case 'page': handlePage(m); break;
     case 'stalls': S.DB.stalls=m.stalls; break;
@@ -764,6 +764,7 @@ function renderRepairs(){
   const pLabel=p=>p==='high'?'高':p==='normal'?'中':'低';
   $('#main').innerHTML = `<div class="topbar"><div><h1>报修</h1><div class="sub">上报厕所、灯光、空调等设施故障并及时跟进</div></div>
     <button class="btn pri" onclick="openRepair()">＋ 我要报修</button><button class="btn" onclick="exportModuleCsv('repairs',REP_COLS)">导出 CSV</button></div>
+    ${repairStatsBarHtml()}
     <div class="list">${d.repairs.map(r=>{ const canAssign=r.reporterAccount===me||S.admin; const handled=r.handledAt?` · 处理 ${Math.max(0,Math.round((r.handledAt-r.createdAt)/60000))} 分钟`:''; return `<div class="row"><span><span class="who">${esc(r.category)} · ${esc(r.location)}</span> ${r.code?`<span class="badge ${r.status==='resolved'?'ok':r.status==='cancelled'?'grey':'info'}">${esc(r.code)}</span>`:''} <span class="when">${esc(r.reporterName)} ${fmtTime(r.createdAt)}${r.handlerName?` · 负责人 ${esc(r.handlerName)}`:''}${handled}</span><div class="desc">${esc(r.description)}</div>${repairCommentListHtml(r)}</span>
       <span class="fs">
       <span class="badge ${badge(r.status)}">${label(r.status)}</span>
@@ -780,6 +781,20 @@ function renderRepairs(){
       </span></div>`; }).join('')||'<div class="empty">暂无报修记录</div>'}
     </div>
     ${(S.DB.repOffset||0)<(S.DB.repTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('repairs')">加载更多（${S.DB.repTotal-(S.DB.repOffset||0)}）</button></div>`:''}`;
+}
+// 报修满意度统计条：平均满意度、低分工单、高频故障位置
+function repairStatsBarHtml(){
+  const st = S.DB.repairStats || null;
+  if (!st) return '';
+  const hot = (st.hotspots||[]).map(h => `${esc(h.location)}×${h.count}`).join('、');
+  return `<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:10px 0;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--panel)">
+    <span class="badge info">共 ${st.total}</span>
+    <span class="badge ${st.open?'warn':'ok'}">待处理 ${st.open}</span>
+    <span class="badge ok">已解决 ${st.resolved}</span>
+    <span class="badge ${st.avgSatisfaction>=4?'ok':st.avgSatisfaction>=3?'info':'bad'}">平均满意度 ${st.avgSatisfaction}⭐（${st.rated}/${st.resolved} 已评 ${st.ratedPct}%）</span>
+    ${st.lowSatisfaction?`<span class="badge bad">低分工单 ${st.lowSatisfaction}</span>`:''}
+    ${hot?`<span class="badge bad">高频故障 ${hot}</span>`:''}
+  </div>`;
 }
 // 报修工单跟进评论：展示最近评论（倒序）
 function repairCommentListHtml(r) {

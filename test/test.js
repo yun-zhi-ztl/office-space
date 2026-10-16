@@ -707,6 +707,25 @@ async function runTests() {
   const err6f6 = mk(w2, 'error');
   assert(err6f6.length > 0 && err6f6[err6f6.length - 1].message.includes('1-5'), '满意度 6 分被拒');
 
+  // ========== 测试6g: 报修满意度统计 ==========
+  console.log('\n📋 测试6g: 报修满意度统计');
+  // 同位置两次已解决报修（触发高频故障），加一条低分工单
+  await sendMsg(w2, { type: 'repairCreate', category: '灯光', location: '2F 统计热点', description: '热点1' });
+  let rep6g = last(w2, 'repairs');
+  const rep6g1 = rep6g.repairs.find(r => r.description === '热点1').id;
+  await sendMsg(w1, { type: 'repairUpdate', repairId: rep6g1, status: 'resolved' });
+  await sendMsg(w2, { type: 'repairCreate', category: '灯光', location: '2F 统计热点', description: '热点2' });
+  rep6g = last(w2, 'repairs');
+  const rep6g2 = rep6g.repairs.find(r => r.description === '热点2').id;
+  await sendMsg(w1, { type: 'repairUpdate', repairId: rep6g2, status: 'resolved' });
+  await sendMsg(w2, { type: 'repairRate', repairId: rep6g1, satisfaction: 5 });
+  await sendMsg(w2, { type: 'repairRate', repairId: rep6g2, satisfaction: 2 });
+  const rep6gList = last(w2, 'repairs');
+  assert(rep6gList && rep6gList.stats && typeof rep6gList.stats.avgSatisfaction === 'number', 'repairs 广播携带满意度统计');
+  assert(rep6gList.stats.rated >= 2, 'repairs 统计已评价数');
+  assert(rep6gList.stats.lowSatisfaction >= 1, 'repairs 统计低分工单（≤2星）');
+  assert(rep6gList.stats.hotspots && rep6gList.stats.hotspots.some(h => h.location === '2F 统计热点' && h.count >= 2), 'repairs 统计识别高频故障位置');
+
   // ========== 测试5c: 物资常用模板 ==========
   console.log('\n📋 测试5c: 物资常用模板（管理员维护 + 快捷申领）');
   await sendMsg(w1, { type: 'materialTemplateCreate', name: '5号电池', defaultQty: 4, defaultUnit: '节', defaultReason: '遥控器备用' });
