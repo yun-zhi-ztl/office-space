@@ -3,6 +3,7 @@
 // 覆盖 ID 生成、周统计、坑位段位、成就解锁、口令哈希等核心逻辑。
 const { createContext } = require('../src/context');
 const roomsModule = require('../src/modules/rooms');
+const assetsModule = require('../src/modules/assets');
 const extrasModule = require('../src/modules/extras');
 
 let passed = 0;
@@ -300,6 +301,54 @@ const eqRes = [...eqSpace.roomReservations.values()].pop();
 assert(eqRes, '解除维护后可预约');
 assertEq(eqRes.equipment, ['投影', '白板'], '预约设备仅保留会议室已有设备');
 
+// ---------- 资产台账 ----------
+console.log('\n📋 12d. 资产台账');
+const assetUser = { id: 'a1', account: 'admin', nickname: '管理员', stats: {}, achievements: [] };
+const memberUser = { id: 'a2', account: 'member', nickname: '成员', stats: {}, achievements: [] };
+const assetSent = [];
+let assetSeq = 0;
+const assetApi = {
+  ASSET_CATEGORIES: ['固定资产', '办公设备', '家具', '电器', '其它'],
+  ASSET_STATUSES: ['in_use', 'idle', 'maintenance', 'scrapped'],
+  ASSET_CONDITIONS: ['intact', 'damaged', 'missing'],
+  spaceUserInfo: () => new Map(),
+  assetsPublic: (space) => [...space.assets.values()],
+  assetsStats: (space) => { const all = [...space.assets.values()]; return { total: all.length, byStatus: {}, damaged: all.filter((a) => a.condition === 'damaged').length, missing: all.filter((a) => a.condition === 'missing').length }; },
+  broadcast: () => {},
+  LIST_PAGE: 30,
+  isAdmin: (space, account) => account === 'admin',
+  sendTo: (ws, obj) => { assetSent.push(obj); },
+  serError: (m) => ({ type: 'error', message: m }),
+  genId: (prefix) => (prefix === 'ast' ? `ast${assetSeq++}` : 'x'),
+  saveEntity: () => {},
+  deleteEntity: () => {},
+  pushNotification: () => {},
+  sendToAccount: () => {},
+  checkAchievements: () => {},
+  saveProfile: () => {},
+  recordWeekly: () => {},
+  broadcastLeaderboard: () => {},
+};
+const assetModule = assetsModule(assetApi);
+const assetSpace = { id: 's12d', assets: new Map() };
+assetModule.handleAssets({}, assetUser, assetSpace, { type: 'assetCreate', name: '投影仪', category: '办公设备', location: '3F', owner: 'alice', status: 'in_use' });
+const created = [...assetSpace.assets.values()][0];
+assert(created, 'assetCreate 创建资产');
+assertEq(created.name, '投影仪', '资产名称已保存');
+assertEq(created.condition, 'intact', '新资产默认完好');
+assetModule.handleAssets({}, memberUser, assetSpace, { type: 'assetCreate', name: '越权资产' });
+assert(assetSent.some((m) => m.message && m.message.includes('仅管理员')), 'member 创建资产被拒(RBAC)');
+assetModule.handleAssets({}, memberUser, assetSpace, { type: 'assetCheck', id: created.id, condition: 'damaged', note: '屏幕花屏' });
+assertEq(created.condition, 'damaged', 'assetCheck 标记资产损坏');
+assertEq(created.status, 'maintenance', '损坏资产自动进入维护中');
+assertEq(created.checks.length, 1, '资产状态变更记录一次检查');
+assertEq(created.checks[0].account, 'member', '资产检查记录上报人');
+assetModule.handleAssets({}, assetUser, assetSpace, { type: 'assetUpdate', id: created.id, name: '投影仪(新)', status: 'idle' });
+assertEq(created.name, '投影仪(新)', 'assetUpdate 更新名称');
+assertEq(created.status, 'idle', 'assetUpdate 更新状态');
+assetModule.handleAssets({}, assetUser, assetSpace, { type: 'assetDelete', id: created.id });
+assertEq(assetSpace.assets.size, 0, 'assetDelete 删除资产');
+
 // ---------- 周期预约展开 ----------
 console.log('\n📋 13. 周期预约展开');
 const t0 = Date.now() + 3600000;
@@ -527,6 +576,29 @@ assert(!schIds.includes('rs3'), '他人会议不进入我的日程');
 assert(!schIds.includes('lv2'), '未批准请假不进入日程');
 const schType = { ev1: 'event', rs1: 'meeting', rd1: 'desk', ev2: 'event', lv1: 'leave' };
 for (const it of sch.items) assertEq(it.type, schType[it.id], '日程类型 ' + it.id + ' 正确');
+
+// ---------- 空间共享日历 ----------
+console.log('\n📋 21c. 空间共享日历');
+const spCal = api.createSpace('s13c', '日历空间', 1, 0);
+spCal.rooms.push({ id: 'rm1', name: '大会议室' });
+spCal.desks.push({ id: 'ds1', name: '工位A' });
+const calDay = (d) => new Date(2026, 9, d).getTime();
+spCal.roomReservations.set('cr1', { id: 'cr1', roomId: 'rm1', ownerAccount: 'alice', startAt: calDay(5), endAt: calDay(5) + 3600000, status: 'pending', title: '评审' });
+spCal.roomReservations.set('cr2', { id: 'cr2', roomId: 'rm1', ownerAccount: 'bob', startAt: calDay(12), endAt: calDay(12) + 3600000, status: 'cancelled', title: '取消会' });
+spCal.deskReservations.set('cd1', { id: 'cd1', deskId: 'ds1', account: 'alice', startAt: calDay(8), endAt: calDay(8) + 7200000, status: 'pending' });
+spCal.events.set('cev1', { id: 'cev1', hostAccount: 'alice', title: '团建', startAt: calDay(20), endAt: calDay(20) + 7200000, rsvps: new Map() });
+spCal.leaves.set('clv1', { id: 'clv1', account: 'alice', category: '年假', startAt: calDay(25), endAt: calDay(26), status: 'approved' });
+const oct = api.buildSpaceCalendar(spCal, 2026, 10);
+assertEq(oct.year, 2026, '空间日历返回年份');
+assertEq(oct.month, 10, '空间日历返回月份');
+const calDays = oct.days.filter((x) => x && x.items.length);
+assertEq(calDays.map((x) => x.day), [5, 8, 20, 25], '空间日历按天聚合');
+const calIds = calDays.flatMap((x) => x.items.map((i) => i.id));
+assert(calIds.includes('cr1'), '空间日历包含会议室预约');
+assert(!calIds.includes('cr2'), '已取消预约不进入空间日历');
+assert(calIds.includes('cd1') && calIds.includes('cev1') && calIds.includes('clv1'), '空间日历聚合工位/活动/请假');
+assertEq(oct.totals.meeting, 1, '空间日历统计会议数');
+assertEq(oct.totals.desk, 1, '空间日历统计工位数');
 
 // ---------- 空间活跃趋势 ----------
 console.log('\n📋 22. 空间活跃趋势');

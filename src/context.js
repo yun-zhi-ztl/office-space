@@ -23,6 +23,9 @@ function createContext() {
   const MOOD_EMOJIS = ['😊', '😐', '😴', '😡', '🤩', '🥲'];
   const EVENT_CATEGORIES = ['培训', '分享会', '团建', '生日会', '会议', '其它'];
   const DUTY_CATEGORIES = ['环境', '接待', '值班', '其它'];
+  const ASSET_CATEGORIES = ['固定资产', '办公设备', '家具', '电器', '其它'];
+  const ASSET_STATUSES = ['in_use', 'idle', 'maintenance', 'scrapped'];
+  const ASSET_CONDITIONS = ['intact', 'damaged', 'missing'];
   const POLL_MAX_OPTIONS = 5;
   const KNOWLEDGE_CATEGORIES = ['规章制度', '操作指引', '设备说明', '常见问题', '其他'];
   const TASK_PRIORITIES = ['high', 'normal', 'low'];
@@ -158,8 +161,8 @@ function createContext() {
     host: process.env.PGHOST || '127.0.0.1',
     port: +(process.env.PGPORT || 5432),
     user: process.env.PGUSER || 'postgres',
-    password: process.env.PGPASSWORD || 'toilet_dev',
-    database: process.env.PGDATABASE || 'toilet',
+    password: process.env.PGPASSWORD || 'office_dev',
+    database: process.env.PGDATABASE || 'office',
   });
   pool.on('error', (err) => console.error('⚠️  Postgres 池错误:', err.message));
 
@@ -251,6 +254,7 @@ function createContext() {
       else if (r.kind === 'task') sp.tasks.set(data.id, data);
       else if (r.kind === 'leave') sp.leaves.set(data.id, data);
       else if (r.kind === 'meeting_note') sp.meetingNotes.set(data.id, data);
+      else if (r.kind === 'asset') sp.assets.set(data.id, data);
       else if (r.kind === 'notice') { sp.notices.push(data); sp.notices.sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
       else if (r.kind === 'invite') { ensureInvites(sp).set(data.id, data); }
       else if (r.kind === 'audit_log') { if (!sp.auditLogs) sp.auditLogs = []; sp.auditLogs.push(data); sp.auditLogs.sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
@@ -585,6 +589,7 @@ function createContext() {
       meetingNotes: new Map(),
       duties: new Map(),
       invites: new Map(),
+      assets: new Map(),
       requireInvite: false,
       auditLogs: [],
     };
@@ -1154,6 +1159,27 @@ function createContext() {
       upcomingCount: all.filter((r) => r.date > today && r.status === 'assigned').length,
     };
   }
+
+  // ---------- 资产序列化 ----------
+  function assetsPublic(space, info) {
+    return [...space.assets.values()].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)).map((r) => {
+      const owner = info.get(r.owner);
+      return { id: r.id, name: r.name, category: r.category, location: r.location || '', owner: r.owner || '', ownerName: owner ? owner.display : r.owner || '', status: r.status, condition: r.condition || 'intact', note: r.note || '', createdAt: r.createdAt || 0, updatedAt: r.updatedAt || 0, checks: (r.checks || []).slice(-10).reverse().map((c) => ({ account: c.account, accountName: c.accountName, condition: c.condition, note: c.note || '', at: c.at })) };
+    });
+  }
+  function assetsStats(space) {
+    const all = [...space.assets.values()];
+    const byStatus = { in_use: 0, idle: 0, maintenance: 0, scrapped: 0 };
+    const byCategory = {};
+    for (const a of all) {
+      byStatus[a.status] = (byStatus[a.status] || 0) + 1;
+      byCategory[a.category] = (byCategory[a.category] || 0) + 1;
+    }
+    const damaged = all.filter((a) => a.condition === 'damaged').length;
+    const missing = all.filter((a) => a.condition === 'missing').length;
+    return { total: all.length, byStatus, byCategory, damaged, missing };
+  }
+
   // 今日值班提醒：每个未完成值班每日只提醒一次（按 reminderAt 去重）
   function dueDutyReminders(space, now) {
     const key = todayKey(now);
@@ -1763,6 +1789,54 @@ function createContext() {
     return { days: n, items };
   }
 
+  // ---------- 空间共享日历 ----------
+  // 聚合空间内当月所有会议室预约 / 工位预约 / 活动 / 已批准请假，供「空间日历」月历展示
+  function buildSpaceCalendar(space, year, month) {
+    const now = new Date();
+    const y = Math.max(1970, Math.min(9999, parseInt(year, 10) || now.getFullYear()));
+    const m = Math.max(1, Math.min(12, parseInt(month, 10) || now.getMonth() + 1));
+    const start = new Date(y, m - 1, 1).getTime();
+    const end = new Date(y, m, 1).getTime();
+    const dayKeyOf = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+    const items = [];
+    for (const r of space.roomReservations.values()) {
+      if (r.status === 'cancelled' || r.status === 'expired') continue;
+      if (r.startAt < start || r.startAt >= end) continue;
+      const room = space.rooms.find((x) => x.id === r.roomId);
+      items.push({ id: r.id, type: 'meeting', module: 'rooms', title: r.title || '会议', startAt: r.startAt, endAt: r.endAt, room: room ? room.name : '', location: room ? room.location || '' : '', status: r.status });
+    }
+    for (const r of space.deskReservations.values()) {
+      if (r.status === 'cancelled' || r.status === 'expired') continue;
+      if (r.startAt < start || r.startAt >= end) continue;
+      const desk = space.desks.find((d) => d.id === r.deskId);
+      items.push({ id: r.id, type: 'desk', module: 'desks', title: '工位', startAt: r.startAt, endAt: r.endAt, room: desk ? desk.name : '', location: '', status: r.status });
+    }
+    for (const e of space.events.values()) {
+      if (e.cancelled) continue;
+      if (e.startAt < start || e.startAt >= end) continue;
+      items.push({ id: e.id, type: 'event', module: 'events', title: e.title, startAt: e.startAt, endAt: e.endAt, room: '', location: e.location || '', status: 'upcoming' });
+    }
+    for (const lv of space.leaves.values()) {
+      if (lv.status !== 'approved') continue;
+      if (lv.startAt < start || lv.startAt >= end) continue;
+      items.push({ id: lv.id, type: 'leave', module: 'leaves', title: '请假·' + (lv.category || ''), startAt: lv.startAt, endAt: lv.endAt, room: '', location: '', status: lv.status });
+    }
+    items.sort((a, b) => a.startAt - b.startAt);
+    const firstWeekday = new Date(y, m - 1, 1).getDay();
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const leading = (firstWeekday + 6) % 7;
+    const cells = [];
+    for (let i = 0; i < leading; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) {
+      const key = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      cells.push({ date: new Date(y, m - 1, d).getTime(), dayKey: key, day: d, items: items.filter((it) => dayKeyOf(it.startAt) === key) });
+    }
+    while (cells.length % 7 !== 0) cells.push(null);
+    const totals = { meeting: 0, desk: 0, event: 0, leave: 0 };
+    for (const it of items) totals[it.type] = (totals[it.type] || 0) + 1;
+    return { year: y, month: m, days: cells, totals };
+  }
+
   // ---------- 空间活跃趋势 ----------
   // 按天聚合会议室 / 借用 / 申领 / 报修 / 访客的活动量，供空间趋势看板展示
   function buildSpaceTrend(space, days) {
@@ -1834,7 +1908,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, ROOM_APPROVAL_SLA_MS, LEAVE_APPROVAL_SLA_MS, MEETING_ONTIME_GRACE_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, LEAVE_CATEGORIES, MEETING_NOTE_MAX_LEN, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, EVENT_CATEGORIES, DUTY_CATEGORIES, POLL_MAX_OPTIONS, KNOWLEDGE_CATEGORIES, TASK_PRIORITIES, TASK_STATUSES, NOTIFICATION_LEVELS, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, ROOM_APPROVAL_SLA_MS, LEAVE_APPROVAL_SLA_MS, MEETING_ONTIME_GRACE_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, LEAVE_CATEGORIES, MEETING_NOTE_MAX_LEN, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, EVENT_CATEGORIES, DUTY_CATEGORIES, ASSET_CATEGORIES, ASSET_STATUSES, ASSET_CONDITIONS, POLL_MAX_OPTIONS, KNOWLEDGE_CATEGORIES, TASK_PRIORITIES, TASK_STATUSES, NOTIFICATION_LEVELS, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -1848,7 +1922,7 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueRoomApprovalReminders, dueLeaveSlaReminders, dueDutyReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser, ensureInvites, genInviteCode, createInvite, useInvite, revokeInvite, invitesPublic, inviteStatus, auditLog, auditLogsPublic,
     // 序列化
-    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, dutiesPublic, dutyStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, dutiesPublic, dutyStats, assetsPublic, assetsStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
     // 广播
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, dutyBroadcast, eventsBroadcast, pollsBroadcast, knowledgeBroadcast, tasksBroadcast, leavesBroadcast, meetingNotesBroadcast, notificationsBroadcast, noticesBroadcast, pushNotification, pushNotice, visitorsBroadcast,
     // 坑位辅助
@@ -1860,6 +1934,8 @@ function createContext() {
     buildMyReminders,
     // 我的日程
     buildMySchedule,
+    // 空间共享日历
+    buildSpaceCalendar,
     // 空间活跃趋势
     buildSpaceTrend,
   };

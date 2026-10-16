@@ -35,6 +35,7 @@ const notificationsModule = require('./src/modules/notifications');
 const leavesModule = require('./src/modules/leaves');
 const meetingNotesModule = require('./src/modules/meetingNotes');
 const dutiesModule = require('./src/modules/duties');
+const assetsModule = require('./src/modules/assets');
 
 // ---------- 上下文 ----------
 const api = createContext();
@@ -84,6 +85,7 @@ const notifications = notificationsModule(api);
 const leaves = leavesModule(api);
 const meetingNotes = meetingNotesModule(api);
 const duties = dutiesModule(api);
+const assets = assetsModule(api);
 
 // ---------- 分页加载 ----------
 function handleFetchPage(ws, user, space, msg) {
@@ -131,6 +133,8 @@ wss.on('connection', (ws) => {
     if (msg.type === 'getAchievements') { api.sendTo(ws, { type: 'achievements', achievements: api.achievementDefsPublic(user) }); return; }
     if (msg.type === 'getMyReminders') { api.sendTo(ws, { type: 'myReminders', reminders: api.buildMyReminders(space, user) }); return; }
     if (msg.type === 'getMySchedule') { api.sendTo(ws, { type: 'mySchedule', schedule: api.buildMySchedule(space, user, msg.days) }); return; }
+    if (msg.type === 'getSpaceCalendar') { api.sendTo(ws, { type: 'spaceCalendar', calendar: api.buildSpaceCalendar(space, msg.year, msg.month) }); return; }
+    if (msg.type === 'getAssets') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'assets', assets: api.assetsPublic(space, info), stats: api.assetsStats(space) }); return; }
     if (msg.type === 'getSpaceTrend') { api.sendTo(ws, { type: 'spaceTrend', trend: api.buildSpaceTrend(space, msg.days) }); return; }
     if (msg.type === 'getAttendanceCalendar') { api.sendTo(ws, { type: 'attendanceCalendar', calendar: api.attendanceCalendar(space, user.account, msg.year, msg.month) }); return; }
     if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }
@@ -178,6 +182,8 @@ wss.on('connection', (ws) => {
         meetingNotes.handleMeetingNotes(ws, user, space, msg); break;
       case 'dutyAssign': case 'dutyComplete': case 'dutySwap': case 'dutyCancel':
         duties.handleDuties(ws, user, space, msg); break;
+      case 'assetCreate': case 'assetUpdate': case 'assetDelete': case 'assetCheck':
+        assets.handleAssets(ws, user, space, msg); break;
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
       case 'announce': extras.announce(ws, user, space, msg); break;
       case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;

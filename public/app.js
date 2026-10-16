@@ -31,9 +31,12 @@ const S = {
   weeklyReport:null,
   attendanceCalendar:null,
   schedule:{days:1,items:[]},
+  calendar:{year:new Date().getFullYear(),month:new Date().getMonth()+1,days:[],totals:{}},
+  calFilter:{meeting:true,desk:true,event:true,leave:true},
+  assets:[], assetsStats:{},
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'],['schedule','我的日程','🗓️'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'],['schedule','我的日程','🗓️'],['cal','空间日历','📅'],['assets','资产台账','🗄️'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -79,6 +82,7 @@ function dispatch(m){
     case 'tasks': S.DB.tasks=m.tasks||[]; S.taskTotal=m.total||0; S.taskStats=m.stats||{}; break;
     case 'notifications': S.DB.notifications=m.notifications||[]; S.notificationTotal=m.total||0; S.notificationUnread=m.unreadCount||0; renderSidebar(); break;
     case 'materials': S.DB.requests=m.requests; S.DB.materialTemplates=m.templates||[]; S.DB.matTotal=m.total||0; S.DB.matOffset=S.DB.requests.length; break;
+    case 'assets': S.DB.assets=m.assets||[]; S.DB.assetsStats=m.stats||{}; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; S.DB.repairStats=m.stats||null; break;
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
     case 'page': handlePage(m); break;
@@ -89,6 +93,7 @@ function dispatch(m){
     case 'achievements': S.DB.achievements=m.achievements||[]; break;
     case 'myReminders': S.DB.reminders=m.reminders||{}; break;
     case 'mySchedule': S.DB.schedule={days:m.schedule?.days||1,items:m.schedule?.items||[]}; break;
+    case 'spaceCalendar': S.DB.calendar={year:m.calendar?.year||new Date().getFullYear(),month:m.calendar?.month||new Date().getMonth()+1,days:m.calendar?.days||[],totals:m.calendar?.totals||{}}; break;
     case 'spaceTrend': S.DB.trend=m.trend||[]; break;
     case 'notices': S.DB.notices=m.notices||[]; break;
     case 'digest': S.digest=m.digest; break;
@@ -193,17 +198,17 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceTrend','notices','digest'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceCalendar','spaceTrend','notices','digest','assets'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); else if(S.module==='cal') renderSpaceCalendar(); else if(S.module==='assets') renderAssets(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
   else { b.style.display='none'; }
 }
 function renderAll(){ render(); }
-function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); }
+function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); }
 
 /* 分页：广播已按最近 PAGE 下发，前端按 offset 加载更多 */
 const PAGE = 30;
@@ -1703,6 +1708,71 @@ function renderSchedule(){
     ${items.length?groupHtml:'<div class="empty">🗓️ 近期暂无日程安排</div>'}`;
 }
 function loadSchedule(days){ wsSend({type:'getMySchedule',days}); }
+/* 空间共享日历：聚合会议室 / 工位 / 活动 / 请假的月历 */
+function renderSpaceCalendar(){
+  const c = S.DB.calendar || {year:new Date().getFullYear(),month:new Date().getMonth()+1,days:[],totals:{}};
+  const typeCls = {meeting:'info',desk:'grey',event:'warn',leave:'ok'};
+  const typeIcon = {meeting:'🏢',desk:'🪑',event:'🎉',leave:'📅'};
+  const filterHtml = [['meeting','会议'],['desk','工位'],['event','活动'],['leave','请假']].map(([k,label])=>`<label class="check"><input type="checkbox" data-calf="${k}" ${S.DB.calFilter[k]?'checked':''}> ${label}</label>`).join('');
+  const cells = (c.days||[]).map(cell => {
+    if (!cell) return '<div class="cal-cell empty"></div>';
+    const items = (cell.items||[]).filter(it => S.DB.calFilter[it.type]);
+    return `<div class="cal-cell"><div class="cal-day">${cell.day}</div>${items.length?`<div class="cal-items">${items.slice(0,3).map(it=>`<span class="cal-item ${typeCls[it.type]||'info'}">${typeIcon[it.type]||'📅'} ${esc(it.title)}</span>`).join('')}${items.length>3?`<span class="cal-more">+${items.length-3}</span>`:''}</div>`:''}</div>`;
+  }).join('');
+  $('#main').innerHTML = `<div class="topbar"><div><h1>空间日历</h1><div class="sub">聚合空间内当月会议 / 工位 / 活动 / 请假</div></div>
+    <div class="btn grp"><button class="btn" onclick="calShift(-1)">←</button><button class="btn pri" onclick="calToday()">本月</button><button class="btn" onclick="calShift(1)">→</button></div></div>
+    <div class="cal-filter">${filterHtml}</div>
+    <div class="cal-grid">${cells}</div>
+    <div class="meta" style="margin-top:10px">合计：会议 ${(c.totals&&c.totals.meeting||0)} · 工位 ${(c.totals&&c.totals.desk||0)} · 活动 ${(c.totals&&c.totals.event||0)} · 请假 ${(c.totals&&c.totals.leave||0)}</div>`;
+  (document.querySelectorAll('input[data-calf]')||[]).forEach(el=>el.addEventListener('change',()=>{ S.DB.calFilter[el.dataset.calf]=el.checked; renderSpaceCalendar(); }));
+}
+function calShift(d){ const c=S.DB.calendar||{year:new Date().getFullYear(),month:new Date().getMonth()+1}; let y=c.year,m=c.month+d; if(m<1){m=12;y--;} if(m>12){m=1;y++;} S.DB.calendar={year:y,month:m,days:[],totals:{}}; wsSend({type:'getSpaceCalendar',year:y,month:m}); }
+function calToday(){ const n=new Date(); S.DB.calendar={year:n.getFullYear(),month:n.getMonth()+1,days:[],totals:{}}; wsSend({type:'getSpaceCalendar',year:n.getFullYear(),month:n.getMonth()+1}); }
+/* 资产台账 */
+function renderAssets(){
+  const list = S.DB.assets || [];
+  const st = S.DB.assetsStats || {};
+  const statusBadge = {in_use:['ok','在用'],idle:['grey','闲置'],maintenance:['warn','维护中'],scrapped:['bad','已报废']};
+  const condBadge = {intact:['ok','完好'],damaged:['warn','损坏'],missing:['bad','丢失']};
+  const cards = list.map(a=>{
+    const sb = statusBadge[a.status]||['grey',a.status];
+    const cb = condBadge[a.condition]||['grey',a.condition];
+    return `<div class="card"><h3>${esc(a.name)} <span class="badge ${sb[0]}">${sb[1]}</span> <span class="badge ${cb[0]}">${cb[1]}</span></h3>
+      <div class="meta">${esc(a.category)}${a.location?' · '+esc(a.location):''}${a.owner?' · '+esc(a.ownerName||a.owner):''}</div>
+      ${a.note?'<div class="meta">'+esc(a.note)+'</div>':''}
+      <div class="foot">${S.admin?`<button class="btn sm" onclick="openAssetEdit('${a.id}')">编辑</button><button class="btn danger sm" onclick="deleteAsset('${a.id}')">删除</button>`:''}<button class="btn sm" onclick="openAssetCheck('${a.id}')">标记状态</button></div></div>`;
+  }).join('');
+  $('#main').innerHTML = `<div class="topbar"><div><h1>资产台账</h1><div class="sub">空间固定资产 / 办公设备 / 家具 / 电器登记与状态</div></div>
+    ${S.admin?'<button class="btn pri" onclick="openAssetCreate()">新增资产</button>':''}</div>
+    <div class="grid">
+      ${st.total!=null?`<div class="card"><h3>📦 资产总数</h3><div class="num">${st.total}</div><div class="meta">在用 ${(st.byStatus&&st.byStatus.in_use||0)} · 闲置 ${(st.byStatus&&st.byStatus.idle||0)} · 维护中 ${(st.byStatus&&st.byStatus.maintenance||0)} · 已报废 ${(st.byStatus&&st.byStatus.scrapped||0)}</div></div>`:''}
+      <div class="card"><h3>🛠️ 异常资产</h3><div class="num">${st.damaged||0} / ${st.missing||0}</div><div class="meta">损坏 ${st.damaged||0} · 丢失 ${st.missing||0}</div></div>
+      ${cards||'<div class="empty">暂无资产</div>'}</div>`;
+}
+function openAssetCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>新增资产</h2><div class="form">
+  <div class="fld"><label>资产名称</label><input id="astName" placeholder="如：3F 投影仪"></div>
+  <div class="fld"><label>类别</label><select id="astCat">${['固定资产','办公设备','家具','电器','其它'].map(c=>`<option>${c}</option>`).join('')}</select></div>
+  <div class="fld"><label>位置</label><input id="astLoc" placeholder="如：3F 会议室"></div>
+  <div class="fld"><label>负责人</label><input id="astOwner" placeholder="可留空"></div>
+  <div class="fld"><label>状态</label><select id="astStatus"><option value="in_use">在用</option><option value="idle">闲置</option><option value="maintenance">维护中</option></select></div>
+  <div class="fld"><label>备注</label><input id="astNote" placeholder="可选"></div>
+  <button class="btn pri" onclick="submitAssetCreate()">创建</button></div>`); }
+function submitAssetCreate(){ wsSend({type:'assetCreate',name:$('#astName').value,category:$('#astCat').value,location:$('#astLoc').value,owner:$('#astOwner').value,status:$('#astStatus').value,note:$('#astNote').value}); closeModal(); }
+function openAssetEdit(id){ const a=(S.DB.assets||[]).find(x=>x.id===id); if(!a) return; openModal(`<span class="close" onclick="closeModal()">×</span><h2>编辑资产 · ${esc(a.name)}</h2><div class="form">
+  <div class="fld"><label>资产名称</label><input id="astName" value="${esc(a.name)}"></div>
+  <div class="fld"><label>类别</label><select id="astCat">${['固定资产','办公设备','家具','电器','其它'].map(c=>`<option ${c===a.category?'selected':''}>${c}</option>`).join('')}</select></div>
+  <div class="fld"><label>位置</label><input id="astLoc" value="${esc(a.location||'')}"></div>
+  <div class="fld"><label>负责人</label><input id="astOwner" value="${esc(a.owner||'')}"></div>
+  <div class="fld"><label>状态</label><select id="astStatus"><option value="in_use" ${a.status==='in_use'?'selected':''}>在用</option><option value="idle" ${a.status==='idle'?'selected':''}>闲置</option><option value="maintenance" ${a.status==='maintenance'?'selected':''}>维护中</option><option value="scrapped" ${a.status==='scrapped'?'selected':''}>已报废</option></select></div>
+  <div class="fld"><label>备注</label><input id="astNote" value="${esc(a.note||'')}"></div>
+  <button class="btn pri" onclick="submitAssetEdit('${id}')">保存</button></div>`); }
+function submitAssetEdit(id){ wsSend({type:'assetUpdate',id,name:$('#astName').value,category:$('#astCat').value,location:$('#astLoc').value,owner:$('#astOwner').value,status:$('#astStatus').value,note:$('#astNote').value}); closeModal(); }
+function deleteAsset(id){ const a=(S.DB.assets||[]).find(x=>x.id===id); if(confirm('确认删除资产「'+(a?a.name:'')+'」？')) wsSend({type:'assetDelete',id}); }
+function openAssetCheck(id){ const a=(S.DB.assets||[]).find(x=>x.id===id); if(!a) return; openModal(`<span class="close" onclick="closeModal()">×</span><h2>标记资产状态 · ${esc(a.name)}</h2><div class="form">
+  <div class="fld"><label>状态</label><select id="astCond"><option value="intact">完好</option><option value="damaged">损坏</option><option value="missing">丢失</option></select></div>
+  <div class="fld"><label>说明（可选）</label><input id="astCheckNote" placeholder="如：屏幕花屏"></div>
+  <button class="btn pri" onclick="submitAssetCheck('${id}')">提交</button></div>`); }
+function submitAssetCheck(id){ wsSend({type:'assetCheck',id,condition:$('#astCond').value,note:$('#astCheckNote').value}); closeModal(); }
 setInterval(()=>{ if(S.module==='stalls' && S.me && document.visibilityState==='visible') renderStalls(); }, 1000);
 function openReserve(id,type){
   const opts = type==='urinal' ? [['1分钟',1],['2分钟',2],['5分钟',5]] : [['15分钟',15],['30分钟',30],['45分钟',45]];

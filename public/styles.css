@@ -119,3 +119,21 @@
   /* 通知未读行 */
   .row.unread{background:rgba(251,191,36,.07); border-left:3px solid var(--yellow); cursor:pointer;}
   .nav .badge.warn{margin-left:auto; margin-right:4px;}
+  /* 空间日历 */
+  .cal-filter{display:flex; gap:12px; flex-wrap:wrap; margin:10px 0 12px; font-size:12px;}
+  .cal-filter label{display:flex; align-items:center; gap:4px; color:var(--muted); cursor:pointer;}
+  .cal-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:6px;}
+  .cal-cell{border:1px solid var(--line); border-radius:10px; min-height:86px; padding:5px 6px; overflow:hidden;}
+  .cal-cell.empty{border:none;}
+  .cal-day{font-size:12px; color:var(--muted); margin-bottom:3px;}
+  .cal-items{display:flex; flex-direction:column; gap:2px;}
+  .cal-item{font-size:11px; padding:2px 5px; border-radius:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border-left:3px solid;}
+  .cal-item.info{background:rgba(167,139,250,.12); color:var(--purple); border-color:var(--purple);}
+  .cal-item.grey{background:var(--panel2); color:var(--muted); border-color:var(--muted);}
+  .cal-item.warn{background:rgba(251,191,36,.14); color:var(--yellow); border-color:var(--yellow);}
+  .cal-item.ok{background:rgba(52,211,153,.14); color:var(--green); border-color:var(--green);}
+  .cal-more{font-size:10px; color:var(--muted); padding-left:4px;}
+  /* 通用小卡片数字 */
+  .card .num{font-size:26px; font-weight:800; margin:6px 0 4px;}
+  /* 复选框标签 */
+  .check{display:inline-flex; align-items:center; gap:4px; font-size:12px; color:var(--muted); cursor:pointer;}
