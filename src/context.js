@@ -645,7 +645,7 @@ function createContext() {
     }
     return { avg, count, dimensions, ratings: list.slice(-8).reverse() };
   }
-  function roomPublic(space, r) { return { id: r.id, name: r.name, capacity: r.capacity, location: r.location, description: r.description, tags: r.tags || [], requireApproval: !!r.requireApproval, rating: roomRatingSummary(space, r.id) }; }
+  function roomPublic(space, r) { return { id: r.id, name: r.name, capacity: r.capacity, location: r.location, description: r.description, tags: r.tags || [], requireApproval: !!r.requireApproval, minMinutes: r.minMinutes || 5, maxMinutes: r.maxMinutes || 720, rating: roomRatingSummary(space, r.id) }; }
   function reservationPublic(res, info) {
     const who = info.get(res.ownerAccount);
     const attendees = res.attendees || [];

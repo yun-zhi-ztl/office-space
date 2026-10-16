@@ -614,6 +614,8 @@ assertEq(roomRateSum.dimensions.environment.count, 2, '环境维度计数 2');
 assertEq(roomRateSum.ratings.length, 2, '评分明细返回 2 条');
 assertEq(api.roomPublic(spRoomRate, spRoomRate.rooms[0]).rating.avg, 4, 'roomPublic 暴露会议室平均评分');
 assertEq(api.roomPublic(spRoomRate, spRoomRate.rooms[0]).tags.length, 2, 'roomPublic 暴露会议室标签');
+assertEq(api.roomPublic(spRoomRate, spRoomRate.rooms[0]).minMinutes, 5, 'roomPublic 默认最短预约时长 5 分钟');
+assertEq(api.roomPublic(spRoomRate, spRoomRate.rooms[0]).maxMinutes, 720, 'roomPublic 默认最长预约时长 720 分钟');
 const resRatePub = api.reservationPublic(spRoomRate.roomReservations.get('rr1'), new Map());
 assertEq(resRatePub.rating, 5, 'reservationPublic 暴露评分');
 assertEq(resRatePub.ratedAt, nowRate - 50000, 'reservationPublic 暴露评分时间');

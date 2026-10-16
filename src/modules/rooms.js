@@ -18,6 +18,13 @@ module.exports = function roomsModule(api) {
     return arr.map((t) => String(t == null ? '' : t).trim().slice(0, 12)).filter(Boolean).slice(0, 8);
   }
 
+  // 会议室预约时长限制规范化：min 默认 5 分钟、max 默认 720 分钟，保证 min <= max
+  function normalizeRoomDuration(minRaw, maxRaw) {
+    const min = Math.max(1, Math.min(1440, parseInt(minRaw, 10) || 5));
+    const max = Math.max(min, Math.min(24 * 60, parseInt(maxRaw, 10) || 720));
+    return { minMinutes: min, maxMinutes: max };
+  }
+
   // 参会人名单规范化：去重、过滤空值、校验在线成员，最多 50 人
   function normalizeAttendees(space, raw) {
     if (raw == null || raw === '') return { ok: true, attendees: [] };
@@ -95,7 +102,8 @@ module.exports = function roomsModule(api) {
       if (!name) return sendTo(ws, serError('请输入会议室名称'));
       if (!Number.isInteger(capacity) || capacity < 1) return sendTo(ws, serError('请输入有效容纳人数'));
       const tags = normalizeRoomTags(msg.tags);
-      const room = { id: genId('rm', null), name, capacity, location: (msg.location || '').trim().slice(0, 40), description: (msg.description || '').trim().slice(0, 100), tags };
+      const duration = normalizeRoomDuration(msg.minMinutes, msg.maxMinutes);
+      const room = { id: genId('rm', null), name, capacity, location: (msg.location || '').trim().slice(0, 40), description: (msg.description || '').trim().slice(0, 100), tags, minMinutes: duration.minMinutes, maxMinutes: duration.maxMinutes };
       space.rooms.push(room);
       saveEntity(space.id, 'room', room.id, room);
       roomsBroadcast(space);
@@ -133,7 +141,9 @@ module.exports = function roomsModule(api) {
       const endAt = Math.floor(+msg.endAt || 0);
       if (!(startAt > 0) || !(endAt > startAt)) return sendTo(ws, serError('请选择有效的时间段'));
       if (startAt < Date.now()) return sendTo(ws, serError('预约开始时间不能早于当前时间'));
-      if (endAt - startAt < 5 * 60000) return sendTo(ws, serError('至少预约 5 分钟'));
+      const durationMs = endAt - startAt;
+      if (durationMs < (room.minMinutes || 5) * 60000) return sendTo(ws, { type: 'error', message: `预约时长至少 ${room.minMinutes || 5} 分钟`, code: 'roomDuration' });
+      if (durationMs > (room.maxMinutes || 720) * 60000) return sendTo(ws, { type: 'error', message: `预约时长最多 ${room.maxMinutes || 720} 分钟`, code: 'roomDuration' });
       const repeat = (msg.repeat === 'daily' || msg.repeat === 'weekly') ? msg.repeat : null;
       const title = (msg.title || '').trim().slice(0, 40) || '会议';
       const note = (msg.note || '').trim().slice(0, 120);

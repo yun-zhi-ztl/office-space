@@ -466,7 +466,7 @@ function roomCard(r){
   const fav = (S.favorites||[]).includes(r.id);
   const rate = r.rating ? `<div class="meta">评分 ${'⭐'.repeat(Math.round(r.rating.avg))}${'☆'.repeat(5-Math.round(r.rating.avg))} ${r.rating.avg} (${r.rating.count})${r.rating.dimensions?` · 环境 ${r.rating.dimensions.environment.avg} 设备 ${r.rating.dimensions.equipment.avg} 服务 ${r.rating.dimensions.service.avg}`:''}</div>` : '';
   return `<div class="card"><h3>${esc(r.name)} <button class="btn sm ${fav?'pri':''}" title="收藏" onclick="toggleFavorite('${r.id}')">${fav?'⭐':'☆'}</button> ${S.admin?`<span></span><button class="btn danger sm" onclick="removeRoom('${r.id}')">删</button>`:''}</h3>
-    <div class="meta">容量 ${r.capacity} 人${r.location?' · '+esc(r.location):''}${r.description?'<div>'+esc(r.description)+'</div>':''}${r.tags&&r.tags.length?'<div style="margin-top:4px">'+r.tags.map(t=>`<span class="badge grey">${esc(t)}</span>`).join('')+'</div>':''}${r.requireApproval?'<div style="margin-top:4px"><span class="badge warn">需审批</span></div>':''}</div>
+    <div class="meta">容量 ${r.capacity} 人 · 预约 ${r.minMinutes||5}-${r.maxMinutes||720} 分钟${r.location?' · '+esc(r.location):''}${r.description?'<div>'+esc(r.description)+'</div>':''}${r.tags&&r.tags.length?'<div style="margin-top:4px">'+r.tags.map(t=>`<span class="badge grey">${esc(t)}</span>`).join('')+'</div>':''}${r.requireApproval?'<div style="margin-top:4px"><span class="badge warn">需审批</span></div>':''}</div>
     ${rate}
     <div class="meta">${upcoming.length?upcoming.map(u=>`· ${fmtTime(u.startAt)} → ${fmtTime(u.endAt)} <b>${esc(u.title)}</b>${u.ownerAccount===me?'（你）':''}`).join('<br>'):'今日暂无预约'}</div>
     <div class="foot"><button class="btn pri sm" onclick="openBook('${r.id}')">预约</button>${S.admin?`<button class="btn sm" onclick="openRoomTag('${r.id}')">标签</button><button class="btn ${r.requireApproval?'warn':''} sm" onclick="roomApproval('${r.id}',${!r.requireApproval})">${r.requireApproval?'审批关闭':'审批开启'}</button>`:''}</div></div>`;
@@ -481,11 +481,13 @@ function submitRoomTag(id){ wsSend({type:'roomTag',roomId:id,tags:$('#mrTags').v
 function openRoomCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>新增会议室</h2><div class="form">
   <div class="fld"><label>名称</label><input id="mrName" placeholder="如：3F 大会议室"></div>
   <div class="fld"><label>容纳人数</label><input id="mrCap" type="number" min="1" value="8"></div>
+  <div class="fld"><label>最短预约时长（分钟）</label><input id="mrMin" type="number" min="1" value="5"></div>
+  <div class="fld"><label>最长预约时长（分钟）</label><input id="mrMax" type="number" min="1" value="720"></div>
   <div class="fld"><label>位置</label><input id="mrLoc" placeholder="如：三层东侧"></div>
   <div class="fld"><label>备注</label><input id="mrDesc" placeholder="可选"></div>
   <div class="fld"><label>标签（逗号分隔，最多 8 个）</label><input id="mrTags" placeholder="投影, 白板, 会议"></div>
   <button class="btn pri" onclick="submitRoomCreate()">创建</button></div>`); }
-function submitRoomCreate(){ wsSend({type:'roomCreate',name:$('#mrName').value,capacity:parseInt($('#mrCap').value,10),location:$('#mrLoc').value,description:$('#mrDesc').value,tags:$('#mrTags')?$('#mrTags').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean):[]}); closeModal(); }
+function submitRoomCreate(){ wsSend({type:'roomCreate',name:$('#mrName').value,capacity:parseInt($('#mrCap').value,10),minMinutes:parseInt($('#mrMin').value,10),maxMinutes:parseInt($('#mrMax').value,10),location:$('#mrLoc').value,description:$('#mrDesc').value,tags:$('#mrTags')?$('#mrTags').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean):[]}); closeModal(); }
 function removeRoom(id){ if(confirm('确认删除该会议室？')) wsSend({type:'roomRemove',roomId:id}); }
 function toggleFavorite(id){ wsSend({type:'roomFavorite',roomId:id}); }
 function setRoomFavFilter(v){ S.favFilter=v; render(); }

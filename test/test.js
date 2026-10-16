@@ -348,6 +348,32 @@ async function runTests() {
     wOrg.close(); wAte.close();
   }
 
+  // ========== 测试3h: 会议室预约时长限制 ==========
+  console.log('\n📋 测试3h: 会议室预约时长限制');
+  {
+    const spH = (await httpJson('POST', '/api/spaces', { name: '时长办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aH = 'dur_' + runKey;
+    await reg(aH, 'pw', '时长用户');
+    const wH = await createWSClient(); await loginTo(wH, spH.id, aH, 'pw');
+    await sendMsg(wH, { type: 'roomCreate', name: '时长会议室', capacity: 6, minMinutes: 15, maxMinutes: 60 });
+    const roomH = last(wH, 'rooms').rooms[0];
+    assert(roomH && roomH.minMinutes === 15 && roomH.maxMinutes === 60, 'roomCreate 存储最短/最长预约时长');
+    const tH = Date.now() + 10 * 60000;
+    // 短于最短时长被拒
+    await sendMsg(wH, { type: 'roomBook', roomId: roomH.id, startAt: tH, endAt: tH + 10 * 60000, title: '短会' });
+    const errShort = mk(wH, 'error').pop();
+    assert(errShort && errShort.code === 'roomDuration' && /至少 15 分钟/.test(errShort.message), '短于最短时长被拒');
+    // 长于最长时长被拒
+    await sendMsg(wH, { type: 'roomBook', roomId: roomH.id, startAt: tH, endAt: tH + 120 * 60000, title: '长会' });
+    const errLong = mk(wH, 'error').pop();
+    assert(errLong && errLong.code === 'roomDuration' && /最多 60 分钟/.test(errLong.message), '长于最长时长被拒');
+    // 合法时长成功
+    await sendMsg(wH, { type: 'roomBook', roomId: roomH.id, startAt: tH, endAt: tH + 30 * 60000, title: '正常会' });
+    const okBook = (last(wH, 'rooms').reservations || []).some(r => r.title === '正常会');
+    assert(okBook, '区间内时长预约成功');
+    wH.close();
+  }
+
   // ========== 测试4: 工具借用 ==========
   console.log('\n📋 测试4: 工具借用（创建/借用/不足/归还）');
   await sendMsg(w1, { type: 'toolCreate', name: '测试机', category: '测试电脑', total: 2, location: '3F 机柜' });
