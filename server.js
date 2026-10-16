@@ -161,7 +161,7 @@ wss.on('connection', (ws) => {
         polls.handlePolls(ws, user, space, msg); break;
       case 'knowledgeCreate': case 'knowledgeEdit': case 'knowledgeDelete': case 'knowledgeLike': case 'knowledgeComment':
         knowledge.handleKnowledge(ws, user, space, msg); break;
-      case 'taskCreate': case 'taskAssign': case 'taskUpdate': case 'taskStart': case 'taskComplete': case 'taskRemove':
+      case 'taskCreate': case 'taskAssign': case 'taskUpdate': case 'taskStart': case 'taskComplete': case 'taskRemove': case 'taskComment':
         tasks.handleTasks(ws, user, space, msg); break;
       case 'notificationRead': case 'notificationReadAll':
         notifications.handleNotifications(ws, user, space, msg); break;

@@ -808,7 +808,7 @@ assert(achUser4.achievements.includes('knowledgeLiked'), '获得 10 赞解锁知
 // ---------- 待办任务序列化 + 统计 ----------
 console.log('\n📋 47. 待办任务序列化 / 统计');
 const tkSp = api.createSpace('s48', '任务空间', 1, 0);
-tkSp.tasks.set('tk1', { id: 'tk1', title: '整理周报', description: '周五前', creatorAccount: 'alice', creatorName: '甲', assigneeAccount: 'bob', assigneeName: '乙', priority: 'high', status: 'pending', dueAt: 2000, completedAt: null, createdAt: 1, updatedAt: 2 });
+tkSp.tasks.set('tk1', { id: 'tk1', title: '整理周报', description: '周五前', creatorAccount: 'alice', creatorName: '甲', assigneeAccount: 'bob', assigneeName: '乙', priority: 'high', status: 'pending', dueAt: 2000, completedAt: null, createdAt: 1, updatedAt: 2, comments: [{ id: 'tc1', account: 'bob', name: '乙', text: '已完成初稿', createdAt: 6 }] });
 tkSp.tasks.set('tk2', { id: 'tk2', title: '买电池', description: '', creatorAccount: 'bob', creatorName: '乙', assigneeAccount: '', assigneeName: '', priority: 'normal', status: 'in_progress', dueAt: null, completedAt: null, createdAt: 3, updatedAt: 4 });
 const tkPub = api.tasksPublic(tkSp, api.spaceUserInfo(tkSp.id), { account: 'bob' });
 assertEq(tkPub.length, 2, 'tasksPublic 返回任务');
@@ -816,6 +816,9 @@ assertEq(tkPub[0].id, 'tk1', 'tasksPublic 按优先级排序');
 assertEq(tkPub[0].myAssignee, true, 'tasksPublic 标记本人为负责人');
 assertEq(tkPub[1].myCreator, true, 'tasksPublic 标记本人为创建人');
 assertEq(tkPub[0].myTask, true, 'tasksPublic 标记本人相关任务');
+assertEq(tkPub[0].commentCount, 1, 'tasksPublic 统计评论数');
+assertEq(tkPub[0].comments[0].text, '已完成初稿', 'tasksPublic 暴露评论');
+assertEq(tkPub[1].commentCount, 0, '无评论任务评论数为 0');
 const tkSt = api.taskStats(tkSp);
 assertEq(tkSt.total, 2, 'taskStats 统计总数');
 assertEq(tkSt.pending, 1, 'taskStats 统计待办');

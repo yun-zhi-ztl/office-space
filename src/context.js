@@ -1040,6 +1040,8 @@ function createContext() {
         myAssignee: user && t.assigneeAccount === user.account,
         myCreator: user && t.creatorAccount === user.account,
         myTask: user && (t.assigneeAccount === user.account || t.creatorAccount === user.account || isAdmin(space, user.account)),
+        commentCount: (t.comments || []).length,
+        comments: (t.comments || []).map((c) => ({ id: c.id, account: c.account, name: c.name, text: c.text || '', createdAt: c.createdAt || 0 })).reverse().slice(0, 20),
       };
     }).sort((a, b) => {
       const done = (s) => s.status === 'done' || s.status === 'cancelled';

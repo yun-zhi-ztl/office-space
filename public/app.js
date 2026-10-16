@@ -111,6 +111,7 @@ function dispatch(m){
     case 'knowledgeCommented': { const k=(S.DB.knowledge||[]).find(x=>x.id===m.id); if(k){ k.commentCount=(k.commentCount||0)+1; } toast('💬 评论成功','success'); render(); break; }
     case 'taskCreated': toast('📝 任务已创建','success'); render(); break;
     case 'taskAssigned': toast('📌 任务已指派给你：'+(m.title||''),'info'); render(); break;
+    case 'taskCommented': { const t=(S.DB.tasks||[]).find(x=>x.id===m.taskId); if(t){ t.commentCount=(t.commentCount||0)+1; } toast('💬 任务已评论','success'); render(); break; }
     case 'taskUpdated': toast('✔ 任务已更新','success'); render(); break;
     case 'taskStarted': toast('▶️ 任务已开始','info'); render(); break;
     case 'taskCompleted': toast('✅ 任务已完成','success'); render(); break;
@@ -1235,10 +1236,17 @@ function renderTasks(){
     </div>
     <h3 style="margin:22px 0 10px">📝 任务列表</h3>
     <div class="list">${list.length?list.map(t=>`
-      <div class="row"><span><span class="who">${esc(t.title)} ${taskBadge(t)}</span>
+      <div class="row"><span><span class="who">${esc(t.title)} ${taskBadge(t)} ${t.commentCount?`<span class="badge ok">💬 ${t.commentCount}</span>`:''}</span>
         <div class="desc">${esc(t.description||'')}</div>
         <div class="when">${esc(t.creatorName||'')} ${t.assigneeAccount?'→ '+esc(t.assigneeName||''):'（开放认领）'} · ${t.dueAt?'截止 '+fmtTime(t.dueAt):'无截止时间'}${t.completedAt?' · 完成于 '+fmtTime(t.completedAt):''}</div>
-      </span><span class="fs">${taskActions(t)}</span></div>`).join(''):'<div class="empty">还没有任务，来创建第一个吧</div>'}</div>`;
+        ${taskCommentListHtml(t)}
+      </span><span class="fs">${taskActions(t)}${(t.creatorAccount===me||t.assigneeAccount===me||S.admin)?`<div style="margin-top:6px"><input placeholder="评论…" maxlength="200" onkeydown="if(event.key==='Enter')taskComment('${t.id}',this.value)"/></div>`:''}</span></div>`).join(''):'<div class="empty">还没有任务，来创建第一个吧</div>'}</div>`;
+}
+// 任务评论列表：展示最近评论（倒序）
+function taskCommentListHtml(t) {
+  const comments = (t.comments || []).slice().reverse();
+  if (!comments.length) return '';
+  return `<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">${comments.map((c) => `<div style="font-size:12px;margin-bottom:4px"><b>${esc(c.name||'')}</b> <span style="color:var(--muted)">${fmtTime(c.createdAt)}</span><br>${esc(c.text||'')}</div>`).join('')}</div>`;
 }
 function openTaskCreate(){
   const d=new Date(Date.now()+86400000);
@@ -1263,6 +1271,7 @@ function submitTaskAssign(id){ wsSend({type:'taskAssign',taskId:id,assigneeAccou
 function taskStart(id){ wsSend({type:'taskStart',taskId:id}); }
 function taskComplete(id){ wsSend({type:'taskComplete',taskId:id}); }
 function taskRemove(id){ wsSend({type:'taskRemove',taskId:id}); }
+function taskComment(id, text){ wsSend({type:'taskComment',taskId:id,text}); }
 
 /* ============ 通知中心 ============ */
 function renderNotifications(){

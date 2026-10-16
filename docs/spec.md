@@ -245,7 +245,7 @@
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，
 以及 `rooms`（含 `rooms` / `reservations` / `waitlist` / `waitlistTotal`）、`tools`、`materials`（含 `requests` / `templates`）、`repairs`、`visitors`、`stalls`、`attendance`（含 `records` / `stats` / `config`）、`desks`（含 `desks` / `reservations` / `reservationTotal`）、`deskStats`、`ooo`（含 `records` / `stats`）、`feedback`（含 `records` / `stats`）、`mood`（含 `records` / `stats`）、`events`（含 `events` / `total` / `stats`）、`polls`（含 `polls` / `total` / `stats`）、`knowledge`（含 `knowledge` / `total` / `stats`）、`tasks`（含 `tasks` / `total` / `stats`）、`notifications`（含 `notifications` / `total` / `unreadCount`）、`users`、`leaderboard`（含 `account`、`role`、`display`），
-另有 `roomStats`、`spacePaused`、`roomWaitlistPromoted`、`roomRated`、`roomFavorites`、`repairEscalated`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendanceCheckedIn`、`attendanceCheckedOut`、`attendanceCalendar`、`eventReminder`、`eventRsvpChanged`、`pollVoted`、`pollClosed`、`knowledgeLiked`、`knowledgeCommented`、`taskCreated`、`taskAssigned`、`taskCompleted` 等即时广播，另有 `oooBacked`、`oooReturnSoon`、`moodCheckedIn`；全量广播含 `inventory`（物资库存台账，随 `broadcastAll` 下发）；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows` / `feedback` / `events` / `polls` / `knowledge` / `tasks`）。
+另有 `roomStats`、`spacePaused`、`roomWaitlistPromoted`、`roomRated`、`roomFavorites`、`repairEscalated`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendanceCheckedIn`、`attendanceCheckedOut`、`attendanceCalendar`、`eventReminder`、`eventRsvpChanged`、`pollVoted`、`pollClosed`、`knowledgeLiked`、`knowledgeCommented`、`taskCreated`、`taskAssigned`、`taskCompleted`、`taskCommented` 等即时广播，另有 `oooBacked`、`oooReturnSoon`、`moodCheckedIn`；全量广播含 `inventory`（物资库存台账，随 `broadcastAll` 下发）；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows` / `feedback` / `events` / `polls` / `knowledge` / `tasks`）。
 
 ## 5. 前端
 
@@ -371,7 +371,7 @@
 | 收藏家成就 | 收藏会议室累计 3 个解锁「收藏家」徽章 | 复用 `stats.favoriteCount` + `achievements` |
 | 物资库存台账 | 登记办公文具、耗材等公共物资库存，成员按需领用并归还；库存跌破阈值自动标记「库存告急」并通知管理员，阈值恢复后可再次提醒 | `inventoryCreate` / `inventoryAdjust`(`minAvailable`) / `inventoryIssue` / `inventoryReturn`、服务端下发 `inventoryLowStock` |
 | 考勤打卡 | 上下班打卡；管理员可配置工作时间与迟到宽限，迟到自动标记；统计今日打卡 / 迟到 / 已下班人数与下班完成率，并计入个人战绩 | `attendCheckIn` / `attendCheckOut` / `attendConfig`、服务端下发 `attendance` |
-| 待办任务 | 空间级任务看板：成员发起、指派负责人、认领推进；高 / 普通 / 低优先级与截止时间，按优先级 + 截止时间排序；负责人开始 / 完成 / 删除，创建人收到完成通知 | `taskCreate` / `taskAssign` / `taskUpdate` / `taskStart` / `taskComplete` / `taskRemove`、服务端下发 `tasks` |
+| 待办任务 | 空间级任务看板：成员发起、指派负责人、认领推进；高 / 普通 / 低优先级与截止时间，按优先级 + 截止时间排序；负责人开始 / 完成 / 删除，创建人收到完成通知，创建人/负责人/管理员可评论跟进 | `taskCreate` / `taskAssign` / `taskUpdate` / `taskStart` / `taskComplete` / `taskRemove` / `taskComment`、服务端下发 `tasks` |
 | 通知中心 | 系统重要事件留痕（指派 / 完成 / 超时 / 提醒），全员可看、按人标记已读；侧栏未读徽标，支持单条已读与一键全部已读 | `notificationRead` / `notificationReadAll`、服务端下发 `notifications`（含 `unreadCount`） |
 | 考勤连续打卡与全勤 | 连续打卡天数（今天未打回退到昨天）与全勤月数统计；按月出勤日历网格展示每日打卡 / 迟到 / 工作时长，本月全勤标记 | `getAttendanceCalendar`、服务端下发 `attendanceCalendar`、复用 `stats`(`attendanceStreak` / `attendancePerfectMonths`) |
 | 考勤战绩与成就 | 打卡计入累计打卡次数与非迟到打卡次数，周报与空间趋势新增打卡指标；解锁「早到达人」与「打卡达人」徽章 | 复用 `stats`(`attendanceCount` / `earlyCount`) + `achievements` |
@@ -420,7 +420,7 @@ src/modules/     rooms / tools / materials / inventory / repairs / visitors / at
 
 空间级任务看板，覆盖「今天要做什么」的日常协作，任何成员可发起，指派或开放认领，推动闭环。
 
-- `task`: `{ id, title(≤60), description(≤300), creatorAccount, creatorName, assigneeAccount, assigneeName, priority, status, dueAt, completedAt, createdAt, updatedAt }`
+- `task`: `{ id, title(≤60), description(≤300), creatorAccount, creatorName, assigneeAccount, assigneeName, priority, status, dueAt, completedAt, createdAt, updatedAt, comments[] }`
   - `priority`: `high` / `normal` / `low`（默认 `normal`），列表按优先级 + 截止时间排序。
   - `status`: `pending`(待办) / `in_progress`(进行中) / `done`(已完成) / `cancelled`(已取消)。
   - `assigneeAccount` 为空表示开放认领；指派后由负责人跟进。
@@ -431,7 +431,8 @@ src/modules/     rooms / tools / materials / inventory / repairs / visitors / at
   - `taskStart`（负责人 / 创建人 / 管理员：流转为 `in_progress`）
   - `taskComplete`（负责人 / 创建人 / 管理员：流转为 `done`，记录 `completedAt`）
   - `taskRemove`（创建人或管理员删除）
-- 广播与单发：`tasks`（含 `stats`）、`taskCreated`、`taskAssigned`、`taskCompleted`。
+  - `taskComment`（创建人 / 负责人 / 管理员：添加跟进评论，`comments[]` 最多 30 条）
+- 广播与单发：`tasks`（含 `stats`）、`taskCreated`、`taskAssigned`、`taskCompleted`、`taskCommented`。
 - 战绩与成就：`taskCreateCount` / `taskDoneCount`；「任务达人」（创建 5 次）、「高效执行」（完成 5 次）。
 
 ### 11.2 通知中心（notifications）
@@ -456,5 +457,5 @@ src/modules/     rooms / tools / materials / inventory / repairs / visitors / at
 
 ### 11.4 客户端→服务端新增消息
 
-`taskCreate` / `taskAssign` / `taskUpdate` / `taskStart` / `taskComplete` / `taskRemove` / `notificationRead` / `notificationReadAll` / `attendanceCalendar`；服务端相应广播
-`tasks` / `taskCreated` / `taskAssigned` / `taskCompleted` / `notifications` / `attendanceCalendar`。
+`taskCreate` / `taskAssign` / `taskUpdate` / `taskStart` / `taskComplete` / `taskRemove` / `taskComment` / `notificationRead` / `notificationReadAll` / `attendanceCalendar`；服务端相应广播
+`tasks` / `taskCreated` / `taskAssigned` / `taskCompleted` / `taskCommented` / `notifications` / `attendanceCalendar`。

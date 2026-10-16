@@ -1541,6 +1541,19 @@ async function runTests() {
     await sendMsg(wB, { type: 'getStats' });
     const stT = last(wB, 'stats');
     assert(stT && stT.stats.taskDoneCount === 1, '完成任务累计 taskDoneCount=1');
+    // 负责人评论
+    await sendMsg(wB, { type: 'taskComment', taskId: tkId, text: '投影已连接好' });
+    const tkC = await waitFor(wB, 'tasks', (t) => t.tasks && t.tasks.some((x) => x.id === tkId && x.commentCount === 1), 3000);
+    assert(tkC && tkC.tasks.find((x) => x.id === tkId).commentCount === 1, '负责人评论任务成功');
+    assert(tkC && tkC.tasks.find((x) => x.id === tkId).comments[0].text === '投影已连接好', '任务评论内容正确');
+    // 创建人评论
+    await sendMsg(wA, { type: 'taskComment', taskId: tkId, text: '辛苦了，我来验收' });
+    const tkD = await waitFor(wA, 'tasks', (t) => t.tasks && t.tasks.some((x) => x.id === tkId && x.commentCount === 2), 3000);
+    assert(tkD && tkD.tasks.find((x) => x.id === tkId).commentCount === 2, '创建人评论任务成功');
+    // 空评论被拒
+    await sendMsg(wB, { type: 'taskComment', taskId: tkId, text: '   ' });
+    const errTkC = mk(wB, 'error').pop();
+    assert(errTkC && errTkC.message.includes('请输入评论内容'), '空任务评论被拒');
     // 非创建人删除被拒
     await sendMsg(wB, { type: 'taskRemove', taskId: tkId });
     const errRm = mk(wB, 'error').pop();

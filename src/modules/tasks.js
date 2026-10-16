@@ -1,6 +1,6 @@
 'use strict';
-// 待办任务模块：taskCreate / taskAssign / taskUpdate / taskStart / taskComplete / taskRemove
-// 空间级任务看板：成员可发起 / 指派 / 认领，推动闭环。
+// 待办任务模块：taskCreate / taskAssign / taskUpdate / taskStart / taskComplete / taskRemove / taskComment
+// 空间级任务看板：成员可发起 / 指派 / 认领，推动闭环，支持跟进评论。
 module.exports = function tasksModule(api) {
   const { TASK_PRIORITIES, accounts, sendTo, serError, genId, saveEntity, deleteEntity, isAdmin, pushNotification, tasksBroadcast, checkAchievements, saveProfile, recordWeekly } = api;
 
@@ -25,6 +25,7 @@ module.exports = function tasksModule(api) {
         assigneeAccount: assigneeAccount || '', assigneeName: assignee ? assignee.username : '',
         priority, status: 'pending', dueAt, completedAt: null,
         createdAt: now, updatedAt: now,
+        comments: [],
       };
       space.tasks.set(rec.id, rec);
       user.stats.taskCreateCount = (user.stats.taskCreateCount || 0) + 1;
@@ -101,6 +102,22 @@ module.exports = function tasksModule(api) {
       deleteEntity(space.id, 'task', rec.id);
       tasksBroadcast(space);
       sendTo(ws, { type: 'taskRemoved', taskId: rec.id });
+    } else if (msg.type === 'taskComment') {
+      const rec = space.tasks.get(msg.taskId);
+      if (!rec) return sendTo(ws, serError('任务不存在'));
+      const allowed = rec.creatorAccount === user.account || rec.assigneeAccount === user.account || isAdmin(space, user.account);
+      if (!allowed) return sendTo(ws, serError('只有创建人、负责人或管理员可评论'));
+      const text = String(msg.text || '').trim().slice(0, 200);
+      if (!text) return sendTo(ws, serError('请输入评论内容'));
+      const comments = rec.comments || [];
+      if (comments.length >= 30) return sendTo(ws, serError('任务评论已达上限（30 条）'));
+      const comment = { id: genId('tc', null), account: user.account, name: user.nickname, text, createdAt: Date.now() };
+      comments.push(comment);
+      rec.comments = comments;
+      rec.updatedAt = Date.now();
+      saveEntity(space.id, 'task', rec.id, rec);
+      tasksBroadcast(space);
+      sendTo(ws, { type: 'taskCommented', taskId: rec.id, comment });
     }
   }
 
