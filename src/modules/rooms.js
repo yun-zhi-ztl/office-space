@@ -3,12 +3,12 @@
 //               / roomWaitlistCancel / reservationCancel / reservationCancelSeries / reservationApprove / reservationReject
 //               / roomStart / roomEnd / roomRate / roomFavorite
 module.exports = function roomsModule(api) {
-  const { roomReservationsPublic, roomPublic, roomWaitlistPublic, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly, getUserByAccount, sendToUser, sendToAccount, saveProfile, broadcastLeaderboard, expandRecurring, roomStatsBroadcast, checkAchievements, pushNotification, ROOM_REMIND_WINDOW_MS, MEETING_ONTIME_GRACE_MS } = api;
+  const { roomReservationsPublic, roomPublic, roomWaitlistPublic, roomInsights, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly, getUserByAccount, sendToUser, sendToAccount, saveProfile, broadcastLeaderboard, expandRecurring, roomStatsBroadcast, checkAchievements, pushNotification, ROOM_REMIND_WINDOW_MS, MEETING_ONTIME_GRACE_MS } = api;
 
   function roomsBroadcast(space) {
     const reservations = roomReservationsPublic(space);
     const waitlist = roomWaitlistPublic(space);
-    broadcast(space.id, 'rooms', { rooms: space.rooms.map((r) => roomPublic(space, r)), reservations: reservations.slice(0, LIST_PAGE), reservationTotal: reservations.length, waitlist: waitlist.slice(0, LIST_PAGE), waitlistTotal: waitlist.length });
+    broadcast(space.id, 'rooms', { rooms: space.rooms.map((r) => roomPublic(space, r)), reservations: reservations.slice(0, LIST_PAGE), reservationTotal: reservations.length, waitlist: waitlist.slice(0, LIST_PAGE), waitlistTotal: waitlist.length, insights: roomInsights(space) });
     roomStatsBroadcast(space);
   }
 

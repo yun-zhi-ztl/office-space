@@ -58,7 +58,7 @@ function dispatch(m){
       S.admin = m.role==='admin'; S.token=m.token;
       localStorage.setItem('os_token',m.token); localStorage.setItem('os_space',S.space?S.space.id:S.lastSpace);
       $('#gate').style.display='none'; $('#app').style.display='flex'; renderAll(); break;
-    case 'rooms': S.DB.rooms=m.rooms; S.DB.reservations=m.reservations; S.DB.revTotal=m.reservationTotal||0; S.DB.revOffset=S.DB.reservations.length; S.DB.waitlist=m.waitlist||[]; S.DB.waitlistTotal=m.waitlistTotal||0; break;
+    case 'rooms': S.DB.rooms=m.rooms; S.DB.reservations=m.reservations; S.DB.revTotal=m.reservationTotal||0; S.DB.revOffset=S.DB.reservations.length; S.DB.waitlist=m.waitlist||[]; S.DB.waitlistTotal=m.waitlistTotal||0; S.DB.roomInsights=m.insights||null; break;
     case 'tools': S.DB.tools=m.tools; S.DB.toolWaitlist=m.waitlist||[]; break;
     case 'inventory': S.DB.inventory={ items:m.items||[], issues:m.issues||[] }; break;
     case 'attendance': S.DB.attendance={ records:m.records||[], stats:m.stats||{}, config:m.config||{workStart:'09:00',workEnd:'18:00',lateMinutes:15} }; break;
@@ -454,12 +454,25 @@ function renderRooms(){
   $('#main').innerHTML = `<div class="topbar"><div><h1>会议室预约</h1><div class="sub">预约时段、冲突自动检测、实时同步</div></div>
     <div class="btn grp"><button class="btn ${favFilter==='all'?'pri':''}" onclick="setRoomFavFilter('all')">全部</button><button class="btn ${favFilter==='fav'?'pri':''}" onclick="setRoomFavFilter('fav')">⭐ 我的收藏 (${favIds.length})</button><button class="btn" onclick="openSuggest()">✨ 智能选房</button><button class="btn" onclick="exportModuleCsv('rooms',ROOM_COLS)">导出 CSV</button>${S.admin?'<button class="btn pri" onclick="openRoomCreate()">＋ 新增会议室</button>':''}</div></div>
     <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))">${rooms.map(r=>roomCard(r)).join('')||'<div class="empty">还没有会议室，管理员可新增</div>'}</div>
+    ${roomInsightsHtml()}
     <h3 style="margin:22px 0 10px">📅 全部预约</h3>
     <div class="list">${roomReservationListHtml(d, me)}</div>
     <h3 style="margin:22px 0 10px">⏳ 候补队列 <span class="badge info">${d.waitlistTotal||0}</span></h3>
     <div class="list">${(d.waitlist||[]).length?d.waitlist.map(w=>{ const rm=d.rooms.find(x=>x.id===w.roomId); const mine=w.ownerAccount===me; return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(w.title)} <span class="when">${fmtTime(w.startAt)} → ${fmtTime(w.endAt)}</span><div class="when">${esc(w.ownerName)}${mine?'（你）':''} · ${fmtTime(w.createdAt)}</div></span>
       <span class="fs">${mine?`<button class="btn danger sm" onclick="cancelWaitlist('${w.id}')">取消候补</button>`:'<span class="badge warn">候补中</span>'}</span></div>`; }).join(''):'<div class="empty">暂无候补</div>'}</div>
     ${(S.DB.revOffset||0)<(S.DB.revTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('rooms')">加载更多（${S.DB.revTotal-(S.DB.revOffset||0)}）</button></div>`:''}`;
+}
+// 会议室洞察：评分口碑榜 + 使用率排行
+function roomInsightsHtml(){
+  const ins = S.DB.roomInsights || null;
+  if (!ins || (!ins.ratingRanking.length && !ins.usageRanking.length)) return '';
+  const ratingRows = ins.ratingRanking.length ? ins.ratingRanking.map((r, i) => `<tr><td>${i+1}</td><td>${esc(r.name)}</td><td>${'⭐'.repeat(Math.round(r.avg))}${'☆'.repeat(5-Math.round(r.avg))} <b>${r.avg}</b></td><td>${r.count}</td></tr>`).join('') : '<tr><td colspan="4" style="color:var(--muted)">暂无评分数据</td></tr>';
+  const usageRows = ins.usageRanking.length ? ins.usageRanking.map((r, i) => `<tr><td>${i+1}</td><td>${esc(r.name)}</td><td>${r.todayCount}</td><td>${r.todayMinutes} 分钟</td></tr>`).join('') : '';
+  return `<h3 style="margin:22px 0 10px">💡 会议室洞察</h3>
+    <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">
+      <div class="card"><h3>⭐ 评分口碑榜</h3><table><thead><tr><th>#</th><th>会议室</th><th>评分</th><th>评价数</th></tr></thead><tbody>${ratingRows}</tbody></table></div>
+      <div class="card"><h3>📊 使用率排行</h3><table><thead><tr><th>#</th><th>会议室</th><th>今日场次</th><th>今日分钟</th></tr></thead><tbody>${usageRows||'<tr><td colspan="4" style="color:var(--muted)">今日暂无预约</td></tr>'}</tbody></table></div>
+    </div>`;
 }
 function roomCard(r){
   const d=S.DB, me=S.me.account;

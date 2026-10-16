@@ -374,6 +374,30 @@ async function runTests() {
     wH.close();
   }
 
+  // ========== 测试3i: 会议室洞察 ==========
+  console.log('\n📋 测试3i: 会议室洞察（评分口碑榜 + 使用率排行）');
+  {
+    const spI = (await httpJson('POST', '/api/spaces', { name: '洞察办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aI = 'insight_' + runKey;
+    await reg(aI, 'pw', '洞察用户');
+    const wI = await createWSClient(); await loginTo(wI, spI.id, aI, 'pw');
+    await sendMsg(wI, { type: 'roomCreate', name: '口碑会议室', capacity: 4 });
+    await sendMsg(wI, { type: 'roomCreate', name: '冷门会议室', capacity: 4 });
+    const roomsI = last(wI, 'rooms').rooms;
+    const tI = Date.now() + 5 * 1000;
+    await sendMsg(wI, { type: 'roomBook', roomId: roomsI[0].id, startAt: tI, endAt: tI + 60 * 60000, title: '口碑会' });
+    const resI = (last(wI, 'rooms').reservations || []).find(r => r.title === '口碑会');
+    await new Promise((r) => setTimeout(r, 6000));
+    await sendMsg(wI, { type: 'roomStart', reservationId: resI.id });
+    await sendMsg(wI, { type: 'roomEnd', reservationId: resI.id });
+    await sendMsg(wI, { type: 'roomRate', reservationId: resI.id, score: 5 });
+    const roomsAfter = last(wI, 'rooms');
+    assert(roomsAfter && roomsAfter.insights && Array.isArray(roomsAfter.insights.ratingRanking), 'rooms 广播携带洞察统计');
+    assert(roomsAfter.insights.ratingRanking.some(r => r.name === '口碑会议室' && r.avg === 5), 'roomInsights 口碑榜包含评分会议室');
+    assert(roomsAfter.insights.usageRanking.some(r => r.name === '口碑会议室' && r.todayCount === 1), 'roomInsights 使用率排行统计场次');
+    wI.close();
+  }
+
   // ========== 测试4: 工具借用 ==========
   console.log('\n📋 测试4: 工具借用（创建/借用/不足/归还）');
   await sendMsg(w1, { type: 'toolCreate', name: '测试机', category: '测试电脑', total: 2, location: '3F 机柜' });

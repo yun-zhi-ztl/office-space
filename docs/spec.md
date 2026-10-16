@@ -44,6 +44,7 @@
   - 约束：同一房间在 `[startAt, endAt)` 内不得与他人预约重叠（冲突检测）。
   - 时长限制：每间会议室可配置 `minMinutes`（默认 5）与 `maxMinutes`（默认 720），预约时长必须落在区间内；超出返回 `roomDuration` 错误。
   - 评分：会议结束（`completed`）后，预约人或管理员可对会议室做环境 / 设备 / 服务三维评分（各 1-5 分，可选评价 ≤60 字），同一会议只评一次；也兼容单 `score` 一次性三维度同分。总体分取三维度平均并四舍五入，会议室平均分与评分数、维度分由 `roomRatingSummary` 聚合，随 `rooms` 广播（`room.rating = { avg, count, dimensions, ratings }`）。
+  - 会议室洞察：`roomInsights` 聚合 `roomRatingSummary` 生成评分口碑榜（仅含 ≥1 条评分，按平均分降序）与使用率排行（按今日场次 + 今日分钟数降序），随 `rooms` 广播下发 `insights`，辅助选址与容量规划。
   - 周期预约：`repeat` 为 `daily` / `weekly`（或省略表示单次），`repeatCount` 限制场次（每天 ≤ 90、每周 ≤ 52）；
     创建时按天 / 周展开为多条独立预约，共用 `seriesId`，可整体取消待开始场次。
   - 收藏：成员可收藏会议室，`profiles.stats.favoriteRooms` 记录收藏房间 id，前端「我的收藏」快捷过滤。
@@ -443,7 +444,7 @@ src/modules/     rooms / tools / materials / inventory / repairs / visitors / at
 
 - 各领域模块是纯函数工厂 `module.exports = (api)=>({...})`，由 `server.js` 注入共享上下文 `api`，无全局状态、便于单测。
 - 定时器、心跳、优雅停机属于进程级关注点，保留在入口。
-- 该拆分不改变任何对外协议与行为，e2e（412 项）在内存与 PostgreSQL 双模式下均通过。
+- 该拆分不改变任何对外协议与行为，e2e（415 项）在内存与 PostgreSQL 双模式下均通过。
 
 ## 10. 健康检查、自测与 CI（本版本新增）
 
@@ -451,10 +452,10 @@ src/modules/     rooms / tools / materials / inventory / repairs / visitors / at
 - **npm 脚本**：
   - `npm start`：启动服务
   - `npm run lint`：对 `server.js` / `public` / `src/` / `test/` 全部 JS 执行 `node --check` 语法检查（`scripts/lint.js`）
-  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁与进度、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化、每日看点、我的待办、空间活跃趋势、用户广播、会议室时长累计 / 实际到场时长、周期预约展开、借用逾期判定、会议室占用率统计、报修优先级序列化、借用记录序列化、工具在借明细序列化、工具排队序列化、会议室候补序列化、访客签到码序列化、借用逾期提醒、会议室开始前提醒、借用到期前提醒、访客预计到访提醒、报修 SLA 超时提醒、申领 SLA 超时提醒、报修重复检测、管理员成员管理、通知统一入口、报修处理时长统计、成员移除、低库存预警、空间周报、成就扩展、物资库存台账、考勤打卡、物资优先级序列化、意见反馈序列化、工位签到字段、心情序列化、待办任务序列化、通知中心序列化、考勤连续打卡与出勤日历、请假审批序列化与统计、会议纪要序列化与统计、请假审批 SLA 提醒，356 项）
+  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁与进度、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化、每日看点、我的待办、空间活跃趋势、用户广播、会议室时长累计 / 实际到场时长、周期预约展开、借用逾期判定、会议室占用率统计、报修优先级序列化、借用记录序列化、工具在借明细序列化、工具排队序列化、会议室候补序列化、访客签到码序列化、借用逾期提醒、会议室开始前提醒、借用到期前提醒、访客预计到访提醒、报修 SLA 超时提醒、申领 SLA 超时提醒、报修重复检测、管理员成员管理、通知统一入口、报修处理时长统计、成员移除、低库存预警、空间周报、成就扩展、物资库存台账、考勤打卡、物资优先级序列化、意见反馈序列化、工位签到字段、心情序列化、待办任务序列化、通知中心序列化、考勤连续打卡与出勤日历、请假审批序列化与统计、会议纪要序列化与统计、请假审批 SLA 提醒，362 项）
   - `npm run test:restore`：前端「自动恢复会话」回归测试（`test/restore.js`，vm stub 加载内联脚本，无需服务）
   - `npm run smoke`：快速冒烟（`test/smoke.js`）——健康检查、首页与大屏可达、WS 连接、登录、收到广播
-  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，412 项）
+  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，415 项）
 - **CI**：`.github/workflows/ci.yml` 在 push 到 `main` 或 pull_request 时自动：`npm ci` → `npm run lint` → `docker compose config` 校验 → `docker build` 构建校验 → 内存模式启动服务 → `npm run smoke` → `npm test`。用不可达的 PG 参数强制内存模式，无需外部数据库。
 - **环境变量**：见 `.env.example`（`PORT`、`PGHOST`、`PGPORT`、`PGUSER`、`PGPASSWORD`、`PGDATABASE`）；`.env` 已加入 `.gitignore`。
 

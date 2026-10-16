@@ -188,6 +188,7 @@ const fakeApi = {
   saveProfile: () => {},
   broadcastLeaderboard: () => {},
   roomStatsBroadcast: () => {},
+  roomInsights: () => ({ ratingRanking: [], usageRanking: [] }),
 };
 const rooms = roomsModule(fakeApi);
 const rsvSpace = { id: 's6', roomReservations: new Map(), rooms: [] };
@@ -222,6 +223,7 @@ const roomAttApi = {
   saveProfile: () => {},
   broadcastLeaderboard: () => {},
   roomStatsBroadcast: () => {},
+  roomInsights: () => ({ ratingRanking: [], usageRanking: [] }),
 };
 const roomAttModule = roomsModule(roomAttApi);
 const attSpace = { id: 's12b', roomReservations: new Map(), rooms: [] };
@@ -316,6 +318,24 @@ assertEq(rs.avgSatisfaction, +((5 + 2 + 4) / 3).toFixed(1), 'repairsStats 计算
 assertEq(rs.lowSatisfaction, 1, 'repairsStats 统计低分工单（≤2星）');
 assertEq(rs.hotspots, [{ location: '走廊', count: 2 }], 'repairsStats 识别高频故障位置');
 assertEq(rs.avgHandledMinutes, 20, 'repairsStats 计算平均处理时长');
+
+// ---------- 会议室洞察 ----------
+console.log('\n📋 16c. 会议室洞察');
+const spRi = api.createSpace('s8c', '会议室洞察空间', 1, 0);
+spRi.rooms.push({ id: 'ri1', name: '好评间', capacity: 4 });
+spRi.rooms.push({ id: 'ri2', name: '差评间', capacity: 4 });
+spRi.rooms.push({ id: 'ri3', name: '无评间', capacity: 4 });
+const nowRi = Date.now();
+spRi.roomReservations.set('rv1', { id: 'rv1', roomId: 'ri1', ownerAccount: 'alice', startAt: nowRi, endAt: nowRi + 60 * 60000, status: 'completed', rating: 5 });
+spRi.roomReservations.set('rv2', { id: 'rv2', roomId: 'ri2', ownerAccount: 'bob', startAt: nowRi, endAt: nowRi + 30 * 60000, status: 'completed', rating: 2 });
+spRi.roomReservations.set('rv3', { id: 'rv3', roomId: 'ri2', ownerAccount: 'carol', startAt: nowRi + 60 * 60000, endAt: nowRi + 90 * 60000, status: 'completed', rating: 1 });
+const ri = api.roomInsights(spRi, nowRi);
+assertEq(ri.ratingRanking.length, 2, 'roomInsights 口碑榜仅包含有评分的会议室');
+assertEq(ri.ratingRanking[0].name, '好评间', 'roomInsights 口碑榜按平均分降序');
+assertEq(ri.ratingRanking[0].avg, 5, 'roomInsights 口碑榜计算平均分');
+assertEq(ri.ratingRanking[1].name, '差评间', 'roomInsights 口碑榜第二名为差评间');
+assertEq(ri.usageRanking[0].name, '差评间', 'roomInsights 使用率排行按今日分钟/场次降序');
+assertEq(ri.usageRanking[0].todayMinutes, 60, 'roomInsights 使用率排行统计今日分钟');
 
 // ---------- 借用记录序列化 ----------
 console.log('\n📋 17. 借用记录序列化');
