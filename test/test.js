@@ -2124,6 +2124,64 @@ async function runTests() {
     wD1.close(); wD2.close(); wD3.close();
   }
 
+  // ========== 测试45: 会议室门禁码 ==========
+  console.log('\n📋 测试45: 会议室门禁码（开始自动生成 / 可见范围 / 结束后失效）');
+  {
+    const spDc = (await httpJson('POST', '/api/spaces', { name: '门禁码办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aDc = 'door_' + runKey, bDc = 'doorm_' + runKey, cDc = 'doorg_' + runKey;
+    await reg(aDc, 'pw', '门禁管理员'); await reg(bDc, 'pw', '会议主'); await reg(cDc, 'pw', '无关成员');
+    const wA = await createWSClient(); await loginTo(wA, spDc.id, aDc, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spDc.id, bDc, 'pw');
+    const wC = await createWSClient(); await loginTo(wC, spDc.id, cDc, 'pw');
+    await sendMsg(wA, { type: 'roomCreate', name: '门禁会议室', capacity: 6 });
+    const rid = last(wA, 'rooms').rooms[0].id;
+    const tStart = Date.now() + 5 * 1000;
+    await sendMsg(wB, { type: 'roomBook', roomId: rid, startAt: tStart, endAt: tStart + 30 * 60000, title: '门禁会' });
+    await new Promise((r) => setTimeout(r, 6000));
+    await sendMsg(wB, { type: 'roomStart', reservationId: last(wB, 'rooms').reservations[0].id });
+    const codeMsg = await waitFor(wB, 'roomDoorCode', (m) => m.doorCode && String(m.doorCode).length === 6, 3000);
+    assert(codeMsg && /^\d{6}$/.test(String(codeMsg.doorCode)), '会议开始后预约人收到 6 位门禁码');
+    const denied = await sendMsg(wC, { type: 'roomDoorCodeRequest', reservationId: last(wB, 'rooms').reservations[0].id });
+    assert(mk(wC, 'error').some(e => e.message.includes('只有预约人、管理员或参会人')), '非相关人员获取门禁码被拒');
+    await sendMsg(wB, { type: 'roomEnd', reservationId: last(wB, 'rooms').reservations[0].id });
+    await sendMsg(wB, { type: 'roomDoorCodeRequest', reservationId: last(wB, 'rooms').reservations[0].id });
+    assert(mk(wB, 'error').some(e => e.message.includes('会议进行中')), '会议结束后门禁码请求被拒');
+    wA.close(); wB.close(); wC.close();
+  }
+
+  // ========== 测试46: 报修/申领批量处理 ==========
+  console.log('\n📋 测试46: 报修/申领批量处理');
+  {
+    const spB = (await httpJson('POST', '/api/spaces', { name: '批量处理办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aB = 'batch_' + runKey, bB = 'batm_' + runKey;
+    await reg(aB, 'pw', '批量管理员'); await reg(bB, 'pw', '批量成员');
+    const wA = await createWSClient(); await loginTo(wA, spB.id, aB, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spB.id, bB, 'pw');
+    // 物资申领批量满足
+    await sendMsg(wB, { type: 'materialRequest', name: '电池A', qty: 2, unit: '节', reason: '批量1' });
+    await sendMsg(wB, { type: 'materialRequest', name: '电池B', qty: 3, unit: '节', reason: '批量2' });
+    const mats = await waitFor(wA, 'materials', (r) => r.requests && r.requests.filter(x => x.status === 'pending').length >= 2, 3000);
+    assert(mats, '两个物资申领待处理');
+    const matIds = mats.requests.filter(x => x.status === 'pending').map(x => x.id);
+    await sendMsg(wA, { type: 'materialBatchFulfill', ids: matIds });
+    const matBatch = await waitFor(wA, 'materialBatchFulfilled', (m) => m.count === 2, 3000);
+    assert(matBatch && matBatch.count === 2, '批量满足申领返回 2 条');
+    const matFulfilled = await waitFor(wA, 'materials', (r) => r.requests && r.requests.every(x => x.status !== 'pending'), 3000);
+    assert(matFulfilled, '批量满足后申领列表不再有待处理');
+    // 报修批量解决
+    await sendMsg(wB, { type: 'repairCreate', category: '灯光', location: '批量灯A', description: '批量修1' });
+    await sendMsg(wB, { type: 'repairCreate', category: '空调', location: '批量空调A', description: '批量修2' });
+    const reps = await waitFor(wA, 'repairs', (r) => r.repairs && r.repairs.filter(x => x.status === 'reported').length >= 2, 3000);
+    assert(reps, '两个报修待处理');
+    const repIds = reps.repairs.filter(x => x.status === 'reported').map(x => x.id);
+    await sendMsg(wA, { type: 'repairBatchResolve', ids: repIds });
+    const repBatch = await waitFor(wA, 'repairBatchResolved', (m) => m.count === 2, 3000);
+    assert(repBatch && repBatch.count === 2, '批量解决报修返回 2 条');
+    const repResolved = await waitFor(wA, 'repairs', (r) => r.repairs && r.repairs.every(x => x.status !== 'reported'), 3000);
+    assert(repResolved, '批量解决后报修列表不再有未处理');
+    wA.close(); wB.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

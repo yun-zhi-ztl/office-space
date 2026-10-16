@@ -25,6 +25,7 @@ const S = {
   roomStats:null,
   deskStats:null,
   lastRoomBook:null,
+  lastRoomDoorCode:null,
   _kbReply:null,
   favorites:[],
   weeklyReport:null,
@@ -156,6 +157,9 @@ function dispatch(m){
     case 'roomApprovalPending': if(S.admin) toast('🔔 会议室预约待审批已超时：'+(m.roomName||'')+' · '+(m.title||''),'warn'); break;
     case 'roomWaitlistPromoted': toast('🎉 候补已晋升：预约已自动创建（'+fmtTime(m.startAt)+'）','success'); render(); break;
     case 'meetingStarted': { const rm=(S.DB.rooms||[]).find(r=>r.id===m.roomId); toast('🔔 会议已开始：'+(rm?rm.name:'会议室')+' · '+(m.title||''),'success'); render(); break; }
+    case 'roomDoorCode': S.lastRoomDoorCode={reservationId:m.reservationId,code:m.doorCode}; toast('🔓 会议室门禁码：'+m.doorCode,'success'); render(); break;
+    case 'materialBatchFulfilled': toast('✔ 已批量满足申领：'+(m.count||0)+' 条','success'); render(); break;
+    case 'repairBatchResolved': toast('✔ 已批量解决报修：'+(m.count||0)+' 条','success'); render(); break;
     case 'meetingAttended': toast('✅ 已确认到场','success'); render(); break;
     case 'reservationRescheduled': toast('✔ 改期成功：'+fmtTime(m.startAt)+' → '+fmtTime(m.endAt),'success'); render(); break;
     case 'roomRated': toast('✔ 会议室评分已提交：'+m.score+' 分','success'); render(); break;
@@ -444,7 +448,8 @@ function roomReservationListHtml(d, me){
     if(g.single){
       const r=g.single; const rm=d.rooms.find(x=>x.id===r.roomId);
       const action = r.status==='pending_approval' ? `${S.admin?`<button class="btn green sm" onclick="reservationApprove('${r.id}')">批准</button><button class="btn danger sm" onclick="reservationReject('${r.id}')">驳回</button>`:''}${r.ownerAccount===me?`<button class="btn danger sm" onclick="cancelReservation('${r.id}')">取消</button>`:''}` : ((r.ownerAccount===me||S.admin)&&r.status==='pending') ? `<button class="btn sm" onclick="openReschedule('${r.id}')">改期</button>${r.ownerAccount===me?`<button class="btn danger sm" onclick="cancelReservation('${r.id}')">取消</button>`:''}` : '';
-      return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(r.title)} <span class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}</span>${r.actualStartAt&&r.actualEndAt?` <span class="hint">⏱️ 到场 ${Math.max(0,Math.round((r.actualEndAt-r.actualStartAt)/60000))} 分钟</span>`:''}</span><span class="fs">${roomResBadge(r.status)}${r.attendees&&r.attendees.length?`<span class="badge info">👥 到场 ${r.attendanceRate||0}%（${(r.attendedAccounts||[]).length}/${r.attendees.length}）</span>`:''}${action}${(r.status==='active'&&(r.attendees||[]).includes(me)&&!(r.attendedAccounts||[]).includes(me))?`<button class="btn green sm" onclick="meetingAttend('${r.id}')">✅ 确认到场</button>`:''}${(r.ownerAccount===me||S.admin)&&r.status==='completed'&&!r.rating?`<button class="btn sm" onclick="openRoomRate('${r.id}')">评分</button>`:''}${r.rating?`<span class="badge ok">已评 ${r.rating}⭐</span>`:''}</span></div>`;
+      const doorCode = (S.lastRoomDoorCode && S.lastRoomDoorCode.reservationId===r.id && r.status==='active') ? `<span class="badge ok">🔓 门禁码 ${esc(S.lastRoomDoorCode.code)}</span><button class="btn sm" onclick="copyDoorCode('${r.id}')">复制</button>` : ((r.status==='active' && (r.ownerAccount===me || S.admin || (r.attendees||[]).includes(me))) ? `<button class="btn sm" onclick="requestDoorCode('${r.id}')">🔓 开门码</button>` : '');
+      return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(r.title)} <span class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}</span>${r.actualStartAt&&r.actualEndAt?` <span class="hint">⏱️ 到场 ${Math.max(0,Math.round((r.actualEndAt-r.actualStartAt)/60000))} 分钟</span>`:''}</span><span class="fs">${roomResBadge(r.status)}${r.attendees&&r.attendees.length?`<span class="badge info">👥 到场 ${r.attendanceRate||0}%（${(r.attendedAccounts||[]).length}/${r.attendees.length}）</span>`:''}${action}${doorCode}${(r.status==='active'&&(r.attendees||[]).includes(me)&&!(r.attendedAccounts||[]).includes(me))?`<button class="btn green sm" onclick="meetingAttend('${r.id}')">✅ 确认到场</button>`:''}${(r.ownerAccount===me||S.admin)&&r.status==='completed'&&!r.rating?`<button class="btn sm" onclick="openRoomRate('${r.id}')">评分</button>`:''}${r.rating?`<span class="badge ok">已评 ${r.rating}⭐</span>`:''}</span></div>`;
     }
     const first=g.items[0]; const rm=d.rooms.find(x=>x.id===first.roomId);
     const pat=repeatLabel(g.repeat, first);
@@ -539,6 +544,8 @@ function submitBook(roomId){
   closeModal();
 }
 function cancelReservation(id){ wsSend({type:'reservationCancel',reservationId:id}); }
+function requestDoorCode(id){ wsSend({type:'roomDoorCodeRequest',reservationId:id}); }
+function copyDoorCode(id){ const c=S.lastRoomDoorCode&&S.lastRoomDoorCode.code; if(!c) return; if(navigator.clipboard) navigator.clipboard.writeText(c).then(()=>toast('🔓 门禁码已复制','success')).catch(()=>toast('🔓 门禁码：'+c,'success')); else toast('🔓 门禁码：'+c,'success'); }
 function cancelSeries(seriesId){ if(confirm('确认取消该周期预约的全部待开始场次？')) wsSend({type:'reservationCancelSeries',seriesId}); }
 function meetingAttend(id){ wsSend({type:'meetingAttend',reservationId:id}); toast('✅ 已确认到场','success'); }
 function roomApproval(id, v){ wsSend({type:'roomApproval',roomId:id,requireApproval:!!v}); }
@@ -708,10 +715,10 @@ function renderMaterials(){
   const d=S.DB, me=S.me.account;
   const tplList=(S.DB.materialTemplates||[]).map(t=>`<div class="row"><span><span class="who">📋 ${esc(t.name)}</span> <span class="when">默认 ×${t.defaultQty}${t.defaultUnit?' '+esc(t.defaultUnit):''}</span><div class="desc">${esc(t.defaultReason||'')}</div></span>${S.admin?`<button class="btn danger sm" onclick="deleteTemplate('${t.id}')">删除</button>`:''}</div>`).join('');
   $('#main').innerHTML = `<div class="topbar"><div><h1>物资申领</h1><div class="sub">需要电池、文具等物资时提交申请，由同事/管理员处理</div></div>
-    <button class="btn pri" onclick="openMaterialRequest()">＋ 我要申领</button><button class="btn" onclick="exportModuleCsv('materials',MAT_COLS)">导出 CSV</button>${S.admin?'<button class="btn" onclick="openTemplateCreate()">＋ 常用模板</button>':''}</div>
+    <button class="btn pri" onclick="openMaterialRequest()">＋ 我要申领</button><button class="btn" onclick="exportModuleCsv('materials',MAT_COLS)">导出 CSV</button>${S.admin?'<button class="btn" onclick="batchMaterialFulfill()">✔ 批量满足当前页</button><button class="btn" onclick="openTemplateCreate()">＋ 常用模板</button>':''}</div>
     ${S.admin?`<h3 style="margin:14px 0 8px">📋 常用物资模板</h3><div class="list">${tplList||'<div class="empty">暂无模板</div>'}</div>`:''}
     <div class="list">${d.requests.map(r=>{ const st=r.status; const badge=st==='pending'?'warn':st==='fulfilled'?'ok':'grey'; const canAssign=r.requesterAccount===me||S.admin; const canFulfill=st==='pending'&&!(r.handlerAccount&&r.handlerAccount!==me&&!S.admin); const handled=r.handledAt?` · 处理 ${Math.max(0,Math.round((r.handledAt-r.createdAt)/60000))} 分钟`:''; return `<div class="row"><span><span class="who">${esc(r.requesterName)}</span> 申领 <b>${esc(r.name)}</b> ×${r.qty}${r.unit?' '+esc(r.unit):''}${r.handlerName?` · 负责人 ${esc(r.handlerName)}`:''}<div class="desc">${esc(r.reason||'')}</div><div class="when">${fmtTime(r.createdAt)}${handled}</div></span>
-      <span class="fs"><span class="badge ${badge}">${st==='pending'?'待处理':st==='fulfilled'?'已满足':'已取消'}</span><span class="badge ${r.priority==='high'?'danger':r.priority==='low'?'grey':''}">${r.priority==='high'?'高':r.priority==='low'?'低':'普通'}</span>
+      <span class="fs">${st==='pending'?'<input type="checkbox" class="batch" data-id="'+r.id+'">':''}<span class="badge ${badge}">${st==='pending'?'待处理':st==='fulfilled'?'已满足':'已取消'}</span><span class="badge ${r.priority==='high'?'danger':r.priority==='low'?'grey':''}">${r.priority==='high'?'高':r.priority==='low'?'低':'普通'}</span>
       ${st==='pending'?`${r.requesterAccount===me?`<button class="btn danger sm" onclick="cancelRequest('${r.id}')">取消</button>`:(canFulfill?`<button class="btn green sm" onclick="fulfillRequest('${r.id}')">已满足</button>`:'')}${canAssign?`<button class="btn sm" onclick="openAssign('material','${r.id}')">指派</button><button class="btn sm" onclick="updateMaterialPriority('${r.id}','${r.priority}')">改优先级</button>`:''}`:''}
       </span></div>`; }).join('')||'<div class="empty">暂无申领记录</div>'}
     </div>
@@ -741,6 +748,11 @@ function submitTemplate(){ wsSend({type:'materialTemplateCreate',name:$('#tplNam
 function deleteTemplate(id){ if(confirm('确认删除该常用模板？')) wsSend({type:'materialTemplateDelete',templateId:id}); }
 function cancelRequest(id){ wsSend({type:'materialCancel',requestId:id}); }
 function fulfillRequest(id){ wsSend({type:'materialFulfill',requestId:id}); }
+function batchMaterialFulfill(){
+  const ids=Array.from(document.querySelectorAll('#main input.batch:checked')).map(x=>x.dataset.id);
+  if(!ids.length) return toast('请先勾选要满足的申领','warn');
+  wsSend({type:'materialBatchFulfill',ids});
+}
 function updateMaterialPriority(id, current){
   const opts=[['high','高'],['normal','普通'],['low','低']].map(([v,l])=>`<option value="${v}" ${v===current?'selected':''}>${l}</option>`).join('');
   openModal(`<span class="close" onclick="closeModal()">×</span><h2>调整优先级</h2><div class="form">
@@ -798,10 +810,10 @@ function renderRepairs(){
   const pBadge=p=>p==='high'?'bad':p==='normal'?'info':'grey';
   const pLabel=p=>p==='high'?'高':p==='normal'?'中':'低';
   $('#main').innerHTML = `<div class="topbar"><div><h1>报修</h1><div class="sub">上报厕所、灯光、空调等设施故障并及时跟进</div></div>
-    <button class="btn pri" onclick="openRepair()">＋ 我要报修</button><button class="btn" onclick="exportModuleCsv('repairs',REP_COLS)">导出 CSV</button></div>
+    <button class="btn pri" onclick="openRepair()">＋ 我要报修</button><button class="btn" onclick="exportModuleCsv('repairs',REP_COLS)">导出 CSV</button>${S.admin?'<button class="btn" onclick="batchRepairResolve()">✔ 批量解决当前页</button>':''}</div>
     ${repairStatsBarHtml()}
     <div class="list">${d.repairs.map(r=>{ const canAssign=r.reporterAccount===me||S.admin; const handled=r.handledAt?` · 处理 ${Math.max(0,Math.round((r.handledAt-r.createdAt)/60000))} 分钟`:''; return `<div class="row"><span><span class="who">${esc(r.category)} · ${esc(r.location)}</span> ${r.code?`<span class="badge ${r.status==='resolved'?'ok':r.status==='cancelled'?'grey':'info'}">${esc(r.code)}</span>`:''} <span class="when">${esc(r.reporterName)} ${fmtTime(r.createdAt)}${r.handlerName?` · 负责人 ${esc(r.handlerName)}`:''}${handled}</span><div class="desc">${esc(r.description)}</div>${repairCommentListHtml(r)}</span>
-      <span class="fs">
+      <span class="fs">${(r.status==='reported'||r.status==='in_progress')?'<input type="checkbox" class="batch" data-id="'+r.id+'">':''}
       <span class="badge ${badge(r.status)}">${label(r.status)}</span>
       <span class="badge ${pBadge(r.priority)}">${pLabel(r.priority)}优先</span>
       ${r.escalated?'<span class="badge bad">已升级</span>':''}
@@ -846,6 +858,11 @@ function openRepair(){ openModal(`<span class="close" onclick="closeModal()">×<
   <button class="btn pri" onclick="submitRepair()">提交</button></div>`); }
 function submitRepair(){ wsSend({type:'repairCreate',category:$('#rpCat').value,priority:$('#rpPri').value,location:$('#rpLoc').value,description:$('#rpDesc').value}); closeModal(); }
 function setRepair(id,status){ wsSend({type:'repairUpdate',repairId:id,status}); }
+function batchRepairResolve(){
+  const ids=Array.from(document.querySelectorAll('#main input.batch:checked')).map(x=>x.dataset.id);
+  if(!ids.length) return toast('请先勾选要解决的报修','warn');
+  wsSend({type:'repairBatchResolve',ids});
+}
 function repairComment(id, text){ wsSend({type:'repairComment',repairId:id,text}); }
 /* 报修满意度评分：已解决的报修，上报人/管理员可打 1-5 星并留评 */
 function openRepairRate(id){

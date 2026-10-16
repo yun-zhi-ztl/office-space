@@ -81,6 +81,13 @@ function createContext() {
     } while ([...space.visitors.values()].some((v) => v.code === code));
     return code;
   }
+  function genDoorCode(space) {
+    let code;
+    do {
+      code = String(Math.floor(Math.random() * 1000000)).padStart(6, '0');
+    } while ([...space.roomReservations.values()].some((r) => r.doorCode === code));
+    return code;
+  }
   function sendTo(ws, obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
   function broadcastTo(spaceId, obj) {
     const sp = spaces.get(spaceId);
@@ -1716,7 +1723,7 @@ function createContext() {
     set pgEnabled(v) { usePg = v; },
     initDb, flushWrites, scheduleFlush,
     // 工具
-    genId, genSpaceId, genCheckinCode, sendTo, broadcastTo, sendToUser, sendToAccount, getUsersIn, getUserByAccount, isAdmin, serError, lk, spaceUserInfo, isToolLowStock, isStockLow,
+    genId, genSpaceId, genCheckinCode, genDoorCode, sendTo, broadcastTo, sendToUser, sendToAccount, getUsersIn, getUserByAccount, isAdmin, serError, lk, spaceUserInfo, isToolLowStock, isStockLow,
     // 认证
     hashPassword, verifyPassword, issueToken, accountByLogin,
     // 持久化

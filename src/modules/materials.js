@@ -9,6 +9,18 @@ module.exports = function materialsModule(api) {
     broadcast(space.id, 'materials', { requests: all.slice(0, LIST_PAGE), total: all.length, templates: materialsTemplatesPublic(space) });
   }
 
+  function fulfillMaterialRequest(space, req, user) {
+    req.status = 'fulfilled';
+    req.handledAt = Date.now();
+    saveEntity(space.id, 'material', req.id, req);
+    user.stats.helperCount = (user.stats.helperCount || 0) + 1;
+    checkAchievements(user);
+    saveProfile(user);
+    sendToAccount(req.requesterAccount, { type: 'materialFulfilled', requestId: req.id, name: req.name });
+    pushNotification(space, { type: 'materialFulfilled', level: 'success', title: '物资申领已满足', body: req.name });
+    sendToUser(user.id, { type: 'stats', stats: user.stats, achievements: user.achievements });
+  }
+
   function handleMaterials(ws, user, space, msg) {
     if (msg.type === 'materialRequest') {
       if (space.paused) return sendTo(ws, serError('空间已暂停，暂不可申领'));
@@ -79,16 +91,24 @@ module.exports = function materialsModule(api) {
       if (req.requesterAccount === user.account) return sendTo(ws, serError('不能处理自己的申领'));
       if (req.handlerAccount && req.handlerAccount !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('该申领已指派，由负责人处理'));
       if (req.status !== 'pending') return sendTo(ws, serError('该申领已处理'));
-      req.status = 'fulfilled';
-      req.handledAt = Date.now();
-      saveEntity(space.id, 'material', req.id, req);
-      user.stats.helperCount = (user.stats.helperCount || 0) + 1;
-      checkAchievements(user);
-      saveProfile(user);
-      sendToAccount(req.requesterAccount, { type: 'materialFulfilled', requestId: req.id, name: req.name });
-      pushNotification(space, { type: 'materialFulfilled', level: 'success', title: '物资申领已满足', body: req.name });
-      sendToUser(user.id, { type: 'stats', stats: user.stats, achievements: user.achievements });
+      fulfillMaterialRequest(space, req, user);
       materialsBroadcast(space);
+    } else if (msg.type === 'materialBatchFulfill') {
+      if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可批量满足申领'));
+      const ids = Array.isArray(msg.ids) ? msg.ids.map(String) : [];
+      if (!ids.length) return sendTo(ws, serError('请选择申领'));
+      const fulfilled = [];
+      for (const id of ids) {
+        const req = space.materialRequests.get(id);
+        if (!req) continue;
+        if (req.status !== 'pending') continue;
+        if (req.requesterAccount === user.account) continue;
+        fulfillMaterialRequest(space, req, user);
+        fulfilled.push(req.id);
+      }
+      if (!fulfilled.length) return sendTo(ws, serError('所选申领均无法处理（可能已处理或为自己提交）'));
+      materialsBroadcast(space);
+      sendTo(ws, { type: 'materialBatchFulfilled', requestIds: fulfilled, count: fulfilled.length });
     }
   }
 

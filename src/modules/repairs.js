@@ -9,6 +9,19 @@ module.exports = function repairsModule(api) {
     broadcast(space.id, 'repairs', { repairs: all.slice(0, LIST_PAGE), total: all.length, stats: repairsStats(space) });
   }
 
+  function resolveRepair(space, rep, user) {
+    rep.status = 'resolved';
+    rep.handledAt = Date.now();
+    rep.updatedAt = Date.now();
+    saveEntity(space.id, 'repair', rep.id, rep);
+    user.stats.helperCount = (user.stats.helperCount || 0) + 1;
+    checkAchievements(user);
+    saveProfile(user);
+    sendToUser(user.id, { type: 'stats', stats: user.stats, achievements: user.achievements });
+    sendToAccount(rep.reporterAccount, { type: 'repairResolved', repairId: rep.id, category: rep.category, location: rep.location });
+    pushNotification(space, { type: 'repairResolved', level: 'success', title: '报修已解决', body: rep.category + ' · ' + rep.location });
+  }
+
   function handleRepairs(ws, user, space, msg) {
     if (msg.type === 'repairCreate') {
       if (space.paused) return sendTo(ws, serError('空间已暂停，暂不可报修'));
@@ -80,15 +93,24 @@ module.exports = function repairsModule(api) {
       if (to === 'resolved') rep.handledAt = Date.now();
       saveEntity(space.id, 'repair', rep.id, rep);
       if (to === 'in_progress') sendToAccount(rep.reporterAccount, { type: 'repairInProgress', repairId: rep.id, category: rep.category, location: rep.location });
-      if (to === 'resolved') {
-        user.stats.helperCount = (user.stats.helperCount || 0) + 1;
-        checkAchievements(user);
-        saveProfile(user);
-        sendToUser(user.id, { type: 'stats', stats: user.stats, achievements: user.achievements });
-        sendToAccount(rep.reporterAccount, { type: 'repairResolved', repairId: rep.id, category: rep.category, location: rep.location });
-        pushNotification(space, { type: 'repairResolved', level: 'success', title: '报修已解决', body: rep.category + ' · ' + rep.location });
-      }
+      if (to === 'resolved') resolveRepair(space, rep, user);
       repairsBroadcast(space);
+    } else if (msg.type === 'repairBatchResolve') {
+      if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可批量解决报修'));
+      const ids = Array.isArray(msg.ids) ? msg.ids.map(String) : [];
+      if (!ids.length) return sendTo(ws, serError('请选择报修'));
+      const resolved = [];
+      for (const id of ids) {
+        const rep = space.repairs.get(id);
+        if (!rep) continue;
+        if (rep.status !== 'reported' && rep.status !== 'in_progress') continue;
+        if (rep.reporterAccount === user.account) continue;
+        resolveRepair(space, rep, user);
+        resolved.push(rep.id);
+      }
+      if (!resolved.length) return sendTo(ws, serError('所选报修均无法解决（可能已解决或为自己提交）'));
+      repairsBroadcast(space);
+      sendTo(ws, { type: 'repairBatchResolved', repairIds: resolved, count: resolved.length });
     } else if (msg.type === 'repairComment') {
       const rep = space.repairs.get(msg.repairId);
       if (!rep) return sendTo(ws, serError('报修记录不存在'));

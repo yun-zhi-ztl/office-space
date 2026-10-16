@@ -3,7 +3,7 @@
 //               / roomWaitlistCancel / reservationCancel / reservationCancelSeries / reservationApprove / reservationReject
 //               / roomStart / roomEnd / roomRate / roomFavorite
 module.exports = function roomsModule(api) {
-  const { roomReservationsPublic, roomPublic, roomWaitlistPublic, roomInsights, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly, getUserByAccount, sendToUser, sendToAccount, saveProfile, broadcastLeaderboard, expandRecurring, roomStatsBroadcast, checkAchievements, pushNotification, ROOM_REMIND_WINDOW_MS, MEETING_ONTIME_GRACE_MS } = api;
+  const { roomReservationsPublic, roomPublic, roomWaitlistPublic, roomInsights, broadcast, LIST_PAGE, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, recordWeekly, getUserByAccount, sendToUser, sendToAccount, saveProfile, broadcastLeaderboard, expandRecurring, roomStatsBroadcast, checkAchievements, pushNotification, ROOM_REMIND_WINDOW_MS, MEETING_ONTIME_GRACE_MS, genDoorCode } = api;
 
   function roomsBroadcast(space) {
     const reservations = roomReservationsPublic(space);
@@ -44,11 +44,27 @@ module.exports = function roomsModule(api) {
     return { ok: true, attendees: out };
   }
 
-  // 开始会议：设置进行中、记录准时/迟到、向参会人下发会议开始通知（手动 roomStart 与定时器自动开始共用）
+  // 门禁码可见范围：会议预约人、空间管理员、参会人
+  function roomDoorCodeEligible(space, res, account) {
+    return res.ownerAccount === account || isAdmin(space, account) || (res.attendees || []).includes(account);
+  }
+  function notifyRoomDoorCode(space, res) {
+    if (!res.doorCode) return;
+    const seen = new Set();
+    const push = (acc) => { if (acc && !seen.has(acc)) { seen.add(acc); sendToAccount(acc, { type: 'roomDoorCode', reservationId: res.id, roomId: res.roomId, title: res.title, doorCode: res.doorCode }); } };
+    push(res.ownerAccount);
+    for (const acc of space.admins || []) push(acc);
+    for (const acc of res.attendees || []) push(acc);
+  }
+
+  // 开始会议：设置进行中、记录准时/迟到、生成并下发门禁码、向参会人下发会议开始通知
   function startMeeting(space, res, now) {
     if (res.status !== 'pending') return false;
     res.status = 'active';
     res.actualStartAt = now;
+    res.doorCode = genDoorCode(space);
+    res.doorCodeIssuedAt = now;
+    notifyRoomDoorCode(space, res);
     const owner = getUserByAccount(res.ownerAccount);
     if (owner) {
       if (now - res.startAt <= MEETING_ONTIME_GRACE_MS) {
@@ -269,7 +285,21 @@ module.exports = function roomsModule(api) {
       w.status = 'cancelled';
       saveEntity(space.id, 'room_waitlist', w.id, w);
       roomsBroadcast(space);
-    } else if (msg.type === 'roomStart' || msg.type === 'roomEnd') {
+    } else if (msg.type === 'roomStart' || msg.type === 'roomEnd' || msg.type === 'roomDoorCodeRequest') {
+      if (msg.type === 'roomDoorCodeRequest') {
+        const r = space.roomReservations.get(msg.reservationId);
+        if (!r) return sendTo(ws, serError('预约不存在'));
+        if (r.status !== 'active') return sendTo(ws, serError('会议进行中才可获取门禁码'));
+        if (!roomDoorCodeEligible(space, r, user.account)) return sendTo(ws, serError('只有预约人、管理员或参会人可获取门禁码'));
+        if (!r.doorCode) {
+          r.doorCode = genDoorCode(space);
+          r.doorCodeIssuedAt = Date.now();
+          saveEntity(space.id, 'room_reservation', r.id, r);
+          notifyRoomDoorCode(space, r);
+        }
+        sendTo(ws, { type: 'roomDoorCode', reservationId: r.id, roomId: r.roomId, title: r.title, doorCode: r.doorCode });
+        return;
+      }
       const res = space.roomReservations.get(msg.reservationId);
       if (!res) return sendTo(ws, serError('预约不存在'));
       if (res.ownerAccount !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('只能操作自己的预约'));
@@ -279,6 +309,8 @@ module.exports = function roomsModule(api) {
       if (msg.type === 'roomEnd' && res.status === 'active') {
         res.status = 'completed';
         res.actualEndAt = Date.now();
+        res.doorCode = null;
+        res.doorCodeIssuedAt = null;
         const owner = getUserByAccount(res.ownerAccount);
         if (owner) {
           owner.stats.meetingCount = (owner.stats.meetingCount || 0) + 1;

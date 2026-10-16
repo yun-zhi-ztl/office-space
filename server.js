@@ -135,15 +135,15 @@ wss.on('connection', (ws) => {
     if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }
 
     switch (msg.type) {
-      case 'roomCreate': case 'roomTag': case 'roomApproval': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'reservationCancelSeries': case 'reservationApprove': case 'reservationReject': case 'reservationReschedule': case 'reservationAttendees': case 'roomWaitlist': case 'roomWaitlistCancel': case 'roomStart': case 'roomEnd': case 'meetingAttend': case 'roomRate': case 'roomFavorite':
+      case 'roomCreate': case 'roomTag': case 'roomApproval': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'reservationCancelSeries': case 'reservationApprove': case 'reservationReject': case 'reservationReschedule': case 'reservationAttendees': case 'roomWaitlist': case 'roomWaitlistCancel': case 'roomStart': case 'roomEnd': case 'roomDoorCodeRequest': case 'meetingAttend': case 'roomRate': case 'roomFavorite':
         rooms.handleRooms(ws, user, space, msg); break;
       case 'toolCreate': case 'toolDelete': case 'toolAdjust': case 'toolBorrow': case 'toolReturn': case 'toolExtend': case 'toolWaitlist': case 'remindOverdue':
         tools.handleTools(ws, user, space, msg); break;
-      case 'materialRequest': case 'materialCancel': case 'materialFulfill': case 'materialAssign': case 'materialUpdate': case 'materialTemplateCreate': case 'materialTemplateDelete':
+      case 'materialRequest': case 'materialCancel': case 'materialFulfill': case 'materialBatchFulfill': case 'materialAssign': case 'materialUpdate': case 'materialTemplateCreate': case 'materialTemplateDelete':
         materials.handleMaterials(ws, user, space, msg); break;
       case 'inventoryCreate': case 'inventoryDelete': case 'inventoryAdjust': case 'inventoryIssue': case 'inventoryReturn':
         inventory.handleInventory(ws, user, space, msg); break;
-      case 'repairCreate': case 'repairUpdate': case 'repairAssign': case 'repairComment': case 'repairRate':
+      case 'repairCreate': case 'repairUpdate': case 'repairBatchResolve': case 'repairAssign': case 'repairComment': case 'repairRate':
         repairs.handleRepairs(ws, user, space, msg); break;
       case 'visitorCreate': case 'visitorArrived': case 'visitorLeft': case 'visitorCancel': case 'visitorRemove': case 'visitorCheckin':
         visitors.handleVisitors(ws, user, space, msg); break;
