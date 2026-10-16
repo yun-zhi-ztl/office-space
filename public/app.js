@@ -138,6 +138,7 @@ function dispatch(m){
     case 'reservationApproved': toast('✔ 会议室预约已批准：'+fmtTime(m.startAt),'success'); render(); break;
     case 'reservationRejected': toast('✘ 会议室预约已被驳回：'+(m.title||''),'warn'); render(); break;
     case 'roomApprovalRequested': if(S.admin) toast('📋 有会议室预约待审批','info'); break;
+    case 'roomApprovalPending': if(S.admin) toast('🔔 会议室预约待审批已超时：'+(m.roomName||'')+' · '+(m.title||''),'warn'); break;
     case 'roomWaitlistPromoted': toast('🎉 候补已晋升：预约已自动创建（'+fmtTime(m.startAt)+'）','success'); render(); break;
     case 'reservationRescheduled': toast('✔ 改期成功：'+fmtTime(m.startAt)+' → '+fmtTime(m.endAt),'success'); render(); break;
     case 'roomRated': toast('✔ 会议室评分已提交：'+m.score+' 分','success'); render(); break;

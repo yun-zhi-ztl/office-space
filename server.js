@@ -323,6 +323,17 @@ setInterval(() => {
       }
       rooms.roomsBroadcast(sp);
     }
+    // 会议室预约审批催办：待审批超过 SLA 仍未处理时提醒管理员，避免漏审批
+    const roomApprovalReminders = api.dueRoomApprovalReminders(sp, now);
+    if (roomApprovalReminders.length) {
+      for (const r of roomApprovalReminders) {
+        r.approvalRemindedAt = now;
+        api.saveEntity(sp.id, 'room_reservation', r.id, r);
+        const rm = sp.rooms.find((x) => x.id === r.roomId);
+        for (const acc of sp.admins) api.sendToAccount(acc, { type: 'roomApprovalPending', reservationId: r.id, roomId: r.roomId, roomName: rm ? rm.name : '', title: r.title });
+      }
+      rooms.roomsBroadcast(sp);
+    }
     // 活动开始前提醒：开始前 10 分钟内提醒一次
     const eventReminders = api.dueEventReminders(sp, now);
     if (eventReminders.length) {

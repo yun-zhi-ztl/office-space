@@ -31,6 +31,7 @@ function createContext() {
   const RESERVE_CONFIRM_WINDOW_MS = 5 * 60000;
   const OVERDUE_REMIND_THROTTLE_MS = 24 * 3600 * 1000;
   const ROOM_REMIND_WINDOW_MS = 10 * 60000;
+  const ROOM_APPROVAL_SLA_MS = 24 * 3600 * 1000;
   const BORROW_SOON_WINDOW_MS = 24 * 3600 * 1000;
   const OOO_RETURN_WINDOW_MS = 30 * 60000;
   const OOO_RETURN_REMIND_THROTTLE_MS = 4 * 3600 * 1000;
@@ -377,6 +378,15 @@ function createContext() {
       if (r.reminded) return false;
       if (!r.remindAt) return false;
       return nowMs >= r.remindAt;
+    });
+  }
+  // 会议室预约待审批超过 SLA 仍未处理，提醒管理员跟进（按 approvalRemindedAt 去重）
+  function dueRoomApprovalReminders(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    return [...space.roomReservations.values()].filter((r) => {
+      if (r.status !== 'pending_approval') return false;
+      if (r.approvalRemindedAt) return false;
+      return nowMs >= (r.createdAt || 0) + ROOM_APPROVAL_SLA_MS;
     });
   }
   // 活动开始前提醒：开始前 10 分钟内提醒一次，避免刷屏
@@ -1496,7 +1506,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, EVENT_CATEGORIES, POLL_MAX_OPTIONS, KNOWLEDGE_CATEGORIES, TASK_PRIORITIES, TASK_STATUSES, NOTIFICATION_LEVELS, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, ROOM_APPROVAL_SLA_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, EVENT_CATEGORIES, POLL_MAX_OPTIONS, KNOWLEDGE_CATEGORIES, TASK_PRIORITIES, TASK_STATUSES, NOTIFICATION_LEVELS, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -1508,7 +1518,7 @@ function createContext() {
     // 持久化
     saveSpace, saveAccount, saveProfile, saveEntity, deleteEntity, saveStallRating, saveStatsToSpace,
     // 空间
-    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
+    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueRoomApprovalReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
     // 序列化
     roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
     // 广播

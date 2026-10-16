@@ -368,6 +368,19 @@ assertEq(api.ROOM_REMIND_WINDOW_MS, 10 * 60000, '会议提醒窗口为开始前 
 const resPub = api.reservationPublic(spRoom.roomReservations.get('rr1'), new Map());
 assertEq(resPub.remindAt, nowRoom - 1, 'reservationPublic 保留 remindAt');
 
+// ---------- 会议室审批催办 ----------
+console.log('\n📋 23b. 会议室审批催办');
+const spApproval = api.createSpace('s15b', '审批催办空间', 1, 0);
+const nowApproval = 1000000000;
+const SLA = api.ROOM_APPROVAL_SLA_MS;
+spApproval.roomReservations.set('ar1', { id: 'ar1', roomId: 'rm1', ownerAccount: 'alice', title: '旧单', startAt: nowApproval + 60000, endAt: nowApproval + 3600000, status: 'pending_approval', createdAt: nowApproval - SLA, approvalRemindedAt: null });
+spApproval.roomReservations.set('ar2', { id: 'ar2', roomId: 'rm1', ownerAccount: 'bob', title: '新单', startAt: nowApproval + 60000, endAt: nowApproval + 3600000, status: 'pending_approval', createdAt: nowApproval, approvalRemindedAt: null });
+spApproval.roomReservations.set('ar3', { id: 'ar3', roomId: 'rm1', ownerAccount: 'carol', title: '已催', startAt: nowApproval + 60000, endAt: nowApproval + 3600000, status: 'pending_approval', createdAt: nowApproval - SLA, approvalRemindedAt: nowApproval - 1000 });
+spApproval.roomReservations.set('ar4', { id: 'ar4', roomId: 'rm1', ownerAccount: 'dave', title: '普通', startAt: nowApproval + 60000, endAt: nowApproval + 3600000, status: 'pending', createdAt: nowApproval, approvalRemindedAt: null });
+const apprRem = api.dueRoomApprovalReminders(spApproval, nowApproval);
+assertEq(apprRem.map((r) => r.id), ['ar1'], '仅返回超过 SLA 且未催办过的待审批预约');
+assertEq(api.ROOM_APPROVAL_SLA_MS, 24 * 3600 * 1000, '审批催办 SLA 为 24 小时');
+
 // ---------- 借用到期前提醒 ----------
 console.log('\n📋 24. 借用到期前提醒');
 const spBorrow = api.createSpace('s16', '到期提醒空间', 1, 0);

@@ -1746,7 +1746,36 @@ async function runTests() {
     await sendMsg(wA, { type: 'roomApproval', roomId, requireApproval: false });
     const roomsOff = await waitFor(wA, 'rooms', (r) => r.rooms && r.rooms.some((x) => x.id === roomId && x.requireApproval === false), 3000);
     assert(roomsOff && findRoom(roomsOff, roomId).requireApproval === false, '管理员关闭审批成功');
-    wA.close(); wB.close();
+    // 候补晋升也必须遵守审批：开启审批后晋升的预约应为 pending_approval
+    const cP = 'apvw_' + runKey;
+    await reg(cP, 'pw', '候补成员');
+    const wC = await createWSClient(); await loginTo(wC, spP.id, cP, 'pw');
+    await sendMsg(wA, { type: 'roomApproval', roomId, requireApproval: true });
+    const roomsWl = await waitFor(wA, 'rooms', (r) => r.rooms && r.rooms.some((x) => x.id === roomId && x.requireApproval === true), 3000);
+    assert(roomsWl && findRoom(roomsWl, roomId).requireApproval === true, '候补测试重新开启审批');
+    const tW = base + 200 * 60000;
+    await sendMsg(wB, { type: 'roomBook', roomId, startAt: tW, endAt: tW + 30 * 60000, title: '占位会' });
+    const rW1 = await waitFor(wB, 'rooms', (r) => r.reservations && r.reservations.some((x) => x.title === '占位会' && x.status === 'pending_approval'), 3000);
+    assert(rW1, '成员占位预约进入 pending_approval');
+    const resW = findRes(rW1, rW1.reservations.find((x) => x.title === '占位会').id);
+    // 成员尝试重复预约同一时段应被拒（pending_approval 也占用时段）
+    await sendMsg(wC, { type: 'roomBook', roomId, startAt: tW, endAt: tW + 30 * 60000, title: '插队会' });
+    const errWl = mk(wC, 'error').pop();
+    assert(errWl && errWl.message.includes('已被预约'), '待审批时段不可重复预约');
+    // 加入候补
+    await sendMsg(wC, { type: 'roomWaitlist', roomId, startAt: tW, endAt: tW + 30 * 60000, title: '候补会' });
+    const wl = await waitFor(wC, 'rooms', (r) => r.waitlist && r.waitlist.some((w) => w.ownerAccount === cP && w.title === '候补会'), 3000);
+    assert(wl, '成员加入候补成功');
+    // 取消占位预约，候补晋升后应仍为 pending_approval
+    await sendMsg(wB, { type: 'reservationCancel', reservationId: resW.id });
+    const rPromoted = await waitFor(wC, 'rooms', (r) => r.reservations && r.reservations.some((x) => x.title === '候补会' && x.status === 'pending_approval'), 3000);
+    assert(rPromoted, '候补晋升后预约仍为 pending_approval（遵守审批）');
+    const resPromoted = findRes(rPromoted, rPromoted.reservations.find((x) => x.title === '候补会').id);
+    // 管理员批准候补晋升的预约
+    await sendMsg(wA, { type: 'reservationApprove', reservationId: resPromoted.id });
+    const rApprovedWl = await waitFor(wA, 'rooms', (r) => r.reservations && r.reservations.some((x) => x.id === resPromoted.id && x.status === 'pending'), 3000);
+    assert(rApprovedWl, '候补晋升审批批准成功');
+    wA.close(); wB.close(); wC.close();
   }
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);

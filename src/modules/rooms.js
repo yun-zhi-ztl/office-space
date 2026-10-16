@@ -33,7 +33,9 @@ module.exports = function roomsModule(api) {
     }
     if (!target) return;
     target.status = 'promoted';
-    const res = { id: genId('res', null), roomId: target.roomId, ownerAccount: target.ownerAccount, ownerName: target.ownerName, title: target.title, startAt: target.startAt, endAt: target.endAt, note: target.note, status: 'pending', repeat: null, seriesId: null, seriesIndex: 0, remindAt: Math.max(Date.now(), target.startAt - ROOM_REMIND_WINDOW_MS), reminded: false };
+    const room = space.rooms.find((r) => r.id === target.roomId);
+    const requireApproval = room && room.requireApproval;
+    const res = { id: genId('res', null), roomId: target.roomId, ownerAccount: target.ownerAccount, ownerName: target.ownerName, title: target.title, startAt: target.startAt, endAt: target.endAt, note: target.note, status: requireApproval ? 'pending_approval' : 'pending', repeat: null, seriesId: null, seriesIndex: 0, remindAt: Math.max(Date.now(), target.startAt - ROOM_REMIND_WINDOW_MS), reminded: false, approvalRemindedAt: null };
     space.roomReservations.set(res.id, res);
     saveEntity(space.id, 'room_reservation', res.id, res);
     const owner = getUserByAccount(target.ownerAccount);
@@ -41,6 +43,7 @@ module.exports = function roomsModule(api) {
       recordWeekly(owner, 'meetings');
       sendToAccount(target.ownerAccount, { type: 'roomWaitlistPromoted', waitlistId: target.id, reservationId: res.id, roomId: res.roomId, startAt: res.startAt, endAt: res.endAt });
     }
+    if (requireApproval) pushNotification(space, { type: 'roomApprovalRequested', level: 'info', title: '会议室预约待审批', body: (room ? room.name : '') + ' · ' + res.title });
   }
 
   function handleRooms(ws, user, space, msg) {
@@ -97,7 +100,7 @@ module.exports = function roomsModule(api) {
       if (participants > room.capacity) return sendTo(ws, serError(`人数超过会议室容量（最多 ${room.capacity} 人）`));
       const seriesId = repeat ? genId('ser', null) : null;
       const slots = expandRecurring(startAt, endAt, repeat, msg.repeatCount);
-      const clash = slots.some((slot) => [...space.roomReservations.values()].some((r) => r.roomId === room.id && (r.status === 'pending' || r.status === 'active') && slot.startAt < r.endAt && slot.endAt > r.startAt));
+      const clash = slots.some((slot) => slotClash(space, room.id, slot.startAt, slot.endAt));
       if (clash) {
         const first = slots[0];
         const free = space.rooms.filter((r) => r.id !== room.id && !slotClash(space, r.id, first.startAt, first.endAt));
@@ -105,7 +108,7 @@ module.exports = function roomsModule(api) {
         return sendTo(ws, { type: 'error', message: '该时段已被预约，可加入候补或另选时间' + (suggest.length ? '；空闲：' + suggest.map((r) => r.name).join('、') : ''), code: 'roomConflict', suggestions: suggest });
       }
       slots.forEach((slot, i) => {
-        const res = { id: genId('res', null), roomId: room.id, ownerAccount: user.account, ownerName: user.nickname, title, startAt: slot.startAt, endAt: slot.endAt, note, participants, status: room.requireApproval ? 'pending_approval' : 'pending', repeat: repeat || null, seriesId: seriesId || null, seriesIndex: i, remindAt: Math.max(Date.now(), slot.startAt - ROOM_REMIND_WINDOW_MS), reminded: false };
+        const res = { id: genId('res', null), roomId: room.id, ownerAccount: user.account, ownerName: user.nickname, title, startAt: slot.startAt, endAt: slot.endAt, note, participants, status: room.requireApproval ? 'pending_approval' : 'pending', repeat: repeat || null, seriesId: seriesId || null, seriesIndex: i, remindAt: Math.max(Date.now(), slot.startAt - ROOM_REMIND_WINDOW_MS), reminded: false, approvalRemindedAt: null };
         space.roomReservations.set(res.id, res);
         saveEntity(space.id, 'room_reservation', res.id, res);
       });
@@ -159,7 +162,7 @@ module.exports = function roomsModule(api) {
       if (!(startAt > 0) || !(endAt > startAt)) return sendTo(ws, serError('请选择有效的时间段'));
       if (startAt < Date.now()) return sendTo(ws, serError('改期开始时间不能早于当前时间'));
       if (endAt - startAt < 5 * 60000) return sendTo(ws, serError('至少预约 5 分钟'));
-      const clash = [...space.roomReservations.values()].some((r) => r.id !== res.id && r.roomId === room.id && (r.status === 'pending' || r.status === 'active') && startAt < r.endAt && endAt > r.startAt);
+      const clash = [...space.roomReservations.values()].some((r) => r.id !== res.id && r.roomId === room.id && (r.status === 'pending' || r.status === 'pending_approval' || r.status === 'active') && startAt < r.endAt && endAt > r.startAt);
       if (clash) {
         const free = space.rooms.filter((r) => r.id !== room.id && !slotClash(space, r.id, startAt, endAt));
         const suggest = free.slice(0, 5).map((r) => roomPublic(space, r));
