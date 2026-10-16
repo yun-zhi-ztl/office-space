@@ -33,6 +33,7 @@ const knowledgeModule = require('./src/modules/knowledge');
 const tasksModule = require('./src/modules/tasks');
 const notificationsModule = require('./src/modules/notifications');
 const leavesModule = require('./src/modules/leaves');
+const meetingNotesModule = require('./src/modules/meetingNotes');
 
 // ---------- 上下文 ----------
 const api = createContext();
@@ -80,6 +81,7 @@ const knowledge = knowledgeModule(api);
 const tasks = tasksModule(api);
 const notifications = notificationsModule(api);
 const leaves = leavesModule(api);
+const meetingNotes = meetingNotesModule(api);
 
 // ---------- 分页加载 ----------
 function handleFetchPage(ws, user, space, msg) {
@@ -169,6 +171,8 @@ wss.on('connection', (ws) => {
         notifications.handleNotifications(ws, user, space, msg); break;
       case 'leaveCreate': case 'leaveCancel': case 'leaveApprove': case 'leaveReject':
         leaves.handleLeaves(ws, user, space, msg); break;
+      case 'meetingNoteCreate': case 'meetingNoteEdit': case 'meetingNoteRemove':
+        meetingNotes.handleMeetingNotes(ws, user, space, msg); break;
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
       case 'announce': extras.announce(ws, user, space, msg); break;
       case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;

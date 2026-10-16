@@ -903,8 +903,25 @@ assertEq(lvSt.approvedCount, 1, 'leavesStats 统计已批准');
 assertEq(lvSt.rejectedCount, 1, 'leavesStats 统计已驳回');
 assertEq(lvSt.todayCount, 1, 'leavesStats 统计今日开始数');
 
+// ---------- 会议纪要序列化 + 统计 ----------
+console.log('\n📋 51. 会议纪要序列化 / 统计');
+const mnSp = api.createSpace('mn', '会议纪要空间', 1, 0);
+const mnNow = new Date('2026-10-15T10:00:00+08:00').getTime();
+mnSp.rooms.push({ id: 'rm1', name: '大会议室', capacity: 10 });
+mnSp.roomReservations.set('rv1', { id: 'rv1', roomId: 'rm1', ownerAccount: 'alice', ownerName: '甲', title: '周会', startAt: mnNow, endAt: mnNow + 3600000, status: 'completed' });
+mnSp.meetingNotes.set('mn1', { id: 'mn1', reservationId: 'rv1', title: '周会议纪要', content: '同步需求', account: 'bob', name: '乙', createdAt: mnNow, updatedAt: mnNow });
+mnSp.meetingNotes.set('mn2', { id: 'mn2', reservationId: 'rv1', title: '', content: '纪要二', account: 'carol', name: '丙', createdAt: mnNow - 1000, updatedAt: mnNow + 1000 });
+const mnPub = api.meetingNotesPublic(mnSp, api.spaceUserInfo(mnSp.id), mnNow);
+assertEq(mnPub.length, 2, 'meetingNotesPublic 返回会议纪要');
+assertEq(mnPub[0].id, 'mn2', 'meetingNotesPublic 按更新时间倒序');
+assertEq(mnPub[0].reservationTitle, '周会', 'meetingNotesPublic 关联会议标题');
+assertEq(mnPub[0].roomName, '大会议室', 'meetingNotesPublic 关联会议室');
+const mnSt = api.meetingNotesStats(mnSp, mnNow);
+assertEq(mnSt.total, 2, 'meetingNotesStats 统计总数');
+assertEq(mnSt.todayCount, 2, 'meetingNotesStats 统计今日更新');
+
 // ---------- 新成就 ----------
-console.log('\n📋 51. 待办任务 / 连续打卡成就');
+console.log('\n📋 52. 待办任务 / 连续打卡成就');
 const achUser5 = { stats: api.newStats(), achievements: [] };
 achUser5.stats.taskCreateCount = 5; achUser5.stats.taskDoneCount = 5;
 api.checkAchievements(achUser5);

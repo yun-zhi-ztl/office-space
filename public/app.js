@@ -18,7 +18,7 @@ const S = {
   lastSpace: localStorage.getItem('os_space')||'',
   ws: null, me:null, space:null, module:'rooms',
   pendingLogin:null,
-  DB:{ rooms:[], reservations:[], waitlist:[], waitlistTotal:0, tools:[], requests:[], materialTemplates:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[], inventory:{items:[],issues:[]}, attendance:{records:[],stats:{},config:{workStart:'09:00',workEnd:'18:00',lateMinutes:15}}, desks:{desks:[],reservations:[],reservationTotal:0}, ooo:{records:[],stats:{}}, leaves:{leaves:[],stats:{}}, events:[], polls:[], knowledge:[], tasks:[], notifications:[] },
+  DB:{ rooms:[], reservations:[], waitlist:[], waitlistTotal:0, tools:[], requests:[], materialTemplates:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[], inventory:{items:[],issues:[]}, attendance:{records:[],stats:{},config:{workStart:'09:00',workEnd:'18:00',lateMinutes:15}}, desks:{desks:[],reservations:[],reservationTotal:0}, ooo:{records:[],stats:{}}, leaves:{leaves:[],stats:{}}, meetingNotes:{notes:[],stats:{}}, events:[], polls:[], knowledge:[], tasks:[], notifications:[] },
   visitorTotal:0, visitorOffset:0,
   borrowTotal:0, borrowOffset:0,
   eventTotal:0, eventOffset:0, pollTotal:0, pollOffset:0, knowledgeTotal:0, knowledgeOffset:0, taskTotal:0, taskStats:{}, notificationTotal:0, notificationUnread:0,
@@ -31,7 +31,7 @@ const S = {
   attendanceCalendar:null,
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -68,6 +68,7 @@ function dispatch(m){
     case 'feedback': S.DB.feedback={ records:m.records||[], stats:m.stats||{} }; break;
     case 'mood': S.DB.mood={ records:m.records||[], stats:m.stats||{} }; break;
     case 'leaves': S.DB.leaves={ leaves:m.leaves||[], stats:m.stats||{} }; break;
+    case 'meetingNotes': S.DB.meetingNotes={ notes:m.notes||[], stats:m.stats||{} }; break;
     case 'events': S.DB.events=m.events||[]; S.eventTotal=m.total||0; S.eventOffset=S.DB.events.length; S.eventStats=m.stats||{}; break;
     case 'polls': S.DB.polls=m.polls||[]; S.pollTotal=m.total||0; S.pollOffset=S.DB.polls.length; S.pollStats=m.stats||{}; break;
     case 'knowledge': S.DB.knowledge=m.knowledge||[]; S.knowledgeTotal=m.total||0; S.knowledgeOffset=S.DB.knowledge.length; S.knowledgeStats=m.stats||{}; break;
@@ -102,6 +103,8 @@ function dispatch(m){
     case 'leaveCreated': if(S.admin) toast('📅 有请假申请待审批：'+(m.name||'')+' · '+(m.category||''),'info'); break;
     case 'leaveApproved': toast('✔ 请假申请已批准：'+(m.category||''),'success'); render(); break;
     case 'leaveRejected': toast('✘ 请假申请已被驳回：'+(m.category||'')+(m.decideNote?' · '+m.decideNote:''),'warn'); render(); break;
+    case 'meetingNoteCreated': if(S.admin) toast('📝 会议纪要已更新：'+(m.noteId||''),'info'); break;
+    case 'meetingNoteUpdated': toast('✔ 会议纪要已保存','success'); render(); break;
     case 'eventCreated': toast('🎉 活动已创建','success'); render(); break;
     case 'eventRsvpChanged': { const ev=(S.DB.events||[]).find(e=>e.id===m.rsvpId); if(ev) ev.myRsvp=m.status; toast('✔ 已更新参与状态（'+({going:'参加',maybe:'可能',not_going:'不参加'}[m.status]||m.status)+'）','success'); render(); break; }
     case 'eventCancelled': toast('已取消活动','warn'); render(); break;
@@ -166,10 +169,10 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','roomStats','users','leaderboard','achievements','myReminders','spaceTrend','notices','digest'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','spaceTrend','notices','digest'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
@@ -1074,6 +1077,59 @@ function openLeaveReject(id){
     <button class="btn danger" onclick="submitLeaveReject()">确认驳回</button></div>`);
 }
 function submitLeaveReject(){ wsSend({type:'leaveReject',leaveId:S.lastLeaveReject,decideNote:$('#lvNote').value}); closeModal(); }
+
+/* ============ 会议纪要 ============ */
+function renderMeetingNotes(){
+  const d=S.DB.meetingNotes||{notes:[],stats:{}};
+  const me=S.me.account;
+  const st=d.stats||{};
+  $('#main').innerHTML = `<div class="topbar"><div><h1>会议纪要</h1><div class="sub">会议结束后把结论挂在对应预约上，便于复盘与分享</div></div>
+    <button class="btn pri" onclick="openMeetingNoteCreate()">＋ 新建纪要</button></div>
+    <div class="cards">
+      <div class="card"><h3>📝 纪要总数</h3><div style="font-size:30px;font-weight:800">${st.total||0}</div><div class="meta">条</div></div>
+      <div class="card"><h3>📅 今日更新</h3><div style="font-size:30px;font-weight:800">${st.todayCount||0}</div><div class="meta">条</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">🗒️ 会议纪要</h3>
+    <div class="list">${(d.notes||[]).length?d.notes.map(n=>{
+      const mine=n.account===me;
+      const who=n.reservationTitle?(' · '+esc(n.reservationTitle)):(n.roomName?(' · '+esc(n.roomName)):'');
+      return `<div class="row"><span><span class="who">${esc(n.title||'（无标题）')}</span> <span class="badge">${esc(n.name||n.account)}</span>
+        <div class="desc">${esc((n.content||'').slice(0,120))}${(n.content||'').length>120?'…':''}</div>
+        <div class="when">${n.reservationTitle?esc(n.reservationTitle)+' · ':''}${n.roomName?esc(n.roomName):''}${who} · ${fmtTime(n.updatedAt||n.createdAt)} 更新</div>
+      </span><span class="fs">${(mine||S.admin)?`<button class="btn green sm" onclick="openMeetingNoteEdit('${n.id}')">编辑</button><button class="btn danger sm" onclick="meetingNoteRemove('${n.id}')">删除</button>`:''}</span></div>`;
+    }).join(''):'<div class="empty">还没有会议纪要</div>'}</div>`;
+}
+function openMeetingNoteCreate(){
+  const res=(S.DB.reservations||[]).filter(r=>r.status!=='cancelled');
+  const opts=res.length?res.map(r=>`<option value="${r.id}">${esc(r.title||'')} · ${fmtTime(r.startAt)}（${r.ownerName||''}）</option>`).join(''):'';
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>新建会议纪要</h2><div class="form">
+    <div class="fld"><label>关联会议</label><select id="mnRes">${opts}</select></div>
+    <div class="fld"><label>标题</label><input id="mnTitle" placeholder="可选"></div>
+    <div class="fld"><label>纪要内容</label><textarea id="mnContent" rows="6"></textarea></div>
+    <button class="btn pri" onclick="submitMeetingNoteCreate()">保存纪要</button></div>`);
+}
+function submitMeetingNoteCreate(){
+  const rid=$('#mnRes').value;
+  const content=($('#mnContent').value||'').trim();
+  if(!rid) return toast('请先选择关联会议','error');
+  if(!content) return toast('请填写会议纪要内容','error');
+  wsSend({type:'meetingNoteCreate',reservationId:rid,title:$('#mnTitle').value,content});
+  closeModal();
+}
+function openMeetingNoteEdit(id){
+  const n=(S.DB.meetingNotes||{}).notes.find(x=>x.id===id);
+  if(!n) return;
+  S.lastMeetingNote=id;
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>编辑会议纪要 · ${esc(n.title||'（无标题）')}</h2><div class="form">
+    <div class="fld"><label>标题</label><input id="mnTitle" value="${esc(n.title||'')}"></div>
+    <div class="fld"><label>纪要内容</label><textarea id="mnContent" rows="8">${esc(n.content||'')}</textarea></div>
+    <button class="btn pri" onclick="submitMeetingNoteEdit()">保存修改</button></div>`);
+}
+function submitMeetingNoteEdit(){
+  wsSend({type:'meetingNoteEdit',noteId:S.lastMeetingNote,title:$('#mnTitle').value,content:$('#mnContent').value});
+  closeModal();
+}
+function meetingNoteRemove(id){ wsSend({type:'meetingNoteRemove',noteId:id}); }
 
 /* ============ 意见反馈 ============ */
 function renderFeedback(){

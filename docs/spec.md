@@ -149,6 +149,17 @@
 - 广播与单发：`leaves`（含 `leaves` / `total` / `stats`）全量广播；`leaveCreated`（管理员收到新申请）；`leaveApproved` / `leaveRejected` 单发申请人。
 - 统计：`leavesStats` 返回 `pendingCount` / `todayCount` / `approvedCount` / `rejectedCount`，随 `leaves` 广播下发。
 
+### 会议纪要（meeting notes）
+
+成员把纪要挂到会议室预约上，与会议室预约通过 `reservationId` 关联。一个预约最多保留一条纪要，重复创建转为更新。
+
+- `meeting_note`: `{ id, reservationId, title, content, account, name, createdAt, updatedAt }`
+  - `title` 必填、≤120；`content` 必填、≤2000（`MEETING_NOTE_MAX_LEN`）。
+  - 关联的会议室预约需存在，序列化补充 `meetingTitle` 与 `roomName` 便于展示。
+- 权限：成员创建；作者或管理员编辑 / 删除。
+- 广播：`meetingNotes`（含 `notes` / `stats`）全量广播；同一预约重复创建发 `meetingNoteUpdated`；管理员收到 `meetingNoteCreated`。
+- 统计：`meetingNotesStats` 返回 `total` / `todayCount`，随 `meetingNotes` 广播下发。
+
 ### 意见反馈（feedback）
 - `feedback`: `{ id, account, name, anonymous, category, content, status, replies[], createdAt, handledAt? }`
   - `category`: 建议 / 吐槽 / 问题 / 表扬；`anonymous` 为真时对外作者显示「匿名成员」。
@@ -237,6 +248,8 @@
 | `oooCreate` / `oooBack` / `oooCancel` / `oooRemove` | 外出登记 / 返回 / 取消 / 删除 | member / owner / admin |
 | `leaveCreate` / `leaveCancel` | 提交请假申请 / 取消自己的待审批申请 | member / owner |
 | `leaveApprove` / `leaveReject` | 批准 / 驳回（可带 `decideNote`） | admin |
+| `meetingNoteCreate` | 为会议室预约创建会议纪要（同一预约重复创建转为更新） | member |
+| `meetingNoteEdit` / `meetingNoteRemove` | 编辑 / 删除自己的纪要（管理员也可） | author / admin |
 | `feedbackCreate` | 提交反馈（可匿名） | member |
 | `feedbackReply` / `feedbackClose` / `feedbackRemove` | 回复 / 关闭 / 删除反馈 | admin |
 | `moodCheckIn` | 提交 / 更新今日心情（emoji） | member |
@@ -260,12 +273,12 @@
 
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，
-以及 `rooms`（含 `rooms` / `reservations` / `waitlist` / `waitlistTotal`）、`tools`、`materials`（含 `requests` / `templates`）、`repairs`、`visitors`、`stalls`、`attendance`（含 `records` / `stats` / `config`）、`desks`（含 `desks` / `reservations` / `reservationTotal`）、`deskStats`、`ooo`（含 `records` / `stats`）、`leaves`（含 `leaves` / `total` / `stats`）、`feedback`（含 `records` / `stats`）、`mood`（含 `records` / `stats`）、`events`（含 `events` / `total` / `stats`）、`polls`（含 `polls` / `total` / `stats`）、`knowledge`（含 `knowledge` / `total` / `stats`）、`tasks`（含 `tasks` / `total` / `stats`）、`notifications`（含 `notifications` / `total` / `unreadCount`）、`users`、`leaderboard`（含 `account`、`role`、`display`），
-另有 `roomStats`、`spacePaused`、`roomWaitlistPromoted`、`roomRated`、`roomFavorites`、`repairEscalated`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendanceCheckedIn`、`attendanceCheckedOut`、`attendanceCalendar`、`eventReminder`、`eventRsvpChanged`、`pollVoted`、`pollClosed`、`knowledgeLiked`、`knowledgeCommented`、`taskCreated`、`taskAssigned`、`taskCompleted`、`taskCommented`、`leaveCreated`、`leaveApproved`、`leaveRejected` 等即时广播，另有 `oooBacked`、`oooReturnSoon`、`moodCheckedIn`；全量广播含 `inventory`（物资库存台账，随 `broadcastAll` 下发）；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows` / `feedback` / `events` / `polls` / `knowledge` / `tasks`）。
+以及 `rooms`（含 `rooms` / `reservations` / `waitlist` / `waitlistTotal`）、`tools`、`materials`（含 `requests` / `templates`）、`repairs`、`visitors`、`stalls`、`attendance`（含 `records` / `stats` / `config`）、`desks`（含 `desks` / `reservations` / `reservationTotal`）、`deskStats`、`ooo`（含 `records` / `stats`）、`leaves`（含 `leaves` / `total` / `stats`）、`meetingNotes`（含 `notes` / `stats`）、`feedback`（含 `records` / `stats`）、`mood`（含 `records` / `stats`）、`events`（含 `events` / `total` / `stats`）、`polls`（含 `polls` / `total` / `stats`）、`knowledge`（含 `knowledge` / `total` / `stats`）、`tasks`（含 `tasks` / `total` / `stats`）、`notifications`（含 `notifications` / `total` / `unreadCount`）、`users`、`leaderboard`（含 `account`、`role`、`display`），
+另有 `roomStats`、`spacePaused`、`roomWaitlistPromoted`、`roomRated`、`roomFavorites`、`repairEscalated`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendanceCheckedIn`、`attendanceCheckedOut`、`attendanceCalendar`、`eventReminder`、`eventRsvpChanged`、`pollVoted`、`pollClosed`、`knowledgeLiked`、`knowledgeCommented`、`taskCreated`、`taskAssigned`、`taskCompleted`、`taskCommented`、`leaveCreated`、`leaveApproved`、`leaveRejected`、`meetingNoteCreated`、`meetingNoteUpdated` 等即时广播，另有 `oooBacked`、`oooReturnSoon`、`moodCheckedIn`；全量广播含 `inventory`（物资库存台账，随 `broadcastAll` 下发）；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows` / `feedback` / `events` / `polls` / `knowledge` / `tasks`）。
 
 ## 5. 前端
 
-单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 物资库存 / 报修 / 访客登记 / 考勤打卡 / 工位预约 / 外出登记 / 请假审批 / 意见反馈 / 心情打卡 / 活动管理 / 投票 / 知识库 / 待办任务 / 通知中心 / 坑位看板），
+单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 物资库存 / 报修 / 访客登记 / 考勤打卡 / 工位预约 / 外出登记 / 请假审批 / 会议纪要 / 意见反馈 / 心情打卡 / 活动管理 / 投票 / 知识库 / 待办任务 / 通知中心 / 坑位看板），
 个人资料入口位于侧栏底部；桌面与移动端响应式，原生 HTML/CSS/JS，无构建步骤；静态文件由 Express 托管；
 会议室预约支持每天 / 每周周期预约（列表按 `seriesId` 聚合展示并整组取消）；
 报修列表展示工单号 `RP-日期-编号` 并可调整高 / 中 / 低优先级；空间暂停时顶部展示暂停横幅并限制对应创建操作；
@@ -395,13 +408,14 @@
 | 工位达人成就 | 预约工位累计 5 次解锁「工位达人」徽章 | 复用 `stats.deskCount` + `achievements` |
 | 外出报备达人 | 外出登记累计 5 次解锁「外出报备达人」徽章 | 复用 `stats.oooCount` + `achievements` |
 | 请假审批 | 成员提交请假申请（事假 / 病假 / 年假 / 调休 / 婚假 / 产假 / 丧假 / 其他），同一时间只能有一条待审批申请；管理员批准 / 驳回（可填原因），全程留痕并单发通知申请人 | `leaveCreate` / `leaveCancel` / `leaveApprove` / `leaveReject` + `leaves` / `leaveCreated` / `leaveApproved` / `leaveRejected` |
+| 会议纪要 | 把纪要挂到会议室预约上，成员为预约创建纪要（标题 + 内容），作者或管理员可编辑 / 删除；按预约关联会议标题与会议室，统计总数与今日更新 | `meetingNoteCreate` / `meetingNoteEdit` / `meetingNoteRemove` + `meetingNotes` / `meetingNoteCreated` / `meetingNoteUpdated` |
 | 倾听达人 | 回复意见反馈累计 3 条解锁「倾听达人」徽章 | 复用 `stats.feedbackReplyCount` + `achievements` |
 | 物资申领优先级 | 申领可标记高 / 普通 / 低优先级，列表按优先级排序，申请人或管理员可调整 | `materialRequest`(priority) / `materialUpdate` |
 | 心情打卡 | 每天 emoji 记录一次心情，同一账号每天只保留一条；统计今日人数与各表情计数 | `moodCheckIn` + `mood` |
 
 ### 客户端→服务端新增消息
-`setStatus`、`announce`、`spaceRename`、`spacePause`、`spaceAdminSet`、`spaceKick`、`suggestRoom`、`remindReturn`、`toolExtend`、`toolBorrow`(`dueAt` 自定义归还时间)、`toolCreate` / `toolAdjust`(`minAvailable` 库存告急阈值)、`inventoryCreate` / `inventoryAdjust`(`minAvailable` 物资库存告急阈值) / `inventoryIssue` / `inventoryReturn`、`roomBook`(周期 `repeat`/`repeatCount`)、`reservationCancelSeries`、`reservationReschedule`、`roomRate`、`roomFavorite`、`roomApproval`、`reservationApprove`、`reservationReject`、`roomWaitlist`、`roomWaitlistCancel`、`materialAssign`、`repairAssign`、`repairUpdate`(优先级)、`repairComment`(跟进评论)、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`visitorCheckin`、`attendCheckIn` / `attendCheckOut` / `attendConfig`、`deskCreate` / `deskDelete` / `deskReserve` / `deskCancel` / `deskStart` / `deskEnd`、`oooCreate` / `oooBack` / `oooCancel` / `oooRemove`、`leaveCreate` / `leaveCancel` / `leaveApprove` / `leaveReject`、`feedbackCreate` / `feedbackReply` / `feedbackClose` / `feedbackRemove`、`moodCheckIn`、`materialUpdate`、`profileUpdate`、`passwordChange`、`toggleEmergency`、`fetchPage`(`borrows` 等分页模块)；服务端相应广播/单发
-`users`(含 `status`、`emergencyMode`、`role`) 、`notices`、`suggestRooms`、`borrowReminder`、`roomReminder`、`borrowDueSoon`、`materialAssigned`、`materialFulfilled`、`materialSla`、`repairAssigned`、`repairInProgress`、`repairResolved`、`repairSla`、`repairEscalated`、`adminSet`、`spaceKicked`、`digest`、`visitors`、`spaceRenamed`、`spacePaused`、`roomWaitlistPromoted`、`reservationRescheduled`、`reservationApproved`、`reservationRejected`、`roomApprovalPending`、`rooms`(含 `waitlist`)、`roomRated`、`roomFavorites`、`visitorCheckinNotification`、`visitorArrived`、`visitorLeft`、`visitorReminder`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendance`、`attendanceCheckedIn`、`attendanceCheckedOut`、`desks`、`deskStats`、`ooo`、`leaves`、`feedback`、`mood`、`oooBacked`、`oooReturnSoon`、`moodCheckedIn`、`leaveCreated`、`leaveApproved`、`leaveRejected`。
+`setStatus`、`announce`、`spaceRename`、`spacePause`、`spaceAdminSet`、`spaceKick`、`suggestRoom`、`remindReturn`、`toolExtend`、`toolBorrow`(`dueAt` 自定义归还时间)、`toolCreate` / `toolAdjust`(`minAvailable` 库存告急阈值)、`inventoryCreate` / `inventoryAdjust`(`minAvailable` 物资库存告急阈值) / `inventoryIssue` / `inventoryReturn`、`roomBook`(周期 `repeat`/`repeatCount`)、`reservationCancelSeries`、`reservationReschedule`、`roomRate`、`roomFavorite`、`roomApproval`、`reservationApprove`、`reservationReject`、`roomWaitlist`、`roomWaitlistCancel`、`materialAssign`、`repairAssign`、`repairUpdate`(优先级)、`repairComment`(跟进评论)、`visitorCreate`、`visitorArrived`、`visitorLeft`、`visitorCancel`、`visitorRemove`、`visitorCheckin`、`attendCheckIn` / `attendCheckOut` / `attendConfig`、`deskCreate` / `deskDelete` / `deskReserve` / `deskCancel` / `deskStart` / `deskEnd`、`oooCreate` / `oooBack` / `oooCancel` / `oooRemove`、`leaveCreate` / `leaveCancel` / `leaveApprove` / `leaveReject`、`meetingNoteCreate` / `meetingNoteEdit` / `meetingNoteRemove`、`feedbackCreate` / `feedbackReply` / `feedbackClose` / `feedbackRemove`、`moodCheckIn`、`materialUpdate`、`profileUpdate`、`passwordChange`、`toggleEmergency`、`fetchPage`(`borrows` 等分页模块)；服务端相应广播/单发
+`users`(含 `status`、`emergencyMode`、`role`) 、`notices`、`suggestRooms`、`borrowReminder`、`roomReminder`、`borrowDueSoon`、`materialAssigned`、`materialFulfilled`、`materialSla`、`repairAssigned`、`repairInProgress`、`repairResolved`、`repairSla`、`repairEscalated`、`adminSet`、`spaceKicked`、`digest`、`visitors`、`spaceRenamed`、`spacePaused`、`roomWaitlistPromoted`、`reservationRescheduled`、`reservationApproved`、`reservationRejected`、`roomApprovalPending`、`rooms`(含 `waitlist`)、`roomRated`、`roomFavorites`、`visitorCheckinNotification`、`visitorArrived`、`visitorLeft`、`visitorReminder`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendance`、`attendanceCheckedIn`、`attendanceCheckedOut`、`desks`、`deskStats`、`ooo`、`leaves`、`feedback`、`mood`、`oooBacked`、`oooReturnSoon`、`moodCheckedIn`、`leaveCreated`、`leaveApproved`、`leaveRejected`、`meetingNoteCreated`、`meetingNoteUpdated`。
 
 ## 9. 代码架构（多模块拆分）
 
@@ -412,12 +426,12 @@ server.js        入口：Express + WS 分发 + 定时器 + 心跳 + 优雅停�
 src/context.js   共享上下文：状态 + 常量 + 基础工具 + 持久化(写合并) + 认证 + 序列化 + 广播 + 坑位成就 + 每日看点 + 空间周报
 src/http.js      HTTP 路由：/api/spaces、/api/register
 src/session.js   会话：进入/切换空间、登录（含 digest）
-src/modules/     rooms / tools / materials / inventory / repairs / visitors / attendance / desks / ooo / leaves / feedback / mood / profile / stalls / extras（各领域处理函数）
+src/modules/     rooms / tools / materials / inventory / repairs / visitors / attendance / desks / ooo / leaves / meetingNotes / feedback / mood / profile / stalls / extras（各领域处理函数）
 ```
 
 - 各领域模块是纯函数工厂 `module.exports = (api)=>({...})`，由 `server.js` 注入共享上下文 `api`，无全局状态、便于单测。
 - 定时器、心跳、优雅停机属于进程级关注点，保留在入口。
-- 该拆分不改变任何对外协议与行为，e2e（370 项）在内存与 PostgreSQL 双模式下均通过。
+- 该拆分不改变任何对外协议与行为，e2e（379 项）在内存与 PostgreSQL 双模式下均通过。
 
 ## 10. 健康检查、自测与 CI（本版本新增）
 
@@ -425,10 +439,10 @@ src/modules/     rooms / tools / materials / inventory / repairs / visitors / at
 - **npm 脚本**：
   - `npm start`：启动服务
   - `npm run lint`：对 `server.js` / `public` / `src/` / `test/` 全部 JS 执行 `node --check` 语法检查（`scripts/lint.js`）
-  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁与进度、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化、每日看点、我的待办、空间活跃趋势、用户广播、会议室时长累计 / 实际到场时长、周期预约展开、借用逾期判定、会议室占用率统计、报修优先级序列化、借用记录序列化、工具在借明细序列化、工具排队序列化、会议室候补序列化、访客签到码序列化、借用逾期提醒、会议室开始前提醒、借用到期前提醒、访客预计到访提醒、报修 SLA 超时提醒、申领 SLA 超时提醒、报修重复检测、管理员成员管理、通知统一入口、报修处理时长统计、成员移除、低库存预警、空间周报、成就扩展、物资库存台账、考勤打卡、物资优先级序列化、意见反馈序列化、工位签到字段、心情序列化、待办任务序列化、通知中心序列化、考勤连续打卡与出勤日历、请假审批序列化与统计，320 项）
+  - `npm run test:unit`：单元测试（`test/unit.js`，直接断言 `createContext` 纯函数：ID 生成、周统计、坑位段位、成就解锁与进度、口令哈希、管理员判定、历史预约清理、段位缓存、访客序列化、每日看点、我的待办、空间活跃趋势、用户广播、会议室时长累计 / 实际到场时长、周期预约展开、借用逾期判定、会议室占用率统计、报修优先级序列化、借用记录序列化、工具在借明细序列化、工具排队序列化、会议室候补序列化、访客签到码序列化、借用逾期提醒、会议室开始前提醒、借用到期前提醒、访客预计到访提醒、报修 SLA 超时提醒、申领 SLA 超时提醒、报修重复检测、管理员成员管理、通知统一入口、报修处理时长统计、成员移除、低库存预警、空间周报、成就扩展、物资库存台账、考勤打卡、物资优先级序列化、意见反馈序列化、工位签到字段、心情序列化、待办任务序列化、通知中心序列化、考勤连续打卡与出勤日历、请假审批序列化与统计、会议纪要序列化与统计，326 项）
   - `npm run test:restore`：前端「自动恢复会话」回归测试（`test/restore.js`，vm stub 加载内联脚本，无需服务）
   - `npm run smoke`：快速冒烟（`test/smoke.js`）——健康检查、首页与大屏可达、WS 连接、登录、收到广播
-  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，370 项）
+  - `npm test`：单元测试 + `test:restore` + 完整 e2e（`test/test.js`，379 项）
 - **CI**：`.github/workflows/ci.yml` 在 push 到 `main` 或 pull_request 时自动：`npm ci` → `npm run lint` → `docker compose config` 校验 → `docker build` 构建校验 → 内存模式启动服务 → `npm run smoke` → `npm test`。用不可达的 PG 参数强制内存模式，无需外部数据库。
 - **环境变量**：见 `.env.example`（`PORT`、`PGHOST`、`PGPORT`、`PGUSER`、`PGPASSWORD`、`PGDATABASE`）；`.env` 已加入 `.gitignore`。
 

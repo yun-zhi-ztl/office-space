@@ -17,6 +17,7 @@ function createContext() {
   const INVENTORY_CATEGORIES = ['办公文具', '打印耗材', '电池', '清洁用品', '食品饮料', '其它'];
   const OOO_CATEGORIES = ['外出', '请假', '出差', '调休', '其他'];
   const LEAVE_CATEGORIES = ['事假', '病假', '年假', '调休', '婚假', '产假', '丧假', '其他'];
+  const MEETING_NOTE_MAX_LEN = 2000;
   const FEEDBACK_CATEGORIES = ['建议', '吐槽', '问题', '表扬'];
   const MATERIAL_PRIORITIES = ['high', 'normal', 'low'];
   const MOOD_EMOJIS = ['😊', '😐', '😴', '😡', '🤩', '🥲'];
@@ -224,6 +225,7 @@ function createContext() {
       else if (r.kind === 'notification') sp.notifications.set(data.id, data);
       else if (r.kind === 'task') sp.tasks.set(data.id, data);
       else if (r.kind === 'leave') sp.leaves.set(data.id, data);
+      else if (r.kind === 'meeting_note') sp.meetingNotes.set(data.id, data);
       else if (r.kind === 'notice') { sp.notices.push(data); sp.notices.sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
       else if (r.kind === 'stall') { const st = sp.stalls.find((s) => s.id === data.id); if (st) st.ratings = (data.ratings || []).slice(-60); }
     }
@@ -485,6 +487,7 @@ function createContext() {
       events: new Map(), polls: new Map(), knowledge: new Map(),
       notifications: new Map(), tasks: new Map(),
       leaves: new Map(),
+      meetingNotes: new Map(),
     };
     sp.weeklyReportDate = null;
     sp.stalls = buildStalls(squat == null ? 4 : squat, urinal == null ? 3 : urinal);
@@ -1249,6 +1252,38 @@ function createContext() {
     const all = leavesPublic(sp, info);
     broadcast(sp.id, 'leaves', { leaves: all.slice(0, LIST_PAGE), total: all.length, stats: leavesStats(sp) });
   }
+  // 会议纪要：挂在会议室预约下，会议结束后填写/更新，便于复盘与分享
+  function meetingNotesPublic(space, info, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const rooms = space.rooms;
+    return [...space.meetingNotes.values()].map((n) => {
+      const res = space.roomReservations.get(n.reservationId);
+      const room = res ? rooms.find((r) => r.id === res.roomId) : null;
+      const who = info.get(n.account);
+      return {
+        id: n.id, reservationId: n.reservationId, title: n.title || '', content: n.content || '',
+        account: n.account, name: who ? who.display : n.name,
+        reservationTitle: res ? res.title || '' : '', roomName: room ? room.name : '',
+        startAt: res ? res.startAt : null, endAt: res ? res.endAt : null,
+        createdAt: n.createdAt, updatedAt: n.updatedAt || n.createdAt || 0,
+      };
+    }).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  }
+  function meetingNotesStats(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const ds = new Date(nowMs); ds.setHours(0, 0, 0, 0);
+    const dStart = ds.getTime(), dEnd = dStart + 86400000;
+    const recs = [...space.meetingNotes.values()];
+    return {
+      total: recs.length,
+      todayCount: recs.filter((n) => n.updatedAt >= dStart && n.updatedAt < dEnd).length,
+    };
+  }
+  function meetingNotesBroadcast(sp) {
+    const info = spaceUserInfo(sp.id);
+    const all = meetingNotesPublic(sp, info);
+    broadcast(sp.id, 'meetingNotes', { notes: all.slice(0, LIST_PAGE), total: all.length, stats: meetingNotesStats(sp) });
+  }
   function eventsBroadcast(sp) {
     const info = spaceUserInfo(sp.id);
     const events = eventPublic(sp, info, null);
@@ -1315,6 +1350,7 @@ function createContext() {
     knowledgeBroadcast(sp);
     tasksBroadcast(sp);
     leavesBroadcast(sp);
+    meetingNotesBroadcast(sp);
     notificationsBroadcast(sp);
     broadcastUsers(sp);
     broadcastLeaderboard(sp);
@@ -1539,7 +1575,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, ROOM_APPROVAL_SLA_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, LEAVE_CATEGORIES, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, EVENT_CATEGORIES, POLL_MAX_OPTIONS, KNOWLEDGE_CATEGORIES, TASK_PRIORITIES, TASK_STATUSES, NOTIFICATION_LEVELS, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, ROOM_APPROVAL_SLA_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, LEAVE_CATEGORIES, MEETING_NOTE_MAX_LEN, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, EVENT_CATEGORIES, POLL_MAX_OPTIONS, KNOWLEDGE_CATEGORIES, TASK_PRIORITIES, TASK_STATUSES, NOTIFICATION_LEVELS, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -1553,9 +1589,9 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueRoomApprovalReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
     // 广播
-    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, eventsBroadcast, pollsBroadcast, knowledgeBroadcast, tasksBroadcast, leavesBroadcast, notificationsBroadcast, noticesBroadcast, pushNotification, pushNotice, visitorsBroadcast,
+    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, eventsBroadcast, pollsBroadcast, knowledgeBroadcast, tasksBroadcast, leavesBroadcast, meetingNotesBroadcast, notificationsBroadcast, noticesBroadcast, pushNotification, pushNotice, visitorsBroadcast,
     // 坑位辅助
     activeStallCount, checkAchievements, notifyUrge, ACHIEVEMENT_DEFS,
     achievementProgress, achievementDefsPublic,

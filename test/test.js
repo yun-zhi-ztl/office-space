@@ -1830,6 +1830,55 @@ async function runTests() {
     assert(notifyRejected && notifyRejected.decideNote === '人手不足', '申请人收到 leaveRejected 单发通知');
     wA.close(); wB.close();
   }
+
+  // ========== 测试43: 会议纪要 ==========
+  console.log('\n📋 测试43: 会议纪要');
+  {
+    const spN = (await httpJson('POST', '/api/spaces', { name: '纪要办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aN = 'mna_' + runKey, bN = 'mnm_' + runKey;
+    await reg(aN, 'pw', '纪要管理员'); await reg(bN, 'pw', '纪要成员');
+    const wA = await createWSClient(); await loginTo(wA, spN.id, aN, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spN.id, bN, 'pw');
+    const base = Date.now();
+    // 管理员创建会议室，成员预约
+    await sendMsg(wA, { type: 'roomCreate', name: '纪要会议室', capacity: 6 });
+    const rooms0 = await waitFor(wA, 'rooms', (r) => r.rooms && r.rooms.length === 1, 3000);
+    const roomId = rooms0.rooms[0].id;
+    await sendMsg(wB, { type: 'roomBook', roomId, startAt: base + 10 * 60000, endAt: base + 40 * 60000, title: '周会' });
+    const rooms1 = await waitFor(wB, 'rooms', (r) => r.reservations && r.reservations.some((x) => x.title === '周会'), 3000);
+    const resId = rooms1.reservations.find((x) => x.title === '周会').id;
+    // 成员提交会议纪要
+    await sendMsg(wB, { type: 'meetingNoteCreate', reservationId: resId, title: '周会议纪要', content: '同步需求' });
+    const notes0 = await waitFor(wB, 'meetingNotes', (r) => r.notes && r.notes.some((x) => x.reservationId === resId), 3000);
+    const noteId = notes0.notes[0].id;
+    assert(notes0 && notes0.notes[0].reservationTitle === '周会', '会议纪要关联会议标题');
+    assert(notes0 && notes0.notes[0].roomName === '纪要会议室', '会议纪要关联会议室');
+    assert(notes0 && notes0.stats.total === 1, '会议纪要统计 total=1');
+    // 重复创建转为更新
+    await sendMsg(wB, { type: 'meetingNoteCreate', reservationId: resId, title: '周会议纪要', content: '更新后的内容' });
+    const noteUpd = await waitFor(wB, 'meetingNoteUpdated', (m) => m.noteId === noteId, 3000);
+    assert(noteUpd, '重复提交纪要转为更新');
+    const notesUpd = await waitFor(wB, 'meetingNotes', (r) => r.notes && r.notes.some((x) => x.id === noteId && x.content === '更新后的内容'), 3000);
+    assert(notesUpd, '纪要内容已更新');
+    // 成员编辑自己的纪要
+    await sendMsg(wB, { type: 'meetingNoteEdit', noteId, title: '周会议纪要', content: '最终纪要' });
+    const noteEdited = await waitFor(wB, 'meetingNoteUpdated', (m) => m.noteId === noteId, 3000);
+    assert(noteEdited, '成员编辑自己的纪要成功');
+    // 成员删除自己的纪要
+    await sendMsg(wB, { type: 'meetingNoteRemove', noteId });
+    const notesAfterDel = await waitFor(wB, 'meetingNotes', (r) => r.notes && r.notes.length === 0, 3000);
+    assert(notesAfterDel, '成员删除自己的纪要成功');
+    // 管理员创建纪要
+    await sendMsg(wA, { type: 'meetingNoteCreate', reservationId: resId, title: '管理会议纪要', content: '管理内容' });
+    const notesAdmin = await waitFor(wA, 'meetingNotes', (r) => r.notes && r.notes.some((x) => x.title === '管理会议纪要'), 3000);
+    assert(notesAdmin, '管理员创建纪要成功');
+    const adminNoteId = notesAdmin.notes.find((x) => x.title === '管理会议纪要').id;
+    // 成员不能编辑管理员的纪要
+    await sendMsg(wB, { type: 'meetingNoteEdit', noteId: adminNoteId, title: 'x', content: 'y' });
+    const errEdit = mk(wB, 'error').pop();
+    assert(errEdit && errEdit.message.includes('只能编辑自己'), '成员编辑他人纪要被拒');
+    wA.close(); wB.close();
+  }
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);
