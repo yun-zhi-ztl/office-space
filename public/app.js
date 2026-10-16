@@ -59,7 +59,7 @@ function dispatch(m){
       localStorage.setItem('os_token',m.token); localStorage.setItem('os_space',S.space?S.space.id:S.lastSpace);
       $('#gate').style.display='none'; $('#app').style.display='flex'; renderAll(); break;
     case 'rooms': S.DB.rooms=m.rooms; S.DB.reservations=m.reservations; S.DB.revTotal=m.reservationTotal||0; S.DB.revOffset=S.DB.reservations.length; S.DB.waitlist=m.waitlist||[]; S.DB.waitlistTotal=m.waitlistTotal||0; S.DB.roomInsights=m.insights||null; break;
-    case 'tools': S.DB.tools=m.tools; S.DB.toolWaitlist=m.waitlist||[]; break;
+    case 'tools': S.DB.tools=m.tools; S.DB.toolWaitlist=m.waitlist||[]; S.DB.toolInsights=m.insights||null; break;
     case 'inventory': S.DB.inventory={ items:m.items||[], issues:m.issues||[] }; break;
     case 'attendance': S.DB.attendance={ records:m.records||[], stats:m.stats||{}, config:m.config||{workStart:'09:00',workEnd:'18:00',lateMinutes:15} }; break;
     case 'desks': S.DB.desks={ desks:m.desks||[], reservations:m.reservations||[], reservationTotal:m.reservationTotal||0 }; break;
@@ -626,8 +626,24 @@ function renderTools(){
       </div>
       ${t.activeBorrows&&t.activeBorrows.length?`<div class="meta">在借：${t.activeBorrows.map(b=>{ const can=b.borrowerAccount===me||S.admin; return `${esc(b.borrowerName)}×${b.qty}${b.dueAt?' · 应还 '+fmtTime(b.dueAt):''}${b.days>=0?' · '+b.days+'天':''}${b.overdue?'<span class="badge bad">逾期</span>':''}${b.reminded?'<span class="badge grey">已提醒</span>':''}${b.dueSoon?'<span class="badge warn">即将到期</span>':''}${b.borrowerAccount===me?` <button class="btn green sm" onclick="openReturn('${b.id}')">归还</button>`:''}${can?(b.extensions>=2?'<span class="hint">续借已用完</span>':`<button class="btn sm" onclick="openExtend('${b.id}','${esc(b.borrowerName)}')">续借 (${2-(b.extensions||0)}次)</button>`):''}${b.borrowerAccount!==me&&b.overdue?` <button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒</button>`:''}`; }).join('，')}</div>`:''}
     </div>`).join('')||'<div class="empty">还没有设备，管理员可新增</div>'}
+    </div>
+    ${toolInsightsHtml()}
+  `;
+  }
+  // 设备洞察：借用热度榜 + 归还状态统计 + 逾期概览
+  function toolInsightsHtml(){
+    const ins = S.DB.toolInsights || null;
+    if (!ins) return '';
+    const heatRows = ins.borrowHeat.length ? ins.borrowHeat.map((t, i) => `<tr><td>${i+1}</td><td>${esc(t.name)}</td><td>${t.borrowCount}</td><td>${t.activeCount}</td></tr>`).join('') : '<tr><td colspan="4" style="color:var(--muted)">暂无借用记录</td></tr>';
+    const condText = `${ins.returnConditions.intact||0} 完好 · ${ins.returnConditions.damaged||0} 损坏 · ${ins.returnConditions.missing||0} 丢失`;
+    return `<h3 style="margin:22px 0 10px">💡 设备洞察</h3>
+    <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">
+      <div class="card"><h3>🔥 借用热度榜</h3><table><thead><tr><th>#</th><th>设备</th><th>累计借用</th><th>在借</th></tr></thead><tbody>${heatRows}</tbody></table></div>
+      <div class="card"><h3>📦 归还状态</h3><div class="meta">共 ${ins.totalBorrows} 次借用 · ${ins.activeCount} 在借 · ${ins.overdueCount} 逾期</div>
+        <div class="meta">${condText}</div>
+        <div class="meta">损坏率 ${ins.damagedRate}% · 丢失率 ${ins.missingRate}%</div></div>
     </div>`;
-}
+  }
 function openToolCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>新增设备</h2><div class="form">
   <div class="fld"><label>名称</label><input id="tlName" placeholder="如：测试手机 Pro"></div>
   <div class="fld"><label>类别</label><select id="tlCat"><option>测试电脑</option><option>测试机器</option><option>测试手机</option><option>其它</option></select></div>

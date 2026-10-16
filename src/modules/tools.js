@@ -1,11 +1,11 @@
 'use strict';
 // 工具借用模块：toolCreate / toolDelete / toolAdjust / toolBorrow / toolReturn
 module.exports = function toolsModule(api) {
-  const { spaceUserInfo, toolsPublic, toolWaitlistPublic, broadcast, TOOL_CATEGORIES, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToUser, sendToAccount, checkAchievements, dueBorrowReminders, pushNotice, isToolLowStock } = api;
+  const { spaceUserInfo, toolsPublic, toolWaitlistPublic, toolInsights, broadcast, TOOL_CATEGORIES, isAdmin, sendTo, serError, genId, saveEntity, deleteEntity, saveProfile, recordWeekly, broadcastLeaderboard, getUserByAccount, sendToUser, sendToAccount, checkAchievements, dueBorrowReminders, pushNotice, isToolLowStock } = api;
 
   function toolsBroadcast(space) {
     const info = spaceUserInfo(space.id);
-    broadcast(space.id, 'tools', { tools: toolsPublic(space, info), waitlist: toolWaitlistPublic(space, info) });
+    broadcast(space.id, 'tools', { tools: toolsPublic(space, info), waitlist: toolWaitlistPublic(space, info), insights: toolInsights(space) });
   }
 
   // 库存告急通知：可用数跌破阈值时首次通知管理员并写入公告，避免反复刷屏

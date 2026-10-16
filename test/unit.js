@@ -337,6 +337,27 @@ assertEq(ri.ratingRanking[1].name, '差评间', 'roomInsights 口碑榜第二名
 assertEq(ri.usageRanking[0].name, '差评间', 'roomInsights 使用率排行按今日分钟/场次降序');
 assertEq(ri.usageRanking[0].todayMinutes, 60, 'roomInsights 使用率排行统计今日分钟');
 
+// ---------- 设备洞察 ----------
+console.log('\n📋 16d. 设备洞察');
+const spTi = api.createSpace('s8d', '设备洞察空间', 1, 0);
+spTi.tools.push({ id: 'ti1', name: '热门机', category: '测试电脑', total: 2, available: 0, location: '', description: '' });
+spTi.tools.push({ id: 'ti2', name: '冷门机', category: '测试手机', total: 1, available: 0, location: '', description: '' });
+const nowTi = Date.now();
+spTi.borrows.set('tiA', { id: 'tiA', toolId: 'ti1', borrowerAccount: 'alice', borrowerName: '甲', qty: 1, borrowedAt: nowTi - 10 * 86400000, dueAt: nowTi - 2 * 86400000, returnedAt: nowTi - 3 * 86400000, status: 'returned', condition: 'intact' });
+spTi.borrows.set('tiB', { id: 'tiB', toolId: 'ti1', borrowerAccount: 'bob', borrowerName: '乙', qty: 1, borrowedAt: nowTi - 8 * 86400000, dueAt: nowTi - 1 * 86400000, returnedAt: nowTi - 2 * 86400000, status: 'returned', condition: 'damaged' });
+spTi.borrows.set('tiC', { id: 'tiC', toolId: 'ti1', borrowerAccount: 'carol', borrowerName: '丙', qty: 1, borrowedAt: nowTi - 5 * 86400000, dueAt: nowTi - 1 * 86400000, returnedAt: null, status: 'borrowed', condition: 'intact' });
+spTi.borrows.set('tiD', { id: 'tiD', toolId: 'ti2', borrowerAccount: 'dave', borrowerName: '丁', qty: 1, borrowedAt: nowTi, dueAt: nowTi + 7 * 86400000, returnedAt: null, status: 'borrowed', condition: 'intact' });
+const ti = api.toolInsights(spTi, nowTi);
+assertEq(ti.totalBorrows, 4, 'toolInsights 统计累计借用次数');
+assertEq(ti.activeCount, 2, 'toolInsights 统计在借数量');
+assertEq(ti.overdueCount, 1, 'toolInsights 统计逾期数量');
+assertEq(ti.returnConditions, { intact: 1, damaged: 1, missing: 0 }, 'toolInsights 统计归还状态分布');
+assertEq(ti.damagedRate, 50, 'toolInsights 计算损坏率 50%');
+assertEq(ti.missingRate, 0, 'toolInsights 计算丢失率 0%');
+assertEq(ti.borrowHeat[0].name, '热门机', 'toolInsights 热度榜第一名为热门机');
+assertEq(ti.borrowHeat[0].borrowCount, 3, 'toolInsights 热度榜统计累计借用次数');
+assertEq(ti.borrowHeat[0].activeCount, 1, 'toolInsights 热度榜统计在借数');
+
 // ---------- 借用记录序列化 ----------
 console.log('\n📋 17. 借用记录序列化');
 const spBw = api.createSpace('s9', '借用空间', 1, 0);

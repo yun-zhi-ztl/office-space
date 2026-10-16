@@ -837,6 +837,28 @@ function createContext() {
       };
     }).sort((a, b) => (b.borrowedAt - a.borrowedAt));
   }
+  // 设备洞察：借用热度榜 + 归还状态统计 + 在借/逾期概览
+  function toolInsights(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const all = [...space.borrows.values()];
+    const active = all.filter((b) => b.status === 'borrowed');
+    const returned = all.filter((b) => b.status === 'returned');
+    const conditions = { intact: 0, damaged: 0, missing: 0 };
+    for (const b of returned) conditions[b.condition || 'intact'] = (conditions[b.condition || 'intact'] || 0) + 1;
+    const borrowHeat = space.tools.map((t) => {
+      const list = all.filter((b) => b.toolId === t.id);
+      return { toolId: t.id, name: t.name, borrowCount: list.length, activeCount: list.filter((b) => b.status === 'borrowed').length, damagedCount: list.filter((b) => (b.condition || 'intact') === 'damaged').length, missingCount: list.filter((b) => (b.condition || 'intact') === 'missing').length };
+    }).sort((a, b) => (b.borrowCount - a.borrowCount) || (b.activeCount - a.activeCount));
+    return {
+      totalBorrows: all.length,
+      activeCount: active.length,
+      overdueCount: active.filter((b) => borrowOverdue(b)).length,
+      returnConditions: conditions,
+      damagedRate: returned.length ? +(conditions.damaged / returned.length * 100).toFixed(1) : 0,
+      missingRate: returned.length ? +(conditions.missing / returned.length * 100).toFixed(1) : 0,
+      borrowHeat: borrowHeat.slice(0, 5),
+    };
+  }
   function visitorsPublic(sp, info) {
     return [...sp.visitors.values()].map((v) => ({
       id: v.id,
@@ -1406,7 +1428,7 @@ function createContext() {
     const repairs = repairsPublic(sp, info);
     const visitors = visitorsPublic(sp, info);
     broadcast(sp.id, 'rooms', { rooms: sp.rooms.map((r) => roomPublic(sp, r)), reservations: reservations.slice(0, LIST_PAGE), reservationTotal: reservations.length, waitlist: waitlist.slice(0, LIST_PAGE), waitlistTotal: waitlist.length, insights: roomInsights(sp) });
-    broadcast(sp.id, 'tools', { tools: toolsPublic(sp, info) });
+    broadcast(sp.id, 'tools', { tools: toolsPublic(sp, info), insights: toolInsights(sp) });
     broadcast(sp.id, 'inventory', { items: inventoryPublic(sp, info), issues: inventoryIssuesPublic(sp, info) });
     broadcast(sp.id, 'materials', { requests: materials.slice(0, LIST_PAGE), total: materials.length });
     broadcast(sp.id, 'repairs', { repairs: repairs.slice(0, LIST_PAGE), total: repairs.length, stats: repairsStats(sp) });
@@ -1666,7 +1688,7 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueRoomApprovalReminders, dueLeaveSlaReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
     // 广播
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, eventsBroadcast, pollsBroadcast, knowledgeBroadcast, tasksBroadcast, leavesBroadcast, meetingNotesBroadcast, notificationsBroadcast, noticesBroadcast, pushNotification, pushNotice, visitorsBroadcast,
     // 坑位辅助

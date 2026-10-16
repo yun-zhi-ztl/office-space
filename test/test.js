@@ -540,6 +540,27 @@ async function runTests() {
     wC.close(); wD.close();
   }
 
+  // ========== 测试4f: 设备洞察 ==========
+  console.log('\n📋 测试4f: 设备洞察（借用热度 + 归还状态 + 逾期概览）');
+  {
+    const spI = (await httpJson('POST', '/api/spaces', { name: '设备洞察办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aI = 'inso_' + runKey, bI = 'insm_' + runKey;
+    await reg(aI, 'pw', '洞察管理员'); await reg(bI, 'pw', '洞察成员');
+    const wI = await createWSClient(); await loginTo(wI, spI.id, aI, 'pw');
+    const wJ = await createWSClient(); await loginTo(wJ, spI.id, bI, 'pw');
+    await sendMsg(wI, { type: 'toolCreate', name: '洞察机', category: '测试电脑', total: 2 });
+    const tidI = last(wI, 'tools').tools[0].id;
+    await sendMsg(wJ, { type: 'toolBorrow', toolId: tidI, qty: 1 });
+    const bwI = last(wJ, 'tools').tools.find(t => t.id === tidI).activeBorrows[0];
+    await sendMsg(wJ, { type: 'toolReturn', borrowId: bwI.id, condition: 'damaged' });
+    const insI = last(wJ, 'tools').insights;
+    assert(insI && insI.totalBorrows === 1, '设备洞察统计累计借用 1 次');
+    assert(insI.returnConditions.damaged === 1, '设备洞察统计损坏归还 1 次');
+    assert(insI.damagedRate === 100, '设备洞察损坏率 100%');
+    assert(insI.borrowHeat.some(t => t.name === '洞察机' && t.borrowCount === 1), '设备洞察热度榜包含设备借用次数');
+    wI.close(); wJ.close();
+  }
+
   // ========== 测试5: 物资申领 ==========
   console.log('\n📋 测试5: 物资申领（提交/处理/自处理拒绝）');
   await sendMsg(w2, { type: 'materialRequest', name: '5号电池', qty: 4, unit: '节', reason: '遥控器没电' });
