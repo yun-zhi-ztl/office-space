@@ -610,6 +610,8 @@ const fakeAdminApi = {
   broadcast: () => {},
   getUserByAccount: (a) => ({ id: 'u_' + a, account: a, nickname: a, currentSpace: 's21' }),
   sendToUser: () => {},
+  auditLog: () => {},
+  auditLogsPublic: () => [],
 };
 const fakeAdminWs = { readyState: 1, send: () => {} };
 const extras = extrasModule(fakeAdminApi);
@@ -1096,6 +1098,30 @@ assert(achUser5.achievements.includes('taskDoer'), '完成任务 5 次解锁高�
 achUser5.stats.attendanceStreak = 7;
 api.checkAchievements(achUser5);
 assert(achUser5.achievements.includes('streakKnight'), '连续打卡 7 天解锁连续打卡达人');
+
+// ---------- 邀请码与审计日志 ----------
+console.log('\n📋 53. 邀请码与审计日志');
+const invSp = api.createSpace('inv', '邀请空间', 1, 0);
+const invAdmin = { account: 'alice', nickname: '甲' };
+const inv1 = api.createInvite(invSp, { reusable: false, maxUses: 2, createdBy: '甲' });
+assert(inv1.code && /^[A-Z0-9]{6}$/.test(inv1.code), 'createInvite 生成 6 位邀请码');
+assertEq(inv1.status, 'active', '新邀请码状态为 active');
+assertEq(api.invitesPublic(invSp)[0].status, 'active', 'invitesPublic 暴露邀请码状态');
+assertEq(api.useInvite(invSp, inv1.code.toLowerCase(), 'bob').ok, true, 'useInvite 接受大写邀请码');
+assertEq(api.useInvite(invSp, inv1.code, 'carol').ok, true, '一次性邀请码第二次使用仍有效');
+assertEq(api.useInvite(invSp, inv1.code, 'dave').ok, false, '超过最大使用次数后拒绝');
+assertEq(api.invitesPublic(invSp)[0].status, 'exhausted', '用完后状态为 exhausted');
+const invReuse = api.createInvite(invSp, { reusable: true, maxUses: 1, createdBy: '甲' });
+assertEq(api.useInvite(invSp, invReuse.code, 'bob').ok, true, '可重复邀请码可用');
+assertEq(api.useInvite(invSp, invReuse.code, 'bob').ok, true, '可重复邀请码可多次使用');
+const invExpired = api.createInvite(invSp, { reusable: false, maxUses: 1, expiresAt: Date.now() - 1000, createdBy: '甲' });
+assertEq(api.useInvite(invSp, invExpired.code, 'bob').ok, false, '过期邀请码拒绝使用');
+assertEq(api.invitesPublic(invSp, Date.now()).find((i) => i.id === invExpired.id).status, 'expired', '过期状态为 expired');
+const revOk = api.revokeInvite(invSp, invReuse.id);
+assert(revOk && revOk.revokedAt, 'revokeInvite 撤销邀请码');
+assertEq(api.useInvite(invSp, invReuse.code, 'bob').ok, false, '已撤销邀请码拒绝使用');
+assertEq(api.auditLog(invSp, invAdmin, '创建邀请码', inv1.code).action, '创建邀请码', 'auditLog 写入管理日志');
+assertEq(api.auditLogsPublic(invSp, 10).length, 1, 'auditLogsPublic 返回管理日志');
 
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);

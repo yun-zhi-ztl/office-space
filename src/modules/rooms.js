@@ -82,9 +82,9 @@ module.exports = function roomsModule(api) {
     return true;
   }
 
-  // 时段冲突检测：与现有 pending / pending_approval / active 预约是否重叠
-  function slotClash(space, roomId, startAt, endAt) {
-    return [...space.roomReservations.values()].some((r) => r.roomId === roomId && (r.status === 'pending' || r.status === 'pending_approval' || r.status === 'active') && startAt < r.endAt && endAt > r.startAt);
+  // 时段冲突检测：与现有 pending / pending_approval / active 预约是否重叠（可排除自身，用于延长）
+  function slotClash(space, roomId, startAt, endAt, excludeId = null) {
+    return [...space.roomReservations.values()].some((r) => r.id !== excludeId && r.roomId === roomId && (r.status === 'pending' || r.status === 'pending_approval' || r.status === 'active') && startAt < r.endAt && endAt > r.startAt);
   }
 
   // 晋升候补第一位：找到与释放时段对应的最早候补条目，若其时段已无冲突则转为真实预约并通知
@@ -285,6 +285,21 @@ module.exports = function roomsModule(api) {
       w.status = 'cancelled';
       saveEntity(space.id, 'room_waitlist', w.id, w);
       roomsBroadcast(space);
+    } else if (msg.type === 'roomExtend') {
+      const res = space.roomReservations.get(msg.reservationId);
+      if (!res) return sendTo(ws, serError('预约不存在'));
+      if (res.ownerAccount !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('只能延长自己的预约'));
+      if (res.status !== 'active') return sendTo(ws, serError('只有进行中的会议可延长'));
+      const room = space.rooms.find((r) => r.id === res.roomId);
+      const maxMinutes = (room && room.maxMinutes) || 720;
+      const newEndAt = msg.endAt ? Math.floor(+msg.endAt || 0) : res.endAt + (Math.max(1, Math.min(480, parseInt(msg.minutes, 10) || 30)) * 60000);
+      if (!(newEndAt > Date.now()) || !(newEndAt > res.actualStartAt)) return sendTo(ws, serError('新的结束时间必须晚于当前时间'));
+      if (newEndAt - res.startAt > maxMinutes * 60000) return sendTo(ws, `预约时长最多 ${maxMinutes} 分钟，无法延长`);
+      if (slotClash(space, res.roomId, res.startAt, newEndAt, res.id)) return sendTo(ws, serError('延长后会与其他预约冲突，请先结束会议或改约其它时段'));
+      res.endAt = newEndAt;
+      saveEntity(space.id, 'room_reservation', res.id, res);
+      roomsBroadcast(space);
+      sendTo(ws, { type: 'roomExtended', reservationId: res.id, endAt: res.endAt });
     } else if (msg.type === 'roomStart' || msg.type === 'roomEnd' || msg.type === 'roomDoorCodeRequest') {
       if (msg.type === 'roomDoorCodeRequest') {
         const r = space.roomReservations.get(msg.reservationId);

@@ -4,6 +4,7 @@ module.exports = function sessionApi(api) {
   const {
     spaces, users, accounts, tokens, sendTo, serError, sendToUser, isAdmin, saveSpace, saveStatsToSpace,
     applyProfileToUser, broadcastAll, accountByLogin, verifyPassword, issueToken, newStats, buildDigest,
+    useInvite, ensureInvites,
   } = api;
 
   const loginFailures = new Map();
@@ -25,9 +26,19 @@ module.exports = function sessionApi(api) {
   }
   function clearLoginFailures(account) { loginFailures.delete(String(account || '').toLowerCase()); }
 
-  function joinSpace(ws, spaceId) {
+  function joinSpace(ws, spaceId, inviteCode) {
     const sp = spaces.get(String(spaceId));
     if (!sp) return sendTo(ws, serError('空间不存在'));
+    if (!ensureInvites(sp)) ensureInvites(sp);
+    if (sp.requireInvite) {
+      const code = String(inviteCode || '').trim();
+      if (!code) return sendTo(ws, serError('该空间需要邀请码'));
+      const result = useInvite(sp, code, null);
+      if (!result.ok) return sendTo(ws, serError(result.message || '邀请码无效'));
+    } else if (String(inviteCode || '').trim()) {
+      const result = useInvite(sp, String(inviteCode).trim(), null);
+      if (!result.ok) return sendTo(ws, serError(result.message || '邀请码无效'));
+    }
     const u = users.get(ws._userId);
     const oldSp = ws._ns ? spaces.get(ws._ns) : null;
     if (u && oldSp && oldSp.id !== sp.id) {

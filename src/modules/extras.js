@@ -1,7 +1,7 @@
 'use strict';
 // 扩展功能：setStatus / announce / suggestRoom / remindReturn + 公告推送
 module.exports = function extrasModule(api) {
-  const { users, broadcastUsers, sendTo, serError, roomPublic, noticesBroadcast, isAdmin, saveSpace, saveEntity, deleteEntity, broadcast, getUserByAccount, sendToUser, pushNotice, broadcastStalls, broadcastLeaderboard } = api;
+  const { users, broadcastUsers, sendTo, serError, roomPublic, noticesBroadcast, isAdmin, saveSpace, saveEntity, deleteEntity, broadcast, getUserByAccount, sendToUser, pushNotice, broadcastStalls, broadcastLeaderboard, createInvite, revokeInvite, invitesPublic, auditLog, auditLogsPublic } = api;
 
   function handleSetStatus(ws, user, space, msg) {
     const label = (msg.label || '').trim().slice(0, 8) || '在岗';
@@ -37,6 +37,7 @@ module.exports = function extrasModule(api) {
     space.paused = paused;
     space.pausedReason = paused ? reason : '';
     saveSpace(space);
+    auditLog(space, user, paused ? '暂停空间' : '恢复空间', reason);
     broadcast(space.id, 'spacePaused', { paused, reason: space.pausedReason });
   }
 
@@ -47,6 +48,7 @@ module.exports = function extrasModule(api) {
     if (name === space.name) return sendTo(ws, { type: 'spaceRenamed', name });
     space.name = name;
     saveSpace(space);
+    auditLog(space, user, '修改空间名', name);
     broadcast(space.id, 'spaceRenamed', { name });
   }
 
@@ -61,6 +63,7 @@ module.exports = function extrasModule(api) {
     if (!makeAdmin && space.admins.size === 1) return sendTo(ws, serError('至少保留一名管理员，无法移除最后一名管理员'));
     if (makeAdmin) space.admins.add(account); else space.admins.delete(account);
     saveSpace(space);
+    auditLog(space, user, makeAdmin ? '授予管理员' : '取消管理员', account);
     broadcastUsers(space);
     sendTo(ws, { type: 'adminSet', account, admin: makeAdmin, adminCount: space.admins.size });
     sendToUser(target.id, { type: 'adminSet', account, admin: makeAdmin, adminCount: space.admins.size });
@@ -99,9 +102,10 @@ module.exports = function extrasModule(api) {
     saveSpace(space);
     broadcastUsers(space);
     broadcastLeaderboard(space);
+    auditLog(space, user, '移除成员', target.account);
     pushNotice(space, `管理员 ${user.nickname} 移除了成员 ${target.nickname}`, user.account, user.nickname);
     if (target.ws && target.ws.readyState === 1) {
-      target.ws.send(JSON.stringify({ type: 'spaceKicked', reason: '被管理员移除' }));
+      target.ws.send(JSON.stringify({ type: 'spaceKicked', account: target.account, accountName: target.nickname, reason: '被管理员移除' }));
       target.ws.close();
     }
     sendTo(ws, { type: 'spaceKicked', account, accountName: target.nickname });
@@ -118,12 +122,77 @@ module.exports = function extrasModule(api) {
     sendTo(ws, { type: 'remindSent', count: n });
   }
 
+  function handleInviteCreate(ws, user, space, msg) {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可创建邀请码'));
+    const reusable = !!msg.reusable;
+    const maxUses = Math.max(1, Math.min(100, parseInt(msg.maxUses, 10) || 1));
+    const invite = createInvite(space, { reusable, maxUses, expiresAt: msg.expiresAt, createdBy: user.nickname });
+    auditLog(space, user, '创建邀请码', `${invite.code}（${invite.reusable ? '可重复使用' : '一次性'}）`);
+    sendTo(ws, { type: 'invites', invites: invitesPublic(space) });
+  }
+
+  function handleInviteRevoke(ws, user, space, msg) {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可撤销邀请码'));
+    const invite = revokeInvite(space, msg.inviteId);
+    if (!invite) return sendTo(ws, serError('邀请码不存在'));
+    auditLog(space, user, '撤销邀请码', invite.code);
+    sendTo(ws, { type: 'invites', invites: invitesPublic(space) });
+  }
+
+  function handleInviteList(ws, user, space, msg) {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可查看邀请码'));
+    sendTo(ws, { type: 'invites', invites: invitesPublic(space) });
+  }
+
+  function handleInviteRequire(ws, user, space, msg) {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可设置空间加入方式'));
+    space.requireInvite = !!msg.requireInvite;
+    saveSpace(space);
+    sendTo(ws, { type: 'spaceInviteRequire', requireInvite: !!space.requireInvite });
+    auditLog(space, user, space.requireInvite ? '开启邀请码加入' : '关闭邀请码加入', '');
+  }
+
+  function handleAuditList(ws, user, space, msg) {
+    const limit = Math.min(200, Math.max(1, parseInt(msg.limit, 10) || 50));
+    sendTo(ws, { type: 'auditLogs', logs: auditLogsPublic(space, limit) });
+  }
+
+  function handleAnnounceEdit(ws, user, space, msg) {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可编辑公告'));
+    const notice = space.notices.find((n) => n.id === msg.noticeId);
+    if (!notice) return sendTo(ws, serError('公告不存在'));
+    const text = (msg.text || '').trim().slice(0, 120);
+    if (!text) return sendTo(ws, serError('公告不能为空'));
+    notice.text = text;
+    saveEntity(space.id, 'notice', notice.id, notice);
+    noticesBroadcast(space);
+    sendTo(ws, { type: 'noticeUpdated', noticeId: notice.id, text: notice.text });
+    auditLog(space, user, '编辑公告', text);
+  }
+
+  function handleAnnouncePin(ws, user, space, msg) {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可置顶公告'));
+    const notice = space.notices.find((n) => n.id === msg.noticeId);
+    if (!notice) return sendTo(ws, serError('公告不存在'));
+    notice.pinned = !!msg.pinned;
+    if (notice.pinned) {
+      space.notices.sort((a, b) => ((b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)) || ((b.ts || 0) - (a.ts || 0)));
+    } else {
+      space.notices.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    }
+    saveEntity(space.id, 'notice', notice.id, notice);
+    noticesBroadcast(space);
+    sendTo(ws, { type: 'noticeUpdated', noticeId: notice.id, text: notice.text, pinned: notice.pinned });
+    auditLog(space, user, notice.pinned ? '置顶公告' : '取消置顶公告', notice.text);
+  }
+
   function handleRemoveNotice(ws, user, space, msg) {
     if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可删除公告'));
     const idx = space.notices.findIndex((n) => n.id === msg.noticeId);
     if (idx === -1) return sendTo(ws, serError('公告不存在'));
     const [notice] = space.notices.splice(idx, 1);
     deleteEntity(space.id, 'notice', notice.id);
+    auditLog(space, user, '删除公告', notice.text);
     noticesBroadcast(space);
     sendTo(ws, { type: 'noticeRemoved', noticeId: notice.id });
   }
@@ -156,5 +225,5 @@ module.exports = function extrasModule(api) {
     sendTo(ws, { type: 'noticeReactionUpdated', noticeId: notice.id });
   }
 
-  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace, adminSet: handleAdminSet, kick: handleKick, pause: handlePause, removeNotice: handleRemoveNotice, noticeReact: handleNoticeReact, noticeUnreact: handleNoticeUnreact };
+  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace, adminSet: handleAdminSet, kick: handleKick, pause: handlePause, removeNotice: handleRemoveNotice, noticeReact: handleNoticeReact, noticeUnreact: handleNoticeUnreact, inviteCreate: handleInviteCreate, inviteRevoke: handleInviteRevoke, inviteList: handleInviteList, inviteRequire: handleInviteRequire, auditList: handleAuditList, announceEdit: handleAnnounceEdit, announcePin: handleAnnouncePin };
 };

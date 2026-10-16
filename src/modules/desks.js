@@ -49,6 +49,21 @@ module.exports = function desksModule(api) {
       desksBroadcast(space);
       deskStatsBroadcast(space);
       broadcastLeaderboard(space);
+    } else if (msg.type === 'deskExtend') {
+      const res = space.deskReservations.get(msg.reservationId);
+      if (!res) return sendTo(ws, serError('预约不存在'));
+      if (res.account !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('只能延长自己的工位预约'));
+      if (res.status !== 'active') return sendTo(ws, serError('只有进行中的工位可延长'));
+      const newEndAt = msg.endAt ? Math.floor(+msg.endAt || 0) : res.endAt + (Math.max(1, Math.min(480, parseInt(msg.minutes, 10) || 30)) * 60000);
+      if (!(newEndAt > Date.now()) || !(newEndAt > res.actualStartAt)) return sendTo(ws, serError('新的结束时间必须晚于当前时间'));
+      if (newEndAt - res.startAt < 10 * 60000) return sendTo(ws, serError('延长后总时长仍需至少 10 分钟'));
+      const conflict = [...space.deskReservations.values()].some((r) => r.id !== res.id && r.deskId === res.deskId && (r.status === 'pending' || r.status === 'active') && res.startAt < r.endAt && newEndAt > r.startAt);
+      if (conflict) return sendTo(ws, serError('延长后会与其他工位预约冲突'));
+      res.endAt = newEndAt;
+      saveEntity(space.id, 'desk_reservation', res.id, res);
+      desksBroadcast(space);
+      deskStatsBroadcast(space);
+      sendTo(ws, { type: 'deskExtended', reservationId: res.id, endAt: res.endAt });
     } else if (msg.type === 'deskStart' || msg.type === 'deskEnd') {
       const res = space.deskReservations.get(msg.reservationId);
       if (!res) return sendTo(ws, serError('预约不存在'));

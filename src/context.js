@@ -45,6 +45,9 @@ function createContext() {
   const MATERIAL_SLA_MS = 2 * 24 * 3600 * 1000;
   const REPAIR_ESCALATE_MS = 8 * 3600 * 1000;
   const VISIT_TOKEN_TTL_MS = 24 * 3600 * 1000;
+  const INVITE_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const INVITE_DEFAULT_TTL_MS = 7 * 24 * 3600 * 1000;
+  const AUDIT_LOG_MAX = 120;
   const ATTEND_DEFAULT_WORK_START = '09:00';
   const ATTEND_DEFAULT_WORK_END = '18:00';
   const ATTEND_DEFAULT_LATE_MINUTES = 15;
@@ -86,6 +89,18 @@ function createContext() {
     do {
       code = String(Math.floor(Math.random() * 1000000)).padStart(6, '0');
     } while ([...space.roomReservations.values()].some((r) => r.doorCode === code));
+    return code;
+  }
+  function ensureInvites(space) {
+    if (!space.invites) space.invites = new Map();
+    return space.invites;
+  }
+  function genInviteCode() {
+    let code;
+    do {
+      code = '';
+      for (let i = 0; i < 6; i++) code += INVITE_CODE_CHARS[Math.floor(Math.random() * INVITE_CODE_CHARS.length)];
+    } while ([...spaces.values()].some((sp) => [...ensureInvites(sp).values()].some((inv) => inv.code === code)));
     return code;
   }
   function sendTo(ws, obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
@@ -237,6 +252,8 @@ function createContext() {
       else if (r.kind === 'leave') sp.leaves.set(data.id, data);
       else if (r.kind === 'meeting_note') sp.meetingNotes.set(data.id, data);
       else if (r.kind === 'notice') { sp.notices.push(data); sp.notices.sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
+      else if (r.kind === 'invite') { ensureInvites(sp).set(data.id, data); }
+      else if (r.kind === 'audit_log') { if (!sp.auditLogs) sp.auditLogs = []; sp.auditLogs.push(data); sp.auditLogs.sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
       else if (r.kind === 'stall') { const st = sp.stalls.find((s) => s.id === data.id); if (st) st.ratings = (data.ratings || []).slice(-60); }
     }
     for (const [key, ratings] of Object.entries(byStall)) {
@@ -494,6 +511,65 @@ function createContext() {
     }
     return found;
   }
+  function inviteStatus(inv, now) {
+    const nowMs = now == null ? Date.now() : now;
+    if (inv.revokedAt) return 'revoked';
+    if (inv.expiresAt && nowMs >= inv.expiresAt) return 'expired';
+    if (!inv.reusable && inv.usedCount >= inv.maxUses) return 'exhausted';
+    return 'active';
+  }
+  function createInvite(space, opts = {}) {
+    const invites = ensureInvites(space);
+    const code = genInviteCode();
+    const now = Date.now();
+    const maxUses = Math.max(1, Math.min(100, parseInt(opts.maxUses, 10) || 1));
+    const reusable = !!opts.reusable;
+    const expiresAt = opts.expiresAt ? Math.floor(+opts.expiresAt || 0) : (reusable ? now + INVITE_DEFAULT_TTL_MS : 0);
+    const invite = { id: genId('inv', null), code, reusable, maxUses, usedCount: 0, expiresAt, createdAt: now, createdBy: opts.createdBy || '系统', revokedAt: null };
+    invite.status = inviteStatus(invite);
+    invites.set(invite.id, invite);
+    saveEntity(space.id, 'invite', invite.id, invite);
+    return invite;
+  }
+  function useInvite(space, code, account) {
+    const invites = ensureInvites(space);
+    const target = String(code || '').trim().toUpperCase();
+    const invite = [...invites.values()].find((i) => i.code === target);
+    if (!invite) return { ok: false, code: 'inviteNotFound', message: '邀请码不存在' };
+    const status = inviteStatus(invite);
+    if (status === 'revoked') return { ok: false, code: 'inviteRevoked', message: '邀请码已撤销' };
+    if (status === 'expired') return { ok: false, code: 'inviteExpired', message: '邀请码已过期' };
+    if (status === 'exhausted') return { ok: false, code: 'inviteExhausted', message: '邀请码已用完' };
+    invite.usedCount += 1;
+    if (!invite.reusable && invite.usedCount >= invite.maxUses) invite.usedCount = invite.maxUses;
+    saveEntity(space.id, 'invite', invite.id, invite);
+    return { ok: true, invite, account: account || '' };
+  }
+  function revokeInvite(space, id) {
+    const invites = ensureInvites(space);
+    const invite = invites.get(id);
+    if (!invite) return null;
+    invite.revokedAt = Date.now();
+    saveEntity(space.id, 'invite', invite.id, invite);
+    return invite;
+  }
+  function invitesPublic(space, now) {
+    const invites = ensureInvites(space);
+    const nowMs = now == null ? Date.now() : now;
+    return [...invites.values()].map((inv) => Object.assign({}, inv, { status: inviteStatus(inv, nowMs) })).sort((a, b) => b.createdAt - a.createdAt);
+  }
+  function auditLog(space, user, action, detail = '') {
+    if (!space.auditLogs) space.auditLogs = [];
+    const entry = { id: genId('aud', null), account: user ? user.account : '', name: user ? user.nickname : '', action, detail: String(detail || '').slice(0, 120), ts: Date.now() };
+    space.auditLogs.unshift(entry);
+    if (space.auditLogs.length > AUDIT_LOG_MAX) space.auditLogs.length = AUDIT_LOG_MAX;
+    saveEntity(space.id, 'audit_log', entry.id, entry);
+    return entry;
+  }
+  function auditLogsPublic(space, limit = 50) {
+    const logs = space.auditLogs || [];
+    return logs.slice(0, Math.max(1, Math.min(200, parseInt(limit, 10) || 50))).map((l) => Object.assign({}, l));
+  }
   function createSpace(id, name, squat, urinal) {
     const sp = {
       id, name, squatCount: squat == null ? 4 : squat, urinalCount: urinal == null ? 3 : urinal,
@@ -508,6 +584,9 @@ function createContext() {
       leaves: new Map(),
       meetingNotes: new Map(),
       duties: new Map(),
+      invites: new Map(),
+      requireInvite: false,
+      auditLogs: [],
     };
     sp.weeklyReportDate = null;
     sp.stalls = buildStalls(squat == null ? 4 : squat, urinal == null ? 3 : urinal);
@@ -1315,8 +1394,8 @@ function createContext() {
   function broadcastLeaderboard(sp) { broadcast(sp.id, 'leaderboard', leaderboardPublic(sp)); }
   function noticesBroadcast(sp) { broadcast(sp.id, 'notices', { notices: sp.notices }); }
   // 公告/通知统一入口：写入 + 持久化 + 广播；超过 50 条自动裁剪并删除旧公告
-  function pushNotice(space, text, fromAccount, fromName) {
-    const notice = { id: genId('n', null), text, from: fromName || fromAccount || '系统', ts: Date.now(), reactions: [] };
+  function pushNotice(space, text, fromAccount, fromName, opts = {}) {
+    const notice = { id: genId('n', null), text, from: fromName || fromAccount || '系统', ts: Date.now(), reactions: [], pinned: !!opts.pinned };
     space.notices.unshift(notice);
     if (space.notices.length > 50) {
       const removed = space.notices.splice(50);
@@ -1729,7 +1808,7 @@ function createContext() {
     // 持久化
     saveSpace, saveAccount, saveProfile, saveEntity, deleteEntity, saveStallRating, saveStatsToSpace,
     // 空间
-    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueRoomApprovalReminders, dueLeaveSlaReminders, dueDutyReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
+    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueRoomApprovalReminders, dueLeaveSlaReminders, dueDutyReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser, ensureInvites, genInviteCode, createInvite, useInvite, revokeInvite, invitesPublic, inviteStatus, auditLog, auditLogsPublic,
     // 序列化
     roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, dutiesPublic, dutyStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
     // 广播

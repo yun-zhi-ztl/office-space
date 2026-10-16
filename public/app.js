@@ -17,7 +17,7 @@ const S = {
   token: localStorage.getItem('os_token')||'',
   lastSpace: localStorage.getItem('os_space')||'',
   ws: null, me:null, space:null, module:'rooms',
-  pendingLogin:null,
+  pendingLogin:null, inviteCode:'', auditLogs:[], invites:[],
   DB:{ rooms:[], reservations:[], waitlist:[], waitlistTotal:0, tools:[], requests:[], materialTemplates:[], repairs:[], visitors:[], stalls:[], users:[], leaderboard:[], borrows:[], inventory:{items:[],issues:[]}, attendance:{records:[],stats:{},config:{workStart:'09:00',workEnd:'18:00',lateMinutes:15}}, desks:{desks:[],reservations:[],reservationTotal:0}, ooo:{records:[],stats:{}}, leaves:{leaves:[],stats:{}}, meetingNotes:{notes:[],stats:{}}, events:[], polls:[], knowledge:[], tasks:[], notifications:[] },
   visitorTotal:0, visitorOffset:0,
   borrowTotal:0, borrowOffset:0,
@@ -32,7 +32,7 @@ const S = {
   attendanceCalendar:null,
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -65,6 +65,7 @@ function dispatch(m){
     case 'attendance': S.DB.attendance={ records:m.records||[], stats:m.stats||{}, config:m.config||{workStart:'09:00',workEnd:'18:00',lateMinutes:15} }; break;
     case 'desks': S.DB.desks={ desks:m.desks||[], reservations:m.reservations||[], reservationTotal:m.reservationTotal||0 }; break;
     case 'deskStats': S.deskStats=m.stats; break;
+    case 'deskExtended': toast('✔ 工位已延长到 '+fmtTime(m.endAt),'success'); render(); break;
     case 'ooo': S.DB.ooo={ records:m.records||[], stats:m.stats||{} }; break;
     case 'feedback': S.DB.feedback={ records:m.records||[], stats:m.stats||{} }; break;
     case 'mood': S.DB.mood={ records:m.records||[], stats:m.stats||{} }; break;
@@ -158,6 +159,7 @@ function dispatch(m){
     case 'roomWaitlistPromoted': toast('🎉 候补已晋升：预约已自动创建（'+fmtTime(m.startAt)+'）','success'); render(); break;
     case 'meetingStarted': { const rm=(S.DB.rooms||[]).find(r=>r.id===m.roomId); toast('🔔 会议已开始：'+(rm?rm.name:'会议室')+' · '+(m.title||''),'success'); render(); break; }
     case 'roomDoorCode': S.lastRoomDoorCode={reservationId:m.reservationId,code:m.doorCode}; toast('🔓 会议室门禁码：'+m.doorCode,'success'); render(); break;
+    case 'roomExtended': toast('✔ 会议已延长到 '+fmtTime(m.endAt),'success'); render(); break;
     case 'materialBatchFulfilled': toast('✔ 已批量满足申领：'+(m.count||0)+' 条','success'); render(); break;
     case 'repairBatchResolved': toast('✔ 已批量解决报修：'+(m.count||0)+' 条','success'); render(); break;
     case 'meetingAttended': toast('✅ 已确认到场','success'); render(); break;
@@ -176,6 +178,12 @@ function dispatch(m){
     case 'passwordChanged': toast('✔ 密码已修改','success'); break;
     case 'spaceRenamed': if(S.space) S.space.name=m.name; renderSidebar(); render(); break;
     case 'spacePaused': if(S.space){ S.space.paused=!!m.paused; S.space.pausedReason=m.reason||''; } render(); break;
+    case 'invites': S.invites=m.invites||[]; break;
+    case 'inviteCreated': toast('🔑 邀请码已生成：'+(m.code||''),'success'); break;
+    case 'inviteRevoked': toast('🔒 邀请码已撤销','info'); break;
+    case 'spaceInviteRequire': if(S.space) S.space.requireInvite=!!m.requireInvite; render(); break;
+    case 'auditLogs': S.auditLogs=m.logs||[]; render(); break;
+    case 'noticeUpdated': toast('✔ 公告已更新','success'); render(); break;
     case 'adminSet': if(S.me && m.account===S.me.account){ S.admin=!!m.admin; renderSidebar(); } render(); break;
     case 'spaceKicked': if(S.me && m.account===S.me.account){ toast('你已被管理员移除空间','warn'); S.me=null; S.admin=false; S.space=null; renderGate(); } else { toast('已移除成员 '+(m.accountName||'')+'','info'); render(); } break;
     case 'noticeRemoved': toast('公告已删除','success'); break;
@@ -186,7 +194,7 @@ function dispatch(m){
   if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','spaceTrend','notices','digest'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
@@ -290,6 +298,7 @@ async function renderGate(){
       <div class="form">
         ${spaces.length?`<div class="fld"><label>已有空间</label><div class="list">${spaces.map(s=>`<div class="row"><span><span class="who">${esc(s.name)}</span><span class="when"> · ${s.admin_count} 个管理员</span></span><button class="btn pri sm" onclick="pickSpace('${s.id}')">进入</button></div>`).join('')}</div></div>`:'<div class="hint">暂无空间，先创建一个吧</div>'}
         <div class="fld"><label>创建新空间</label><div class="fs"><input id="spName" placeholder="办公室名，如：三层研发">　<button class="btn pri" onclick="createSpace()">创建</button></div></div>
+        <div class="fld"><label>空间邀请码（若空间要求）</label><input id="inviteCode" placeholder="6 位邀请码，如 X7K2QM" maxlength="6"></div>
       </div>
     </div>
     <div id="gate-acct" style="display:none">
@@ -314,7 +323,7 @@ let pickedSpace='';
 function pickSpace(id){ pickedSpace=id; $('#pickedSpace').textContent=id; gateTab('acct'); }
 async function createSpace(){ const name=$('#spName').value.trim(); if(!name) return toast('请输入空间名','error'); const s=await http('POST','/api/spaces',{name}); if(s.id){ pickedSpace=s.id; gateTab('acct'); toast('空间已创建','success'); } }
 async function submitAccount(){ const account=$('#acAccount').value.trim(), pass=$('#acPass').value; if(!account||!pass) return toast('请输入账号密码','error'); const isLogin=$('#a-login').classList.contains('active'); if(!pickedSpace) return toast('请先选择空间','error'); if(isLogin){ doLogin(account,pass); } else { const name=$('#acName').value.trim(); const r=await http('POST','/api/register',{account,password:pass,username:name||account}); if(r.ok) { toast('注册成功，正在登录','success'); doLogin(account,pass); } else toast(r.error||'注册失败','error'); } }
-function doLogin(account,password){ S.lastSpace=pickedSpace; localStorage.setItem('os_space',pickedSpace); S.pendingLogin={account,password}; wsSend({type:'join',spaceId:pickedSpace}); }
+function doLogin(account,password){ S.lastSpace=pickedSpace; localStorage.setItem('os_space',pickedSpace); S.pendingLogin={account,password}; S.inviteCode=($('#inviteCode')&&$('#inviteCode').value||'').trim(); wsSend({type:'join',spaceId:pickedSpace,inviteCode:S.inviteCode}); }
 function doLogout(){ wsSend({type:'logout'}); S.me=null; localStorage.removeItem('os_token'); location.reload(); }
 function openProfile(){
   const me=S.me||{};
@@ -335,6 +344,13 @@ function openSpaceSettings(){
     <div class="fld"><label>空间名（最多 30 字）</label><input id="spNewName" maxlength="30" value="${esc(S.space?S.space.name:'')}"></div>
     <button class="btn pri" onclick="submitSpaceRename()">保存名称</button></div>
     <hr style="margin:16px 0;border:none;border-top:1px solid var(--line)">
+    <div class="fld"><label>空间加入</label><div class="fs"><label style="margin:0"><input type="checkbox" id="spRequireInvite" ${S.space&&S.space.requireInvite?'checked':''}> 新成员需要邀请码</label></div>
+    <button class="btn sm" onclick="submitInviteRequire()">保存加入方式</button></div>
+    <hr style="margin:16px 0;border:none;border-top:1px solid var(--line)">
+    <div class="fld"><label>邀请码</label><div class="fs"><select id="invMode"><option value="1">一次性邀请码（默认用 1 次）</option><option value="10">一次性邀请码（最多 10 次）</option><option value="reuse">可重复使用邀请码</option></select><button class="btn pri sm" onclick="createInvite()">生成</button></div>
+    <div class="list" style="margin-top:10px">${(S.invites||[]).map(i=>`<div class="row"><span><span class="who">${esc(i.code)}</span> <span class="badge ${i.status==='active'?'ok':'grey'}">${({active:'可用',revoked:'已撤销',expired:'已过期',exhausted:'已用完'})[i.status]||i.status}</span>${i.reusable?' 可重复':' 一次性'}${i.usedCount}/${i.maxUses} 次</span>${i.status==='active'?`<button class="btn danger sm" onclick="revokeInvite('${i.id}')">撤销</button>`:''}</div>`).join('')||'<div class="hint">暂无邀请码</div>'}</div></div>
+    <button class="btn sm" onclick="openAudit()">🛡️ 管理日志</button></div>
+    <hr style="margin:16px 0;border:none;border-top:1px solid var(--line)">
     <div class="fld"><label>管理员管理</label><div class="list">${memberRows}</div><div class="hint">至少保留一名管理员，避免空间无人可管理</div></div>
     <hr style="margin:16px 0;border:none;border-top:1px solid var(--line)">
     <div class="fld"><label>暂停状态</label><div class="fs"><select id="spPaused"><option value="">未暂停</option><option value="1" ${S.space&&S.space.paused?'selected':''}>已暂停</option></select>
@@ -346,11 +362,22 @@ function openSpaceSettings(){
     <div class="fld"><label>尿槽数量 (0-10)</label><input id="scUr" type="number" min="0" max="10" value="${S.DB.stalls.reduce((a,s)=>s.type==='urinal'?a+1:a,0)}"></div>
     <button class="btn pri" onclick="submitConfig()">保存坑位配置</button>
     <div class="hint">坑位改动会使未开始的预约失效</div></div>`);
+  loadInvites();
 }
 function submitSpaceRename(){ wsSend({type:'spaceRename', name:$('#spNewName').value}); closeModal(); }
+function submitInviteRequire(){ wsSend({type:'spaceInviteRequire', requireInvite:!!$('#spRequireInvite').checked}); closeModal(); }
+function createInvite(){ const mode=$('#invMode').value; const msg={reusable:mode==='reuse',maxUses:mode==='1'?1:mode==='10'?10:1}; wsSend({type:'spaceInviteCreate', ...msg}); closeModal(); }
+function revokeInvite(id){ wsSend({type:'spaceInviteRevoke', inviteId:id}); closeModal(); }
+function loadInvites(){ wsSend({type:'spaceInviteList'}); }
 function setAdmin(account, admin){ wsSend({type:'spaceAdminSet', account, admin}); closeModal(); }
 function kickMember(account){ wsSend({type:'spaceKick', account}); closeModal(); }
 function submitPause(){ const paused=!!$('#spPaused').value; wsSend({type:'spacePause', paused, reason:$('#spPauseReason').value}); closeModal(); }
+function openAudit(){ wsSend({type:'spaceAuditList'}); switchModule('audit'); }
+function renderAudit(){
+  const logs=S.auditLogs||[];
+  $('#main').innerHTML = `<div class="topbar"><div><h1>管理日志</h1><div class="sub">管理员对空间的敏感操作留痕</div></div></div>
+    <div class="list">${logs.length?logs.map(l=>`<div class="row"><span><span class="who">${esc(l.name||l.account||'管理员')}</span> <span class="badge info">${esc(l.action)}</span> <span class="when">${fmtTime(l.ts)}</span><div>${esc(l.detail||'')}</div></span></div>`).join(''):'<div class="empty">暂无管理日志</div>'}</div>`;
+}
 
 /* ============ 概览 ============ */
 const ACH = { punctual:'守时达人', endurance:'持久战', night:'夜行者', king:'蹲坑之王', grabber:'抢位达人', rater:'评论家', borrower:'借阅达人', requester:'物资管家', reporter:'热心市民', meeter:'会议达人', roomGuide:'会议室向导', collector:'收藏家', earlyBird:'早到达人', attendanceKing:'打卡达人', deskKnight:'工位达人', awayReporter:'外出报备达人' };
@@ -399,7 +426,7 @@ function renderDash(){
     <div class="fs">${(d.users||[]).map(u=>`<span class="badge info">${esc(u.avatar||'' )} ${esc(u.display||u.username)}${u.emergencyMode?' 🆘':''}${u.status&&u.status.emoji?' '+esc(u.status.emoji):''} ${u.status?esc(u.status.label):'在岗'}</span>`).join('')||'<span class="hint">仅自己在线</span>'}</div>
     <h3 style="margin:22px 0 10px">📢 公告</h3>
     <div class="fs" style="margin-bottom:10px"><input id="annInput" placeholder="向整个空间喊一句话..."><button class="btn pri" onclick="doAnnounce()">喊话</button></div>
-    <div class="list">${(d.notices||[]).map(n=>`<div class="row"><span><span class="who">${esc(n.from)}</span> <span class="when">${fmtTime(n.ts)}</span><div>${esc(n.text)}</div><div class="fs" style="margin-top:6px">${noticeReactions(n).map(r=>`<button class="btn sm ${r.me?'pri':''}" onclick="reactNotice('${n.id}','${r.e}')">${r.e} ${r.count}</button>`).join(' ')}</div></span>${S.admin?`<button class="btn danger sm" onclick="removeNotice('${n.id}')">删除</button>`:''}</div>`).join('')||'<div class="empty">还没有公告</div>'}
+    <div class="list">${(d.notices||[]).slice().sort((a,b)=>((b.pinned?1:0)-(a.pinned?1:0))||((b.ts||0)-(a.ts||0))).map(n=>`<div class="row"><span><span class="who">${n.pinned?'📌':''} ${esc(n.from)}</span> <span class="when">${fmtTime(n.ts)}</span><div>${esc(n.text)}</div><div class="fs" style="margin-top:6px">${noticeReactions(n).map(r=>`<button class="btn sm ${r.me?'pri':''}" onclick="reactNotice('${n.id}','${r.e}')">${r.e} ${r.count}</button>`).join(' ')}</div></span>${S.admin?`<button class="btn sm" onclick="doAnnounceEdit('${n.id}')">编辑</button>${n.pinned?'<button class="btn sm" onclick="doAnnouncePin(\'${n.id}\',false)">取消置顶</button>':'<button class="btn sm" onclick="doAnnouncePin(\'${n.id}\',true)">置顶</button>'}<button class="btn danger sm" onclick="removeNotice('${n.id}')">删除</button>`:''}</div>`).join('')||'<div class="empty">还没有公告</div>'}
     </div>
     ${overdue.length?`<h3 style="margin:22px 0 10px">⏰ 逾期借用 · 占用王</h3><div class="list">${overdue.map(b=>`<div class="row"><span>${esc(b.borrowerName)} ×${b.qty} · 已借 ${b.days} 天</span><button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒归还</button></div>`).join('')}</div>`:''}
     ${S.weeklyReport?`<h3 style="margin:22px 0 10px">📅 本周空间周报 <span class="badge info">${fmtTime(S.weeklyReport.weekStart)}</span></h3><div class="list">
@@ -415,6 +442,9 @@ function renderDash(){
     </div>`;
 }
 function doAnnounce(){ const t=$('#annInput'); const v=(t?t.value:'').trim(); if(v){ wsSend({type:'announce',text:v}); if(t)t.value=''; } }
+function doAnnounceEdit(id){ const n=(S.DB.notices||[]).find(x=>x.id===id); if(!n) return; openModal(`<span class="close" onclick="closeModal()">×</span><h2>编辑公告</h2><div class="form"><div class="fld"><label>公告内容（最多 120 字）</label><input id="edNoticeText" maxlength="120" value="${esc(n.text||'')}"></div><button class="btn pri" onclick="submitAnnounceEdit('${id}')">保存公告</button></div>`); }
+function submitAnnounceEdit(id){ wsSend({type:'announceEdit',noticeId:id,text:$('#edNoticeText').value}); closeModal(); }
+function doAnnouncePin(id, pinned){ wsSend({type:'announcePin',noticeId:id,pinned:!!pinned}); }
 const NOTICE_EMOJIS=['👍','🎉','😮','🤝','🔥'];
 function noticeReactions(n){ const arr=n.reactions||[]; return NOTICE_EMOJIS.map(e=>({e, count:arr.filter(r=>r.reaction===e).length, me:arr.some(r=>r.account===S.me.account&&r.reaction===e)})); }
 function reactNotice(id, e){ wsSend({type:'noticeReact',noticeId:id,reaction:e}); }
@@ -449,7 +479,8 @@ function roomReservationListHtml(d, me){
       const r=g.single; const rm=d.rooms.find(x=>x.id===r.roomId);
       const action = r.status==='pending_approval' ? `${S.admin?`<button class="btn green sm" onclick="reservationApprove('${r.id}')">批准</button><button class="btn danger sm" onclick="reservationReject('${r.id}')">驳回</button>`:''}${r.ownerAccount===me?`<button class="btn danger sm" onclick="cancelReservation('${r.id}')">取消</button>`:''}` : ((r.ownerAccount===me||S.admin)&&r.status==='pending') ? `<button class="btn sm" onclick="openReschedule('${r.id}')">改期</button>${r.ownerAccount===me?`<button class="btn danger sm" onclick="cancelReservation('${r.id}')">取消</button>`:''}` : '';
       const doorCode = (S.lastRoomDoorCode && S.lastRoomDoorCode.reservationId===r.id && r.status==='active') ? `<span class="badge ok">🔓 门禁码 ${esc(S.lastRoomDoorCode.code)}</span><button class="btn sm" onclick="copyDoorCode('${r.id}')">复制</button>` : ((r.status==='active' && (r.ownerAccount===me || S.admin || (r.attendees||[]).includes(me))) ? `<button class="btn sm" onclick="requestDoorCode('${r.id}')">🔓 开门码</button>` : '');
-      return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(r.title)} <span class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}</span>${r.actualStartAt&&r.actualEndAt?` <span class="hint">⏱️ 到场 ${Math.max(0,Math.round((r.actualEndAt-r.actualStartAt)/60000))} 分钟</span>`:''}</span><span class="fs">${roomResBadge(r.status)}${r.attendees&&r.attendees.length?`<span class="badge info">👥 到场 ${r.attendanceRate||0}%（${(r.attendedAccounts||[]).length}/${r.attendees.length}）</span>`:''}${action}${doorCode}${(r.status==='active'&&(r.attendees||[]).includes(me)&&!(r.attendedAccounts||[]).includes(me))?`<button class="btn green sm" onclick="meetingAttend('${r.id}')">✅ 确认到场</button>`:''}${(r.ownerAccount===me||S.admin)&&r.status==='completed'&&!r.rating?`<button class="btn sm" onclick="openRoomRate('${r.id}')">评分</button>`:''}${r.rating?`<span class="badge ok">已评 ${r.rating}⭐</span>`:''}</span></div>`;
+      const extendBtn = (r.status==='active' && (r.ownerAccount===me || S.admin)) ? `<button class="btn sm" onclick="openRoomExtend('${r.id}')">延长</button>` : '';
+      return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(r.title)} <span class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}</span>${r.actualStartAt&&r.actualEndAt?` <span class="hint">⏱️ 到场 ${Math.max(0,Math.round((r.actualEndAt-r.actualStartAt)/60000))} 分钟</span>`:''}</span><span class="fs">${roomResBadge(r.status)}${r.attendees&&r.attendees.length?`<span class="badge info">👥 到场 ${r.attendanceRate||0}%（${(r.attendedAccounts||[]).length}/${r.attendees.length}）</span>`:''}${action}${doorCode}${extendBtn}${(r.status==='active'&&(r.attendees||[]).includes(me)&&!(r.attendedAccounts||[]).includes(me))?`<button class="btn green sm" onclick="meetingAttend('${r.id}')">✅ 确认到场</button>`:''}${(r.ownerAccount===me||S.admin)&&r.status==='completed'&&!r.rating?`<button class="btn sm" onclick="openRoomRate('${r.id}')">评分</button>`:''}${r.rating?`<span class="badge ok">已评 ${r.rating}⭐</span>`:''}</span></div>`;
     }
     const first=g.items[0]; const rm=d.rooms.find(x=>x.id===first.roomId);
     const pat=repeatLabel(g.repeat, first);
@@ -546,6 +577,16 @@ function submitBook(roomId){
 function cancelReservation(id){ wsSend({type:'reservationCancel',reservationId:id}); }
 function requestDoorCode(id){ wsSend({type:'roomDoorCodeRequest',reservationId:id}); }
 function copyDoorCode(id){ const c=S.lastRoomDoorCode&&S.lastRoomDoorCode.code; if(!c) return; if(navigator.clipboard) navigator.clipboard.writeText(c).then(()=>toast('🔓 门禁码已复制','success')).catch(()=>toast('🔓 门禁码：'+c,'success')); else toast('🔓 门禁码：'+c,'success'); }
+function openRoomExtend(id){
+  const r=(S.DB.reservations||[]).find(x=>x.id===id); if(!r) return;
+  const room=(S.DB.rooms||[]).find(x=>x.id===r.roomId);
+  const max=(room&&room.maxMinutes)||720;
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>延长会议 · ${esc(room?room.name:'会议室')}</h2><div class="form">
+    <div class="fld"><label>延长时长（分钟，最多 8 小时）</label><input id="rxMin" type="number" min="1" max="480" value="30"></div>
+    <div class="hint">当前结束 ${fmtTime(r.endAt)}；延长后不可与其他预约冲突，且总时长不超过 ${max} 分钟</div>
+    <button class="btn pri" onclick="submitRoomExtend('${id}')">确认延长</button></div>`);
+}
+function submitRoomExtend(id){ wsSend({type:'roomExtend',reservationId:id,minutes:parseInt($('#rxMin').value,10)||30}); closeModal(); }
 function cancelSeries(seriesId){ if(confirm('确认取消该周期预约的全部待开始场次？')) wsSend({type:'reservationCancelSeries',seriesId}); }
 function meetingAttend(id){ wsSend({type:'meetingAttend',reservationId:id}); toast('✅ 已确认到场','success'); }
 function roomApproval(id, v){ wsSend({type:'roomApproval',roomId:id,requireApproval:!!v}); }
@@ -1059,7 +1100,7 @@ function renderDesks(){
       const desk=(d.desks||[]).find(k=>k.id===r.deskId);
       const mine=r.account===me;
       return `<div class="row"><span><span class="who">🪑 ${esc(desk?desk.name:'工位')}</span> · ${esc(r.name)} <span class="when">${fmtTime(r.startAt)} → ${fmtTime(r.endAt)}</span><div class="desc">${esc(r.note||'')}</div></span>
-        <span class="fs">${deskBadge(r.status)}${mine&&r.status==='pending'?`<button class="btn pri sm" onclick="deskStart('${r.id}')">签到</button><button class="btn danger sm" onclick="cancelDesk('${r.id}')">取消</button>`:''}${mine&&r.status==='active'?`<button class="btn green sm" onclick="deskEnd('${r.id}')">签退</button>`:''}</span></div>`;
+        <span class="fs">${deskBadge(r.status)}${mine&&r.status==='pending'?`<button class="btn pri sm" onclick="deskStart('${r.id}')">签到</button><button class="btn danger sm" onclick="cancelDesk('${r.id}')">取消</button>`:''}${mine&&r.status==='active'?`<button class="btn green sm" onclick="deskEnd('${r.id}')">签退</button><button class="btn sm" onclick="openDeskExtend('${r.id}')">延长</button>`:''}</span></div>`;
     }).join('')||'<div class="empty">暂无工位预约</div>'}</div>`;
 }
 function openDeskCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>新增工位</h2><div class="form">
@@ -1088,6 +1129,14 @@ function submitDeskReserve(id){
 function cancelDesk(id){ wsSend({type:'deskCancel',reservationId:id}); }
 function deskStart(id){ wsSend({type:'deskStart',reservationId:id}); }
 function deskEnd(id){ wsSend({type:'deskEnd',reservationId:id}); }
+function openDeskExtend(id){
+  const r=(S.DB.desks&&S.DB.desks.reservations||[]).find(x=>x.id===id); if(!r) return;
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>延长工位</h2><div class="form">
+    <div class="fld"><label>延长时长（分钟，最多 8 小时）</label><input id="dkxMin" type="number" min="1" max="480" value="30"></div>
+    <div class="hint">当前结束 ${fmtTime(r.endAt)}；延长后不可与其他预约冲突</div>
+    <button class="btn pri" onclick="submitDeskExtend('${id}')">确认延长</button></div>`);
+}
+function submitDeskExtend(id){ wsSend({type:'deskExtend',reservationId:id,minutes:parseInt($('#dkxMin').value,10)||30}); closeModal(); }
 function removeDesk(id){ if(confirm('删除该工位？')) wsSend({type:'deskDelete',deskId:id}); }
 
 /* ============ 外出登记 ============ */

@@ -2182,6 +2182,124 @@ async function runTests() {
     wA.close(); wB.close();
   }
 
+  // ========== 测试47: 会议室延长 ==========
+  console.log('\n📋 测试47: 会议室延长（进行中可延长 / 冲突拒绝）');
+  {
+    const spX = (await httpJson('POST', '/api/spaces', { name: '会议延长办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aX = 'rmx_' + runKey, bX = 'rmxm_' + runKey;
+    await reg(aX, 'pw', '会议延长管理员'); await reg(bX, 'pw', '会议延长成员');
+    const wA = await createWSClient(); await loginTo(wA, spX.id, aX, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spX.id, bX, 'pw');
+    await sendMsg(wA, { type: 'roomCreate', name: '延长会议室', capacity: 6 });
+    const ridX = last(wA, 'rooms').rooms[0].id;
+    const tStart = Date.now() + 3 * 1000;
+    await sendMsg(wB, { type: 'roomBook', roomId: ridX, startAt: tStart, endAt: tStart + 30 * 60000, title: '延长会' });
+    let rX = last(wB, 'rooms').reservations[0];
+    assert(rX && rX.status === 'pending', '成员预约待延长会议成功');
+    await new Promise((r) => setTimeout(r, 6000));
+    await sendMsg(wB, { type: 'roomStart', reservationId: rX.id });
+    rX = (last(wB, 'rooms').reservations || []).find((r) => r.id === rX.id);
+    assert(rX && rX.status === 'active', '会议开始后状态为 active');
+    await sendMsg(wB, { type: 'roomExtend', reservationId: rX.id, minutes: 15 });
+    const extMsg = await waitFor(wB, 'roomExtended', (m) => m.reservationId === rX.id, 3000);
+    assert(extMsg && extMsg.endAt > rX.endAt, '会议延长成功并更新结束时间');
+    rX = (last(wB, 'rooms').reservations || []).find((r) => r.id === rX.id);
+    assert(rX && rX.endAt === extMsg.endAt, '延长后的预约广播同步');
+    wA.close(); wB.close();
+  }
+
+  // ========== 测试48: 工位延长 ==========
+  console.log('\n📋 测试48: 工位延长（进行中可延长）');
+  {
+    const spY = (await httpJson('POST', '/api/spaces', { name: '工位延长办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aY = 'dskx_' + runKey, bY = 'dskxm_' + runKey;
+    await reg(aY, 'pw', '工位延长管理员'); await reg(bY, 'pw', '工位延长成员');
+    const wA = await createWSClient(); await loginTo(wA, spY.id, aY, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spY.id, bY, 'pw');
+    await sendMsg(wA, { type: 'deskCreate', name: '延长工位' });
+    const didY = last(wA, 'desks').desks[0].id;
+    const tStartY = Date.now() + 3 * 1000;
+    await sendMsg(wB, { type: 'deskReserve', deskId: didY, startAt: tStartY, endAt: tStartY + 30 * 60000, name: '延长工位预约' });
+    let rsY = last(wB, 'desks').reservations[0];
+    assert(rsY && rsY.status === 'pending', '成员预约待延长工位成功');
+    await new Promise((r) => setTimeout(r, 6000));
+    await sendMsg(wB, { type: 'deskStart', reservationId: rsY.id });
+    rsY = (last(wB, 'desks').reservations || []).find((r) => r.id === rsY.id);
+    assert(rsY && rsY.status === 'active', '工位签到后状态为 active');
+    await sendMsg(wB, { type: 'deskExtend', reservationId: rsY.id, minutes: 20 });
+    const extMsgY = await waitFor(wB, 'deskExtended', (m) => m.reservationId === rsY.id, 3000);
+    assert(extMsgY && extMsgY.endAt > rsY.endAt, '工位延长成功并更新结束时间');
+    rsY = (last(wB, 'desks').reservations || []).find((r) => r.id === rsY.id);
+    assert(rsY && rsY.endAt === extMsgY.endAt, '延长后的工位广播同步');
+    wA.close(); wB.close();
+  }
+
+  // ========== 测试49: 空间邀请码 ==========
+  console.log('\n📋 测试49: 空间邀请码（开启加入 / 有效码登录 / 无效码拒绝）');
+  {
+    const spInv = (await httpJson('POST', '/api/spaces', { name: '邀请码办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aInv = 'inva_' + runKey, bInv = 'invm_' + runKey;
+    await reg(aInv, 'pw', '邀请管理员'); await reg(bInv, 'pw', '邀请成员');
+    const wA = await createWSClient(); await loginTo(wA, spInv.id, aInv, 'pw');
+    await sendMsg(wA, { type: 'spaceInviteRequire', requireInvite: true });
+    const reqOk = await waitFor(wA, 'spaceInviteRequire', (m) => m.requireInvite === true, 3000);
+    assert(reqOk, '管理员开启邀请码加入成功');
+    await sendMsg(wA, { type: 'spaceInviteCreate', maxUses: 1 });
+    const invites = await waitFor(wA, 'invites', (r) => r.invites && r.invites.length === 1, 3000);
+    assert(invites && invites.invites[0].code && invites.invites[0].status === 'active', '管理员生成可用邀请码');
+    const code = invites.invites[0].code;
+    const wB = await createWSClient();
+    await sendMsg(wB, { type: 'join', spaceId: spInv.id, inviteCode: code });
+    const joined = await waitFor(wB, 'joined', (m) => m.space && m.space.id === spInv.id, 3000);
+    assert(joined, '成员凭有效邀请码进入空间成功');
+    await sendMsg(wB, { type: 'login', account: bInv, password: 'pw' });
+    const loginOk = await waitFor(wB, 'loginSuccess', (m) => m.account === bInv, 3000);
+    assert(loginOk, '邀请成员登录成功');
+    const wC = await createWSClient();
+    await sendMsg(wC, { type: 'join', spaceId: spInv.id, inviteCode: 'ZZZZZZ' });
+    const errInvite = mk(wC, 'error').pop();
+    assert(errInvite && errInvite.message.includes('邀请码不存在'), '无效邀请码进入被拒');
+    wA.close(); wB.close(); wC.close();
+  }
+
+  // ========== 测试50: 公告编辑与置顶 ==========
+  console.log('\n📋 测试50: 公告编辑与置顶');
+  {
+    const spN = (await httpJson('POST', '/api/spaces', { name: '公告办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aN = 'ntc_' + runKey;
+    await reg(aN, 'pw', '公告管理员');
+    const wA = await createWSClient(); await loginTo(wA, spN.id, aN, 'pw');
+    await sendMsg(wA, { type: 'announce', text: '旧公告内容' });
+    const notices0 = await waitFor(wA, 'notices', (r) => r.notices && r.notices.some((n) => n.text === '旧公告内容'), 3000);
+    assert(notices0, '管理员发布公告成功');
+    const noticeId = notices0.notices.find((n) => n.text === '旧公告内容').id;
+    await sendMsg(wA, { type: 'announceEdit', noticeId, text: '新公告内容' });
+    const edited = await waitFor(wA, 'noticeUpdated', (m) => m.noticeId === noticeId && m.text === '新公告内容', 3000);
+    assert(edited, '管理员编辑公告成功');
+    await sendMsg(wA, { type: 'announcePin', noticeId, pinned: true });
+    const pinned = await waitFor(wA, 'notices', (r) => r.notices && r.notices.some((n) => n.id === noticeId && n.pinned === true), 3000);
+    assert(pinned, '管理员置顶公告成功');
+    wA.close();
+  }
+
+  // ========== 测试51: 管理日志 ==========
+  console.log('\n📋 测试51: 管理日志');
+  {
+    const spAudit = (await httpJson('POST', '/api/spaces', { name: '审计办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aAudit = 'aud_' + runKey, bAudit = 'audm_' + runKey;
+    await reg(aAudit, 'pw', '审计管理员'); await reg(bAudit, 'pw', '审计成员');
+    const wA = await createWSClient(); await loginTo(wA, spAudit.id, aAudit, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spAudit.id, bAudit, 'pw');
+    await sendMsg(wA, { type: 'spaceKick', account: bAudit });
+    const kicked = await waitFor(wB, 'spaceKicked', (m) => m.account === bAudit, 3000);
+    assert(kicked, '成员被踢下线');
+    const logs = await waitFor(wA, 'auditLogs', (r) => r.logs && r.logs.some((l) => l.action === '移除成员'), 3000);
+    await sendMsg(wA, { type: 'spaceAuditList' });
+    const logs2 = await waitFor(wA, 'auditLogs', (r) => r.logs && r.logs.some((l) => l.action === '移除成员'), 3000);
+    assert(logs2, '审计日志记录移除成员操作');
+    wA.close(); wB.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

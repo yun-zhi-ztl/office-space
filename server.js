@@ -116,7 +116,7 @@ wss.on('connection', (ws) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
-    if (msg.type === 'join') { session.joinSpace(ws, msg.spaceId); return; }
+    if (msg.type === 'join') { session.joinSpace(ws, msg.spaceId, msg.inviteCode); return; }
 
     const space = ws._ns ? spaces.get(ws._ns) : null;
     if (!space) return api.sendTo(ws, api.serError('请先选择空间'));
@@ -135,7 +135,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }
 
     switch (msg.type) {
-      case 'roomCreate': case 'roomTag': case 'roomApproval': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'reservationCancelSeries': case 'reservationApprove': case 'reservationReject': case 'reservationReschedule': case 'reservationAttendees': case 'roomWaitlist': case 'roomWaitlistCancel': case 'roomStart': case 'roomEnd': case 'roomDoorCodeRequest': case 'meetingAttend': case 'roomRate': case 'roomFavorite':
+      case 'roomCreate': case 'roomTag': case 'roomApproval': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'reservationCancelSeries': case 'reservationApprove': case 'reservationReject': case 'reservationReschedule': case 'reservationAttendees': case 'roomWaitlist': case 'roomWaitlistCancel': case 'roomStart': case 'roomEnd': case 'roomExtend': case 'roomDoorCodeRequest': case 'meetingAttend': case 'roomRate': case 'roomFavorite':
         rooms.handleRooms(ws, user, space, msg); break;
       case 'toolCreate': case 'toolDelete': case 'toolAdjust': case 'toolBorrow': case 'toolReturn': case 'toolExtend': case 'toolWaitlist': case 'remindOverdue':
         tools.handleTools(ws, user, space, msg); break;
@@ -153,7 +153,7 @@ wss.on('connection', (ws) => {
         stalls.handleStalls(ws, user, space, msg); break;
       case 'attendConfig': case 'attendCheckIn': case 'attendCheckOut':
         attendance.handleAttendance(ws, user, space, msg); break;
-      case 'deskCreate': case 'deskDelete': case 'deskReserve': case 'deskCancel': case 'deskStart': case 'deskEnd':
+      case 'deskCreate': case 'deskDelete': case 'deskReserve': case 'deskCancel': case 'deskStart': case 'deskEnd': case 'deskExtend':
         desks.handleDesks(ws, user, space, msg); break;
       case 'oooCreate': case 'oooBack': case 'oooCancel': case 'oooRemove':
         ooo.handleOoo(ws, user, space, msg); break;
@@ -183,6 +183,13 @@ wss.on('connection', (ws) => {
       case 'spaceAdminSet': extras.adminSet(ws, user, space, msg); break;
       case 'spaceKick': extras.kick(ws, user, space, msg); break;
       case 'spacePause': extras.pause(ws, user, space, msg); break;
+      case 'spaceInviteCreate': extras.inviteCreate(ws, user, space, msg); break;
+      case 'spaceInviteRevoke': extras.inviteRevoke(ws, user, space, msg); break;
+      case 'spaceInviteList': extras.inviteList(ws, user, space, msg); break;
+      case 'spaceInviteRequire': extras.inviteRequire(ws, user, space, msg); break;
+      case 'spaceAuditList': extras.auditList(ws, user, space, msg); break;
+      case 'announceEdit': extras.announceEdit(ws, user, space, msg); break;
+      case 'announcePin': extras.announcePin(ws, user, space, msg); break;
       case 'suggestRoom': extras.suggestRoom(ws, user, space, msg); break;
       case 'remindReturn': extras.remindReturn(ws, user, space, msg); break;
       case 'removeNotice': extras.removeNotice(ws, user, space, msg); break;
