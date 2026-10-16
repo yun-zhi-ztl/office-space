@@ -34,9 +34,12 @@ const S = {
   calendar:{year:new Date().getFullYear(),month:new Date().getMonth()+1,days:[],totals:{}},
   calFilter:{meeting:true,desk:true,event:true,leave:true},
   assets:[], assetsStats:{},
+  keys:[], keysStats:{}, keyRequests:[],
+  fridge:{items:[],stats:{},logs:[]},
+  parking:{spots:[],stats:{},reservations:[]},
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'],['schedule','我的日程','🗓️'],['cal','空间日历','📅'],['assets','资产台账','🗄️'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'],['schedule','我的日程','🗓️'],['cal','空间日历','📅'],['assets','资产台账','🗄️'],['keys','钥匙门禁','🔑'],['fridge','冰箱食品','🥤'],['parking','车辆停车','🚗'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -83,6 +86,9 @@ function dispatch(m){
     case 'notifications': S.DB.notifications=m.notifications||[]; S.notificationTotal=m.total||0; S.notificationUnread=m.unreadCount||0; renderSidebar(); break;
     case 'materials': S.DB.requests=m.requests; S.DB.materialTemplates=m.templates||[]; S.DB.matTotal=m.total||0; S.DB.matOffset=S.DB.requests.length; break;
     case 'assets': S.DB.assets=m.assets||[]; S.DB.assetsStats=m.stats||{}; break;
+    case 'keys': S.DB.keys=m.keys||[]; S.DB.keysStats=m.stats||{}; S.DB.keyRequests=m.requests||[]; break;
+    case 'fridge': S.DB.fridge={items:m.items||[],stats:m.stats||{},logs:m.logs||[]}; break;
+    case 'parking': S.DB.parking={spots:m.spots||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; S.DB.repairStats=m.stats||null; break;
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
     case 'page': handlePage(m); break;
@@ -106,6 +112,11 @@ function dispatch(m){
     case 'overdueReminder': toast('⏰ 你借的设备已逾期，请尽快归还','urge'); break;
     case 'toolLowStock': toast('⚠️ 设备库存告急：'+(m.toolName||'')+' 可用 '+m.available+'（阈值 '+m.minAvailable+'）','warn'); render(); break;
     case 'inventoryLowStock': toast('⚠️ 物资库存告急：'+(m.itemName||'')+' 可用 '+m.available+'（阈值 '+m.minAvailable+'）','warn'); render(); break;
+    case 'keyRequest': toast('🔑 待审批：'+(m.keyName||'')+' ×'+(m.qty||1)+'（'+(m.account||'')+' 申请）','warn'); render(); break;
+    case 'keyApproved': toast('✅ 钥匙借用已批准：'+(m.keyName||''),'success'); render(); break;
+    case 'keyRejected': toast('❌ 钥匙借用被驳回','warn'); render(); break;
+    case 'keyOverdueReminder': toast('⏰ 你借的钥匙已逾期，请尽快归还','urge'); break;
+    case 'fridgeLowStock': toast('⚠️ 冰箱库存告急：'+(m.body||''),'warn'); render(); break;
     case 'attendanceCheckedIn': toast(m.isLate?'⏰ 上班打卡成功（已迟到）':'✔ 上班打卡成功', m.isLate?'warn':'success'); render(); break;
     case 'attendanceCheckedOut': toast('✔ 下班打卡成功，今日工作 '+Math.round((m.workedMinutes||0)/60)+'h'+((m.workedMinutes||0)%60?(m.workedMinutes%60)+'m':''),'success'); render(); break;
     case 'oooBacked': toast('✔ 已确认返回（'+(m.category||'外出')+'）','success'); render(); break;
@@ -198,17 +209,17 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceCalendar','spaceTrend','notices','digest','assets'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceCalendar','spaceTrend','notices','digest','assets','keys','fridge','parking'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); else if(S.module==='cal') renderSpaceCalendar(); else if(S.module==='assets') renderAssets(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); else if(S.module==='cal') renderSpaceCalendar(); else if(S.module==='assets') renderAssets(); else if(S.module==='keys') renderKeys(); else if(S.module==='fridge') renderFridge(); else if(S.module==='parking') renderParking(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
   else { b.style.display='none'; }
 }
 function renderAll(){ render(); }
-function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); }
+function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); if(mod==='keys') wsSend({type:'getKeys'}); if(mod==='fridge') wsSend({type:'getFridge'}); if(mod==='parking') wsSend({type:'getParking'}); }
 
 /* 分页：广播已按最近 PAGE 下发，前端按 offset 加载更多 */
 const PAGE = 30;
@@ -1773,6 +1784,127 @@ function openAssetCheck(id){ const a=(S.DB.assets||[]).find(x=>x.id===id); if(!a
   <div class="fld"><label>说明（可选）</label><input id="astCheckNote" placeholder="如：屏幕花屏"></div>
   <button class="btn pri" onclick="submitAssetCheck('${id}')">提交</button></div>`); }
 function submitAssetCheck(id){ wsSend({type:'assetCheck',id,condition:$('#astCond').value,note:$('#astCheckNote').value}); closeModal(); }
+/* 钥匙 / 门禁卡借用 */
+function renderKeys(){
+  const list = S.DB.keys||[]; const st = S.DB.keysStats||{};
+  const secLabel = {low:'普通',high:'高安全'};
+  const stLabel = {pending:'待审批',borrowed:'在借',rejected:'已驳回',returned:'已归还'};
+  const reqBadge = {pending:'warn',borrowed:'info',rejected:'bad',returned:'ok'};
+  $('#main').innerHTML = `<div class="topbar"><div><h1>钥匙 / 门禁卡借用</h1><div class="sub">工卡 / 钥匙 / 门禁卡 / 登记薄管理，高安全级需管理员审批</div></div>
+    ${S.admin?'<button class="btn pri" onclick="openKeyCreate()">新增钥匙</button>':''}</div>
+    <div class="cards">
+      <div class="card"><h3>🔑 钥匙总数</h3><div class="num">${list.length}</div><div class="meta">普通 ${st.bySecurity?.low||0} · 高安全 ${st.bySecurity?.high||0}</div></div>
+      <div class="card"><h3>🚪 在借 / 待审批</h3><div class="num">${st.borrowed||0}<span class="meta"> / ${st.pending||0}</span></div><div class="meta">待审批 ${st.pending||0} 条</div></div>
+      <div class="card"><h3>❌ 丢失</h3><div class="num">${st.missing||0}</div><div class="meta">条丢失记录</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">🔑 钥匙清单</h3>
+    <div class="list">${list.length?list.map(k=>`
+      <div class="row"><span><span class="who">${esc(k.name)} <span class="badge ${k.security==='high'?'warn':''}">${secLabel[k.security]}</span></span>
+        <div class="meta">${esc(k.category)} · 可用 ${k.available}/${k.total} · 在借 ${k.active||0} · 待审批 ${k.pending||0}${k.location?' · '+esc(k.location):''}</div>
+      </span><span class="fs">${S.admin?`<button class="btn sm" onclick="openKeyEdit('${k.id}')">编辑</button><button class="btn danger sm" onclick="deleteKey('${k.id}')">删除</button>`:''}</span></div>`).join(''):'<div class="empty">暂无钥匙</div>'}</div>
+    <h3 style="margin:22px 0 10px">📋 借用申请</h3>
+    <div class="list">${(S.DB.keyRequests||[]).length?S.DB.keyRequests.map(r=>`
+      <div class="row"><span><span class="who">${esc(r.keyName)} <span class="badge ${reqBadge[r.status]||''}">${stLabel[r.status]||r.status}</span></span>
+        <div class="meta">${esc(r.account)} · ×${r.qty}${r.securityCode?' · 尾号 '+esc(r.securityCode.slice(-4)):''}</div>
+      </span><span class="fs">${S.admin&&r.status==='pending'?`<button class="btn pri sm" onclick="keyApprove('${r.id}')">批准</button><button class="btn danger sm" onclick="keyReject('${r.id}')">驳回</button>`:''}${r.status==='borrowed'&&(r.account===S.me.account||S.admin)?`<button class="btn sm" onclick="openKeyReturn('${r.id}')">归还</button>`:''}</span></div>`).join(''):'<div class="empty">暂无申请</div>'}</div>`;
+}
+function openKeyCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>新增钥匙</h2><div class="form">
+  <div class="fld"><label>名称</label><input id="kName" placeholder="如：3F 机房钥匙"></div>
+  <div class="fld"><label>类别</label><select id="kCat">${['工卡','钥匙','门禁卡','登记薄','其它'].map(c=>`<option>${c}</option>`).join('')}</select></div>
+  <div class="fld"><label>安全级</label><select id="kSec"><option value="low">普通</option><option value="high">高安全（需审批）</option></select></div>
+  <div class="fld"><label>数量</label><input id="kTotal" type="number" value="1" min="1"></div>
+  <div class="fld"><label>位置</label><input id="kLoc" placeholder="可选"></div>
+  <button class="btn pri" onclick="submitKeyCreate()">创建</button></div>`); }
+function submitKeyCreate(){ wsSend({type:'keyCreate',name:$('#kName').value,category:$('#kCat').value,security:$('#kSec').value,total:+$('#kTotal').value||1,location:$('#kLoc').value}); closeModal(); }
+function openKeyEdit(id){ const k=(S.DB.keys||[]).find(x=>x.id===id); if(!k) return; openModal(`<span class="close" onclick="closeModal()">×</span><h2>编辑钥匙 · ${esc(k.name)}</h2><div class="form">
+  <div class="fld"><label>名称</label><input id="kName" value="${esc(k.name)}"></div>
+  <div class="fld"><label>类别</label><select id="kCat">${['工卡','钥匙','门禁卡','登记薄','其它'].map(c=>`<option ${c===k.category?'selected':''}>${c}</option>`).join('')}</select></div>
+  <div class="fld"><label>安全级</label><select id="kSec"><option value="low" ${k.security==='low'?'selected':''}>普通</option><option value="high" ${k.security==='high'?'selected':''}>高安全（需审批）</option></select></div>
+  <div class="fld"><label>位置</label><input id="kLoc" value="${esc(k.location||'')}"></div>
+  <button class="btn pri" onclick="submitKeyEdit('${id}')">保存</button></div>`); }
+function submitKeyEdit(id){ wsSend({type:'keyUpdate',id,name:$('#kName').value,category:$('#kCat').value,security:$('#kSec').value,location:$('#kLoc').value}); closeModal(); }
+function deleteKey(id){ const k=(S.DB.keys||[]).find(x=>x.id===id); if(confirm('确认删除钥匙「'+(k?k.name:'')+'」？')) wsSend({type:'keyDelete',id}); }
+function keyApprove(id){ wsSend({type:'keyApprove',id}); }
+function keyReject(id){ if(confirm('驳回该钥匙借用申请？')) wsSend({type:'keyReject',id}); }
+function openKeyReturn(id){ const r=(S.DB.keyRequests||[]).find(x=>x.id===id); if(!r) return; openModal(`<span class="close" onclick="closeModal()">×</span><h2>归还钥匙 · ${esc(r.keyName)}</h2><div class="form">
+  <div class="fld"><label>状态</label><select id="kCond"><option value="intact">完好</option><option value="damaged">损坏</option><option value="missing">丢失</option></select></div>
+  <button class="btn pri" onclick="submitKeyReturn('${id}')">提交</button></div>`); }
+function submitKeyReturn(id){ wsSend({type:'keyReturn',id,condition:$('#kCond').value}); closeModal(); }
+/* 冰箱 / 食品管理 */
+function renderFridge(){
+  const f=S.DB.fridge||{items:[],stats:{},logs:[]}; const st=f.stats||{};
+  const logLabel={take:'取走',restock:'补货',return:'归还'};
+  $('#main').innerHTML = `<div class="topbar"><div><h1>冰箱 / 食品管理</h1><div class="sub">共享冰箱物品登记、取用与补货，保质期提醒与库存告急</div></div>
+    ${S.admin?'<button class="btn pri" onclick="openFridgeCreate()">登记物品</button>':''}</div>
+    <div class="cards">
+      <div class="card"><h3>🥤 物品数</h3><div class="num">${f.items.length}</div><div class="meta">在库物品</div></div>
+      <div class="card"><h3>⚠️ 告急</h3><div class="num">${st.low||0}</div><div class="meta">跌破阈值物品</div></div>
+      <div class="card"><h3>📥 今日取用 / 补货</h3><div class="num">${st.taken||0}<span class="meta"> / ${st.restocked||0}</span></div><div class="meta">取用 ${st.taken||0} · 补货 ${st.restocked||0}</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">🥤 物品清单</h3>
+    <div class="list">${f.items.length?f.items.map(i=>`
+      <div class="row"><span><span class="who">${esc(i.name)} ${i.lowStock?'<span class="badge bad">告急</span>':''}</span>
+        <div class="meta">${esc(i.category)} · 可用 ${i.available}/${i.total} ${esc(i.unit)}${i.expiryDate?' · 到期 '+esc(i.expiryDate):''}</div>
+      </span><span class="fs"><button class="btn sm" onclick="openFridgeTake('${i.id}')">取用</button>${S.admin?`<button class="btn sm" onclick="openFridgeRestock('${i.id}')">补货</button><button class="btn danger sm" onclick="deleteFridgeItem('${i.id}')">删除</button>`:''}</span></div>`).join(''):'<div class="empty">冰箱还是空的</div>'}</div>
+    <h3 style="margin:22px 0 10px">📋 取用记录</h3>
+    <div class="list">${f.logs.length?f.logs.map(l=>`
+      <div class="row"><span><span class="who">${logLabel[l.type]||l.type} · ${esc(l.itemName)} ×${l.qty}</span>
+        <div class="meta">${esc(l.name||l.account)} · ${fmtTime(l.at)}</div>
+      </span></div>`).join(''):'<div class="empty">暂无记录</div>'}</div>`;
+}
+function openFridgeCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>登记冰箱物品</h2><div class="form">
+  <div class="fld"><label>名称</label><input id="fdName" placeholder="如：矿泉水"></div>
+  <div class="fld"><label>类别</label><input id="fdCat" placeholder="如：饮料 / 零食"></div>
+  <div class="fld"><label>数量</label><input id="fdTotal" type="number" value="6" min="1"></div>
+  <div class="fld"><label>单位</label><input id="fdUnit" value="瓶"></div>
+  <div class="fld"><label>保质期（可选）</label><input id="fdExp" placeholder="如：2026-12-31"></div>
+  <div class="fld"><label>阈值</label><input id="fdMin" type="number" value="1" min="0"></div>
+  <button class="btn pri" onclick="submitFridgeCreate()">登记</button></div>`); }
+function submitFridgeCreate(){ wsSend({type:'fridgeItemCreate',name:$('#fdName').value,category:$('#fdCat').value,total:+$('#fdTotal').value||1,unit:$('#fdUnit').value,expiryDate:$('#fdExp').value,minAvailable:+$('#fdMin').value||0}); closeModal(); }
+function openFridgeTake(id){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>取用物品</h2><div class="form">
+  <div class="fld"><label>数量</label><input id="fdQty" type="number" value="1" min="1"></div>
+  <button class="btn pri" onclick="submitFridgeTake('${id}')">取用</button></div>`); }
+function submitFridgeTake(id){ wsSend({type:'fridgeTake',id,qty:+$('#fdQty').value||1}); closeModal(); }
+function openFridgeRestock(id){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>补货</h2><div class="form">
+  <div class="fld"><label>数量</label><input id="fdQty" type="number" value="6" min="1"></div>
+  <button class="btn pri" onclick="submitFridgeRestock('${id}')">补货</button></div>`); }
+function submitFridgeRestock(id){ wsSend({type:'fridgeRestock',id,qty:+$('#fdQty').value||1}); closeModal(); }
+function deleteFridgeItem(id){ if(confirm('确认删除该冰箱物品？')) wsSend({type:'fridgeItemDelete',id}); }
+/* 车辆 / 停车位 */
+function renderParking(){
+  const p=S.DB.parking||{spots:[],stats:{},reservations:[]}; const st=p.stats||{};
+  const typeLabel={standard:'普通',disabled:'无障碍',ev:'充电',reserved:'固定'};
+  const statusLabel={reserved:'待签到',checked_in:'已停放',cancelled:'已取消',checked_out:'已驶离'};
+  const statusBadge={reserved:'info',checked_in:'ok',cancelled:'bad',checked_out:'grey'};
+  $('#main').innerHTML = `<div class="topbar"><div><h1>车辆 / 停车位</h1><div class="sub">共享车位预约与签到签退，车牌登记与实时占用</div></div>
+    ${S.admin?'<button class="btn pri" onclick="openSpotCreate()">新增车位</button>':''}</div>
+    <div class="cards">
+      <div class="card"><h3>🅿️ 车位总数</h3><div class="num">${p.spots.length}</div><div class="meta">可用 ${(p.spots.reduce((a,s)=>a+s.available,0))} 个</div></div>
+      <div class="card"><h3>🚗 当前占用</h3><div class="num">${st.active||0}</div><div class="meta">在预约/停放中</div></div>
+      <div class="card"><h3>📅 今日预约</h3><div class="num">${p.reservations.filter(r=>r.status==='reserved'||r.status==='checked_in').length}</div><div class="meta">待签到 + 已停放</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">🅿️ 车位清单</h3>
+    <div class="list">${p.spots.length?p.spots.map(s=>`
+      <div class="row"><span><span class="who">${esc(s.name)} <span class="badge ${s.type==='ev'?'warn':''}">${typeLabel[s.type]}</span></span>
+        <div class="meta">${s.available}/${s.total} 可用${s.location?' · '+esc(s.location):''}</div>
+      </span><span class="fs">${S.admin?`<button class="btn danger sm" onclick="deleteSpot('${s.id}')">删除</button>`:''}</span></div>`).join(''):'<div class="empty">暂无车位</div>'}</div>
+    <h3 style="margin:22px 0 10px">📋 预约记录</h3>
+    <div class="list">${p.reservations.length?p.reservations.map(r=>`
+      <div class="row"><span><span class="who">${esc(r.spotName)} <span class="badge ${statusBadge[r.status]||''}">${statusLabel[r.status]||r.status}</span></span>
+        <div class="meta">${esc(r.date)} ${fmtTime(r.startAt)}-${fmtTime(r.endAt)}${r.plateNumber?' · '+esc(r.plateNumber):''}</div>
+      </span><span class="fs">${r.status==='reserved'?`<button class="btn sm" onclick="spotCancel('${r.id}')">取消</button>`:''}${(r.status==='reserved'||r.status==='checked_in')&&(r.account===S.me.account||S.admin)?(r.status==='reserved'?`<button class="btn pri sm" onclick="spotCheckin('${r.id}')">签到</button>`:`<button class="btn sm" onclick="spotCheckout('${r.id}')">签出</button>`):''}</span></div>`).join(''):'<div class="empty">暂无预约</div>'}</div>`;
+}
+function openSpotCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>新增车位</h2><div class="form">
+  <div class="fld"><label>名称</label><input id="pkName" placeholder="如：地下 B2 充电位"></div>
+  <div class="fld"><label>类型</label><select id="pkType">${['普通','无障碍','充电','固定'].map((t,i)=>`<option value="${['standard','disabled','ev','reserved'][i]}">${t}</option>`).join('')}</select></div>
+  <div class="fld"><label>数量</label><input id="pkTotal" type="number" value="1" min="1"></div>
+  <div class="fld"><label>位置</label><input id="pkLoc" placeholder="可选"></div>
+  <button class="btn pri" onclick="submitSpotCreate()">创建</button></div>`); }
+function submitSpotCreate(){ wsSend({type:'spotCreate',name:$('#pkName').value,spotType:$('#pkType').value,total:+$('#pkTotal').value||1,location:$('#pkLoc').value}); closeModal(); }
+function deleteSpot(id){ if(confirm('确认删除该车位？')) wsSend({type:'spotDelete',id}); }
+function spotCancel(id){ wsSend({type:'spotCancel',id}); }
+function spotCheckin(id){ wsSend({type:'spotCheckin',id}); }
+function spotCheckout(id){ wsSend({type:'spotCheckout',id}); }
 setInterval(()=>{ if(S.module==='stalls' && S.me && document.visibilityState==='visible') renderStalls(); }, 1000);
 function openReserve(id,type){
   const opts = type==='urinal' ? [['1分钟',1],['2分钟',2],['5分钟',5]] : [['15分钟',15],['30分钟',30],['45分钟',45]];

@@ -26,6 +26,9 @@ function createContext() {
   const ASSET_CATEGORIES = ['固定资产', '办公设备', '家具', '电器', '其它'];
   const ASSET_STATUSES = ['in_use', 'idle', 'maintenance', 'scrapped'];
   const ASSET_CONDITIONS = ['intact', 'damaged', 'missing'];
+  const KEY_CATEGORIES = ['工卡', '钥匙', '门禁卡', '登记薄', '其它'];
+  const KEY_SECURITY = ['low', 'high'];
+  const PARKING_TYPES = ['standard', 'disabled', 'ev', 'reserved'];
   const POLL_MAX_OPTIONS = 5;
   const KNOWLEDGE_CATEGORIES = ['规章制度', '操作指引', '设备说明', '常见问题', '其他'];
   const TASK_PRIORITIES = ['high', 'normal', 'low'];
@@ -255,6 +258,12 @@ function createContext() {
       else if (r.kind === 'leave') sp.leaves.set(data.id, data);
       else if (r.kind === 'meeting_note') sp.meetingNotes.set(data.id, data);
       else if (r.kind === 'asset') sp.assets.set(data.id, data);
+      else if (r.kind === 'key') sp.keys.push(data);
+      else if (r.kind === 'keyRequest') sp.keyRequests.set(data.id, data);
+      else if (r.kind === 'fridgeItem') sp.fridgeItems.push(data);
+      else if (r.kind === 'fridgeLog') sp.fridgeLogs.set(data.id, data);
+      else if (r.kind === 'parkingSpot') sp.parkingSpots.push(data);
+      else if (r.kind === 'parkingReservation') sp.parkingReservations.set(data.id, data);
       else if (r.kind === 'notice') { sp.notices.push(data); sp.notices.sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
       else if (r.kind === 'invite') { ensureInvites(sp).set(data.id, data); }
       else if (r.kind === 'audit_log') { if (!sp.auditLogs) sp.auditLogs = []; sp.auditLogs.push(data); sp.auditLogs.sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
@@ -590,6 +599,9 @@ function createContext() {
       duties: new Map(),
       invites: new Map(),
       assets: new Map(),
+      keys: [], keyRequests: new Map(),
+      fridgeItems: [], fridgeLogs: new Map(),
+      parkingSpots: [], parkingReservations: new Map(),
       requireInvite: false,
       auditLogs: [],
     };
@@ -1178,6 +1190,68 @@ function createContext() {
     const damaged = all.filter((a) => a.condition === 'damaged').length;
     const missing = all.filter((a) => a.condition === 'missing').length;
     return { total: all.length, byStatus, byCategory, damaged, missing };
+  }
+
+  // ---------- 钥匙 / 门禁卡序列化 ----------
+  function keysPublic(space, info) {
+    return space.keys.map((k) => {
+      const active = [...space.keyRequests.values()].filter((r) => r.keyId === k.id && r.status === 'borrowed').length;
+      const pending = [...space.keyRequests.values()].filter((r) => r.keyId === k.id && r.status === 'pending').length;
+      return { id: k.id, name: k.name, category: k.category, security: k.security, total: k.total, available: k.available, active, pending, location: k.location || '', description: k.description || '' };
+    });
+  }
+  function keysStats(space) {
+    const all = space.keys;
+    const bySecurity = { low: 0, high: 0 };
+    for (const k of all) bySecurity[k.security] = (bySecurity[k.security] || 0) + 1;
+    const borrowed = [...space.keyRequests.values()].filter((r) => r.status === 'borrowed').length;
+    const pending = [...space.keyRequests.values()].filter((r) => r.status === 'pending').length;
+    const missing = [...space.keyRequests.values()].filter((r) => r.condition === 'missing').length;
+    return { total: all.length, bySecurity, borrowed, pending, missing };
+  }
+  function keyRequestsPublic(space, info) {
+    return [...space.keyRequests.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map((r) => {
+      const key = space.keys.find((k) => k.id === r.keyId);
+      return { id: r.id, keyId: r.keyId, keyName: key ? key.name : '', account: r.account, qty: r.qty, status: r.status, security: key ? key.security : 'low', securityCode: r.securityCode || '', borrowedAt: r.borrowedAt || 0, dueAt: r.dueAt || 0, returnedAt: r.returnedAt || 0, condition: r.condition || '', approvedBy: r.approvedBy || '', approvedAt: r.approvedAt || 0, createdAt: r.createdAt || 0, lastRemindedAt: r.lastRemindedAt || 0 };
+    });
+  }
+
+  // ---------- 冰箱 / 食品序列化 ----------
+  function fridgeItemsPublic(space, info) {
+    return space.fridgeItems.map((i) => ({ id: i.id, name: i.name, category: i.category, total: i.total, available: i.available, minAvailable: i.minAvailable, unit: i.unit, expiryDate: i.expiryDate || '', location: i.location || '', note: i.note || '', lowStock: i.available <= i.minAvailable }));
+  }
+  function fridgeStats(space) {
+    const all = space.fridgeItems;
+    const low = all.filter((i) => i.available <= i.minAvailable).length;
+    const taken = [...space.fridgeLogs.values()].filter((l) => l.type === 'take').length;
+    const restocked = [...space.fridgeLogs.values()].filter((l) => l.type === 'restock').length;
+    return { total: all.length, low, taken, restocked };
+  }
+  function fridgeLogsPublic(space, info) {
+    return [...space.fridgeLogs.values()].sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 30).map((l) => {
+      const item = space.fridgeItems.find((i) => i.id === l.itemId);
+      const u = info.get(l.account);
+      return { id: l.id, itemId: l.itemId, itemName: item ? item.name : '', account: l.account, name: u ? u.display : l.account, qty: l.qty, type: l.type, at: l.at || 0 };
+    });
+  }
+
+  // ---------- 车辆 / 停车位序列化 ----------
+  function parkingSpotsPublic(space, info) {
+    return space.parkingSpots.map((s) => ({ id: s.id, name: s.name, type: s.type, total: s.total, available: s.available, location: s.location || '', note: s.note || '' }));
+  }
+  function parkingStats(space) {
+    const all = space.parkingSpots;
+    const active = [...space.parkingReservations.values()].filter((r) => r.status === 'reserved' || r.status === 'checked_in').length;
+    const byType = {};
+    for (const s of all) byType[s.type] = (byType[s.type] || 0) + 1;
+    return { total: all.length, active, byType };
+  }
+  function parkingReservationsPublic(space, info) {
+    return [...space.parkingReservations.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map((r) => {
+      const spot = space.parkingSpots.find((s) => s.id === r.spotId);
+      const u = info.get(r.account);
+      return { id: r.id, spotId: r.spotId, spotName: spot ? spot.name : '', spotType: spot ? spot.type : 'standard', account: r.account, plateNumber: r.plateNumber || '', date: r.date, startAt: r.startAt, endAt: r.endAt, status: r.status, checkedInAt: r.checkedInAt || 0, checkedOutAt: r.checkedOutAt || 0, createdAt: r.createdAt || 0 };
+    });
   }
 
   // 今日值班提醒：每个未完成值班每日只提醒一次（按 reminderAt 去重）
@@ -1908,7 +1982,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, ROOM_APPROVAL_SLA_MS, LEAVE_APPROVAL_SLA_MS, MEETING_ONTIME_GRACE_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, LEAVE_CATEGORIES, MEETING_NOTE_MAX_LEN, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, EVENT_CATEGORIES, DUTY_CATEGORIES, ASSET_CATEGORIES, ASSET_STATUSES, ASSET_CONDITIONS, POLL_MAX_OPTIONS, KNOWLEDGE_CATEGORIES, TASK_PRIORITIES, TASK_STATUSES, NOTIFICATION_LEVELS, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, ROOM_APPROVAL_SLA_MS, LEAVE_APPROVAL_SLA_MS, MEETING_ONTIME_GRACE_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, LEAVE_CATEGORIES, MEETING_NOTE_MAX_LEN, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, EVENT_CATEGORIES, DUTY_CATEGORIES, ASSET_CATEGORIES, ASSET_STATUSES, ASSET_CONDITIONS, KEY_CATEGORIES, KEY_SECURITY, PARKING_TYPES, POLL_MAX_OPTIONS, KNOWLEDGE_CATEGORIES, TASK_PRIORITIES, TASK_STATUSES, NOTIFICATION_LEVELS, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -1922,7 +1996,7 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueRoomApprovalReminders, dueLeaveSlaReminders, dueDutyReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser, ensureInvites, genInviteCode, createInvite, useInvite, revokeInvite, invitesPublic, inviteStatus, auditLog, auditLogsPublic,
     // 序列化
-    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, dutiesPublic, dutyStats, assetsPublic, assetsStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, dutiesPublic, dutyStats, assetsPublic, assetsStats, keysPublic, keysStats, keyRequestsPublic, fridgeItemsPublic, fridgeStats, fridgeLogsPublic, parkingSpotsPublic, parkingStats, parkingReservationsPublic, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
     // 广播
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, dutyBroadcast, eventsBroadcast, pollsBroadcast, knowledgeBroadcast, tasksBroadcast, leavesBroadcast, meetingNotesBroadcast, notificationsBroadcast, noticesBroadcast, pushNotification, pushNotice, visitorsBroadcast,
     // 坑位辅助

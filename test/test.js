@@ -2348,6 +2348,98 @@ async function runTests() {
     wA.close(); wB.close();
   }
 
+  // ========== 测试52: 钥匙门禁借用 ==========
+  console.log('\n📋 测试52: 钥匙门禁借用（高安全审批/低安全直借/归还丢失）');
+  {
+    const spKey = (await httpJson('POST', '/api/spaces', { name: '钥匙办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aKey = 'keya_' + runKey, bKey = 'keyb_' + runKey;
+    await reg(aKey, 'pw', '钥匙管理员'); await reg(bKey, 'pw', '钥匙成员');
+    const wK1 = await createWSClient(); await loginTo(wK1, spKey.id, aKey, 'pw');
+    const wK2 = await createWSClient(); await loginTo(wK2, spKey.id, bKey, 'pw');
+    await sendMsg(wK1, { type: 'keyCreate', name: '机房钥匙', category: '钥匙', security: 'high', total: 1 });
+    let keys0 = last(wK1, 'keys');
+    assert(keys0 && keys0.keys.length === 1 && keys0.keys[0].security === 'high', 'admin 创建高安全钥匙');
+    const keyId = keys0.keys[0].id;
+    await sendMsg(wK2, { type: 'keyRequest', keyId, qty: 1 });
+    let keysK = last(wK2, 'keys');
+    const kr0 = keysK.requests.find(r => r.keyId === keyId);
+    assert(kr0 && kr0.status === 'pending', '高安全钥匙申请进入待审批');
+    await sendMsg(wK1, { type: 'keyApprove', id: kr0.id });
+    keysK = last(wK1, 'keys');
+    assert(keysK.requests.find(r => r.id === kr0.id).status === 'borrowed', '批准后变为在借');
+    await sendMsg(wK2, { type: 'keyReturn', id: kr0.id, condition: 'missing' });
+    keysK = last(wK2, 'keys');
+    assert(keysK.requests.find(r => r.id === kr0.id).condition === 'missing', '归还登记丢失');
+    assert(keysK.keys[0].total === 0, '丢失后库存总数扣减');
+    // 低安全级直接借用
+    await sendMsg(wK1, { type: 'keyCreate', name: '门禁卡', category: '门禁卡', security: 'low', total: 2 });
+    const lowKey = last(wK1, 'keys').keys.find(k => k.name === '门禁卡');
+    await sendMsg(wK2, { type: 'keyRequest', keyId: lowKey.id, qty: 1 });
+    const lowKeyReq = last(wK2, 'keys').requests.find(r => r.keyId === lowKey.id);
+    assert(lowKeyReq && lowKeyReq.status === 'borrowed', '低安全级直接借用无需审批');
+    await sendMsg(wK2, { type: 'keyReturn', id: lowKeyReq.id, condition: 'intact' });
+    keysK = last(wK2, 'keys');
+    assert(keysK.keys.find(k => k.id === lowKey.id).available === 2, '完好归还后可用恢复');
+    wK1.close(); wK2.close();
+  }
+
+  // ========== 测试53: 冰箱食品管理 ==========
+  console.log('\n📋 测试53: 冰箱食品管理（登记/取用/告急/补货）');
+  {
+    const spFridge = (await httpJson('POST', '/api/spaces', { name: '冰箱办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aFridge = 'frdga_' + runKey, bFridge = 'frdgb_' + runKey;
+    await reg(aFridge, 'pw', '冰箱管理员'); await reg(bFridge, 'pw', '冰箱成员');
+    const wF1 = await createWSClient(); await loginTo(wF1, spFridge.id, aFridge, 'pw');
+    const wF2 = await createWSClient(); await loginTo(wF2, spFridge.id, bFridge, 'pw');
+    await sendMsg(wF1, { type: 'fridgeItemCreate', name: '矿泉水', category: '饮料', total: 6, unit: '瓶', minAvailable: 2 });
+    let fridge0 = last(wF1, 'fridge');
+    assert(fridge0 && fridge0.items.length === 1 && fridge0.items[0].available === 6, 'admin 登记冰箱物品');
+    const fdId = fridge0.items[0].id;
+    await sendMsg(wF2, { type: 'fridgeTake', id: fdId, qty: 4 });
+    fridge0 = last(wF2, 'fridge');
+    assert(fridge0.items[0].available === 2 && fridge0.items[0].lowStock === true, '取用后跌破阈值标记告急');
+    await sendMsg(wF2, { type: 'fridgeTake', id: fdId, qty: 3 });
+    const errFd = mk(wF2, 'error').pop();
+    assert(errFd && errFd.message.includes('不足'), '超量取用被拒');
+    await sendMsg(wF1, { type: 'fridgeRestock', id: fdId, qty: 6 });
+    fridge0 = last(wF1, 'fridge');
+    assert(fridge0.items[0].total === 12 && fridge0.items[0].available === 8 && fridge0.items[0].lowStock === false, '补货后恢复并解除告急');
+    wF1.close(); wF2.close();
+  }
+
+  // ========== 测试54: 车辆停车位管理 ==========
+  console.log('\n📋 测试54: 车辆停车位（新增/预约/签到/签出/冲突）');
+  {
+    const spPk = (await httpJson('POST', '/api/spaces', { name: '停车办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aPk = 'pka_' + runKey, bPk = 'pkb_' + runKey;
+    await reg(aPk, 'pw', '停车管理员'); await reg(bPk, 'pw', '停车成员');
+    const wP1 = await createWSClient(); await loginTo(wP1, spPk.id, aPk, 'pw');
+    const wP2 = await createWSClient(); await loginTo(wP2, spPk.id, bPk, 'pw');
+    await sendMsg(wP1, { type: 'spotCreate', name: 'B2 充电位', spotType: 'ev', total: 2 });
+    let pk0 = last(wP1, 'parking');
+    assert(pk0 && pk0.spots.length === 1 && pk0.spots[0].type === 'ev', 'admin 新增车位');
+    const spotId = pk0.spots[0].id;
+    const nowMs = Date.now();
+    await sendMsg(wP2, { type: 'spotReserve', spotId, date: '2026-10-16', startAt: nowMs + 86400000, endAt: nowMs + 86400000 + 3600000, plateNumber: '京A12345' });
+    pk0 = last(wP2, 'parking');
+    const parkingRes0 = pk0.reservations[0];
+    assert(parkingRes0 && parkingRes0.status === 'reserved', 'member 预约车位成功');
+    assert(pk0.spots[0].available === 1, '预约后可用减 1');
+    await sendMsg(wP2, { type: 'spotCheckin', id: parkingRes0.id });
+    pk0 = last(wP2, 'parking');
+    assert(pk0.reservations[0].status === 'checked_in', '签到后状态为已停放');
+    await sendMsg(wP2, { type: 'spotCheckout', id: parkingRes0.id });
+    pk0 = last(wP2, 'parking');
+    assert(pk0.reservations[0].status === 'checked_out', '签出后状态为已驶离');
+    assert(pk0.spots[0].available === 2, '签出后可用恢复');
+    // 冲突预约被拒
+    await sendMsg(wP2, { type: 'spotReserve', spotId, date: '2026-10-16', startAt: nowMs + 86400000, endAt: nowMs + 86400000 + 3600000 });
+    await sendMsg(wP2, { type: 'spotReserve', spotId, date: '2026-10-16', startAt: nowMs + 86400000 + 60000, endAt: nowMs + 86400000 + 3600000 + 60000 });
+    const errPk = mk(wP2, 'error').pop();
+    assert(errPk && errPk.message.includes('占用'), '冲突时段预约被拒');
+    wP1.close(); wP2.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

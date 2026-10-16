@@ -36,6 +36,9 @@ const leavesModule = require('./src/modules/leaves');
 const meetingNotesModule = require('./src/modules/meetingNotes');
 const dutiesModule = require('./src/modules/duties');
 const assetsModule = require('./src/modules/assets');
+const keysModule = require('./src/modules/keys');
+const fridgeModule = require('./src/modules/fridge');
+const parkingModule = require('./src/modules/parking');
 
 // ---------- 上下文 ----------
 const api = createContext();
@@ -86,6 +89,9 @@ const leaves = leavesModule(api);
 const meetingNotes = meetingNotesModule(api);
 const duties = dutiesModule(api);
 const assets = assetsModule(api);
+const keys = keysModule(api);
+const fridge = fridgeModule(api);
+const parking = parkingModule(api);
 
 // ---------- 分页加载 ----------
 function handleFetchPage(ws, user, space, msg) {
@@ -135,6 +141,9 @@ wss.on('connection', (ws) => {
     if (msg.type === 'getMySchedule') { api.sendTo(ws, { type: 'mySchedule', schedule: api.buildMySchedule(space, user, msg.days) }); return; }
     if (msg.type === 'getSpaceCalendar') { api.sendTo(ws, { type: 'spaceCalendar', calendar: api.buildSpaceCalendar(space, msg.year, msg.month) }); return; }
     if (msg.type === 'getAssets') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'assets', assets: api.assetsPublic(space, info), stats: api.assetsStats(space) }); return; }
+    if (msg.type === 'getKeys') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'keys', keys: api.keysPublic(space, info), stats: api.keysStats(space), requests: api.keyRequestsPublic(space, info) }); return; }
+    if (msg.type === 'getFridge') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'fridge', items: api.fridgeItemsPublic(space, info), stats: api.fridgeStats(space), logs: api.fridgeLogsPublic(space, info) }); return; }
+    if (msg.type === 'getParking') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'parking', spots: api.parkingSpotsPublic(space, info), stats: api.parkingStats(space), reservations: api.parkingReservationsPublic(space, info) }); return; }
     if (msg.type === 'getSpaceTrend') { api.sendTo(ws, { type: 'spaceTrend', trend: api.buildSpaceTrend(space, msg.days) }); return; }
     if (msg.type === 'getAttendanceCalendar') { api.sendTo(ws, { type: 'attendanceCalendar', calendar: api.attendanceCalendar(space, user.account, msg.year, msg.month) }); return; }
     if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }
@@ -184,6 +193,12 @@ wss.on('connection', (ws) => {
         duties.handleDuties(ws, user, space, msg); break;
       case 'assetCreate': case 'assetUpdate': case 'assetDelete': case 'assetCheck':
         assets.handleAssets(ws, user, space, msg); break;
+      case 'keyCreate': case 'keyDelete': case 'keyUpdate': case 'keyRequest': case 'keyApprove': case 'keyReject': case 'keyReturn': case 'remindKeyOverdue':
+        keys.handleKeys(ws, user, space, msg); break;
+      case 'fridgeItemCreate': case 'fridgeItemDelete': case 'fridgeTake': case 'fridgeRestock': case 'fridgeReturn':
+        fridge.handleFridge(ws, user, space, msg); break;
+      case 'spotCreate': case 'spotDelete': case 'spotReserve': case 'spotCancel': case 'spotCheckin': case 'spotCheckout':
+        parking.handleParking(ws, user, space, msg); break;
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
       case 'announce': extras.announce(ws, user, space, msg); break;
       case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;

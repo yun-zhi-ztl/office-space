@@ -4,6 +4,9 @@
 const { createContext } = require('../src/context');
 const roomsModule = require('../src/modules/rooms');
 const assetsModule = require('../src/modules/assets');
+const keysModule = require('../src/modules/keys');
+const fridgeModule = require('../src/modules/fridge');
+const parkingModule = require('../src/modules/parking');
 const extrasModule = require('../src/modules/extras');
 
 let passed = 0;
@@ -348,6 +351,137 @@ assertEq(created.name, '投影仪(新)', 'assetUpdate 更新名称');
 assertEq(created.status, 'idle', 'assetUpdate 更新状态');
 assetModule.handleAssets({}, assetUser, assetSpace, { type: 'assetDelete', id: created.id });
 assertEq(assetSpace.assets.size, 0, 'assetDelete 删除资产');
+
+// ---------- 钥匙 / 门禁卡 ----------
+console.log('\n📋 12e. 钥匙门禁借用');
+const keyUser = { id: 'k1', account: 'admin', nickname: '管理员', stats: {}, achievements: [] };
+const keyMember = { id: 'k2', account: 'member', nickname: '成员', stats: {}, achievements: [] };
+const keySent = [];
+let keySeq = 0;
+const keyApi = {
+  spaceUserInfo: () => new Map(),
+  keysPublic: (space) => space.keys,
+  keysStats: (space) => {
+    const all = space.keys; const bySecurity = { low: 0, high: 0 };
+    for (const k of all) bySecurity[k.security] = (bySecurity[k.security] || 0) + 1;
+    const rs = [...space.keyRequests.values()];
+    return { total: all.length, bySecurity, borrowed: rs.filter((r) => r.status === 'borrowed').length, pending: rs.filter((r) => r.status === 'pending').length, missing: rs.filter((r) => r.condition === 'missing').length };
+  },
+  keyRequestsPublic: (space) => [...space.keyRequests.values()],
+  broadcast: () => {},
+  KEY_CATEGORIES: ['工卡', '钥匙', '门禁卡', '登记薄', '其它'],
+  isAdmin: (space, account) => account === 'admin',
+  sendTo: (ws, obj) => { keySent.push(obj); },
+  serError: (m) => ({ type: 'error', message: m }),
+  genId: (prefix) => `${prefix}${keySeq++}`,
+  saveEntity: () => {},
+  deleteEntity: () => {},
+  pushNotification: () => {},
+  sendToAccount: () => {},
+  getUserByAccount: () => keyMember,
+  sendToUser: () => {},
+  checkAchievements: () => {},
+  saveProfile: () => {},
+  broadcastLeaderboard: () => {},
+};
+const keyModule = keysModule(keyApi);
+const keySpace = { id: 's12e', keys: [], keyRequests: new Map(), admins: new Set(['admin']) };
+keyModule.handleKeys({}, keyUser, keySpace, { type: 'keyCreate', name: '机房钥匙', category: '钥匙', security: 'high', total: 1 });
+const k = keySpace.keys[0];
+assert(k, 'keyCreate 创建钥匙');
+assertEq(k.security, 'high', '高安全钥匙已保存');
+keyModule.handleKeys({}, keyMember, keySpace, { type: 'keyRequest', keyId: k.id, qty: 1 });
+const kr = [...keySpace.keyRequests.values()][0];
+assertEq(kr.status, 'pending', '高安全钥匙需审批（pending）');
+keyModule.handleKeys({}, keyUser, keySpace, { type: 'keyApprove', id: kr.id });
+assertEq(kr.status, 'borrowed', '批准后变为在借');
+assertEq(kr.approvedBy, 'admin', '审批人已记录');
+keyModule.handleKeys({}, keyUser, keySpace, { type: 'keyReturn', id: kr.id, condition: 'missing' });
+assertEq(kr.status, 'returned', '钥匙归还后状态为已归还');
+assertEq(kr.condition, 'missing', '归还登记丢失');
+assertEq(k.total, 0, '丢失后库存总数扣减');
+assertEq(keyApi.keysStats(keySpace).missing, 1, 'keysStats 统计丢失数');
+
+// ---------- 冰箱 / 食品 ----------
+console.log('\n📋 12f. 冰箱食品管理');
+const fridgeSent = [];
+let fridgeSeq = 0;
+const fridgeApi = {
+  spaceUserInfo: () => new Map(),
+  fridgeItemsPublic: (space) => space.fridgeItems,
+  fridgeStats: (space) => {
+    const low = space.fridgeItems.filter((i) => i.available <= i.minAvailable).length;
+    const logs = [...space.fridgeLogs.values()];
+    return { total: space.fridgeItems.length, low, taken: logs.filter((l) => l.type === 'take').length, restocked: logs.filter((l) => l.type === 'restock').length };
+  },
+  fridgeLogsPublic: (space) => [...space.fridgeLogs.values()],
+  broadcast: () => {},
+  isAdmin: (space, account) => account === 'admin',
+  sendTo: (ws, obj) => { fridgeSent.push(obj); },
+  serError: (m) => ({ type: 'error', message: m }),
+  genId: (prefix) => `${prefix}${fridgeSeq++}`,
+  saveEntity: () => {},
+  deleteEntity: () => {},
+  pushNotification: () => {},
+  broadcastLeaderboard: () => {},
+};
+const fridgeModule2 = fridgeModule(fridgeApi);
+const fridgeSpace = { id: 's12f', fridgeItems: [], fridgeLogs: new Map() };
+fridgeModule2.handleFridge({}, keyUser, fridgeSpace, { type: 'fridgeItemCreate', name: '矿泉水', category: '饮料', total: 6, unit: '瓶', minAvailable: 2 });
+const fi = fridgeSpace.fridgeItems[0];
+assert(fi, 'fridgeItemCreate 登记物品');
+assertEq(fi.available, 6, '初始可用 6');
+fridgeModule2.handleFridge({}, keyMember, fridgeSpace, { type: 'fridgeTake', id: fi.id, qty: 4 });
+assertEq(fi.available, 2, '取用后可用 2');
+assert(fridgeApi.fridgeStats(fridgeSpace).taken >= 1, 'fridgeStats 统计取用');
+fridgeModule2.handleFridge({}, keyMember, fridgeSpace, { type: 'fridgeTake', id: fi.id, qty: 3 });
+assert(fridgeSent.some((m) => m.message && m.message.includes('不足')), '超量取用被拒');
+fridgeModule2.handleFridge({}, keyUser, fridgeSpace, { type: 'fridgeRestock', id: fi.id, qty: 6 });
+assertEq(fi.total, 12, '补货后总数增加');
+assertEq(fi.available, 8, '补货后可用恢复');
+
+// ---------- 车辆 / 停车位 ----------
+console.log('\n📋 12g. 车辆停车位管理');
+const parkingSent = [];
+let parkingSeq = 0;
+const parkingApi = {
+  spaceUserInfo: () => new Map(),
+  parkingSpotsPublic: (space) => space.parkingSpots,
+  parkingStats: (space) => {
+    const byType = {}; for (const s of space.parkingSpots) byType[s.type] = (byType[s.type] || 0) + 1;
+    const active = [...space.parkingReservations.values()].filter((r) => r.status === 'reserved' || r.status === 'checked_in').length;
+    return { total: space.parkingSpots.length, active, byType };
+  },
+  parkingReservationsPublic: (space) => [...space.parkingReservations.values()],
+  broadcast: () => {},
+  PARKING_TYPES: ['standard', 'disabled', 'ev', 'reserved'],
+  isAdmin: (space, account) => account === 'admin',
+  sendTo: (ws, obj) => { parkingSent.push(obj); },
+  serError: (m) => ({ type: 'error', message: m }),
+  genId: (prefix) => `${prefix}${parkingSeq++}`,
+  saveEntity: () => {},
+  deleteEntity: () => {},
+  pushNotification: () => {},
+};
+const parkingModule2 = parkingModule(parkingApi);
+const parkingSpace = { id: 's12g', parkingSpots: [], parkingReservations: new Map() };
+parkingModule2.handleParking({}, keyUser, parkingSpace, { type: 'spotCreate', name: 'B2 充电位', spotType: 'ev', total: 2 });
+const pkSpot = parkingSpace.parkingSpots[0];
+assert(pkSpot, 'spotCreate 新增车位');
+assertEq(pkSpot.available, 2, '初始可用 2');
+parkingModule2.handleParking({}, keyMember, parkingSpace, { type: 'spotReserve', spotId: pkSpot.id, date: '2026-10-16', startAt: Date.now() + 86400000, endAt: Date.now() + 86400000 + 3600000, plateNumber: '京A12345' });
+const pr = [...parkingSpace.parkingReservations.values()][0];
+assert(pr, 'spotReserve 创建预约');
+assertEq(pr.status, 'reserved', '预约初始待签到');
+assertEq(pkSpot.available, 1, '预约后可用减 1');
+parkingModule2.handleParking({}, keyMember, parkingSpace, { type: 'spotCheckin', id: pr.id });
+assertEq(pr.status, 'checked_in', '签到后状态为已停放');
+parkingModule2.handleParking({}, keyMember, parkingSpace, { type: 'spotCheckout', id: pr.id });
+assertEq(pr.status, 'checked_out', '签出后状态为已驶离');
+assertEq(pkSpot.available, 2, '签出后可用恢复');
+parkingModule2.handleParking({}, keyMember, parkingSpace, { type: 'spotReserve', spotId: pkSpot.id, date: '2026-10-16', startAt: Date.now() + 86400000, endAt: Date.now() + 86400000 + 3600000 });
+parkingModule2.handleParking({}, keyMember, parkingSpace, { type: 'spotCancel', id: [...parkingSpace.parkingReservations.values()].pop().id });
+assertEq(parkingApi.parkingStats(parkingSpace).active, 0, '取消后活跃归零');
 
 // ---------- 周期预约展开 ----------
 console.log('\n📋 13. 周期预约展开');
