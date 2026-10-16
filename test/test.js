@@ -1192,7 +1192,7 @@ async function runTests() {
     await sendMsg(wA, { type: 'getAchievements' });
     const ach = last(wA, 'achievements');
     assert(ach && Array.isArray(ach.achievements), '成就墙返回 achievements 数组');
-    assert(ach.achievements.length === 28, '成就墙含 28 个成就');
+    assert(ach.achievements.length === 29, '成就墙含 29 个成就');
     assert(ach.achievements.every((a) => a.id && a.name && a.desc && a.icon), '每项成就含 id/name/desc/icon');
     assert(ach.achievements.every((a) => a.current != null && a.target != null && a.pct != null && typeof a.unlocked === 'boolean'), '每项成就含进度字段');
     assert(ach.achievements.find((a) => a.id === 'punctual').target === 3, '守时达人目标值为 3');
@@ -2082,6 +2082,48 @@ async function runTests() {
     assert(errEdit && errEdit.message.includes('只能编辑自己'), '成员编辑他人纪要被拒');
     wA.close(); wB.close();
   }
+
+  // ========== 测试44: 值班排班 ==========
+  console.log('\n📋 测试44: 值班排班（安排/完成/调换/取消）');
+  {
+    const spD = (await httpJson('POST', '/api/spaces', { name: '值班排班办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aD = 'duty_' + runKey, bD = 'dutm_' + runKey, cD = 'dutc_' + runKey;
+    await reg(aD, 'pw', '值班管理员'); await reg(bD, 'pw', '值班甲'); await reg(cD, 'pw', '值班乙');
+    const wD1 = await createWSClient(); await loginTo(wD1, spD.id, aD, 'pw');
+    const wD2 = await createWSClient(); await loginTo(wD2, spD.id, bD, 'pw');
+    const wD3 = await createWSClient(); await loginTo(wD3, spD.id, cD, 'pw');
+    const dd = new Date();
+    const today = `${dd.getFullYear()}-${String(dd.getMonth() + 1).padStart(2, '0')}-${String(dd.getDate()).padStart(2, '0')}`;
+    // 管理员安排值班
+    await sendMsg(wD1, { type: 'dutyAssign', date: today, account: bD, category: '环境', note: '倒垃圾' });
+    let duties = last(wD1, 'duties');
+    assert(duties && duties.records.length === 1 && duties.records[0].account === bD, 'admin 安排值班成功');
+    const dutyId = duties.records[0].id;
+    assert(mk(wD2, 'dutyAssigned').length >= 1, '值班人收到 dutyAssigned 单发通知');
+    // 重复安排同人当天值班被拒
+    await sendMsg(wD1, { type: 'dutyAssign', date: today, account: bD, category: '接待' });
+    assert(mk(wD1, 'error').some(e => e.message.includes('已有值班')), '同人当天重复安排被拒');
+    // 成员不能安排值班
+    await sendMsg(wD2, { type: 'dutyAssign', date: today, account: cD, category: '值班' });
+    assert(mk(wD2, 'error').some(e => e.message.includes('仅管理员')), '非管理员安排值班被拒');
+    // 成员不能完成他人值班
+    await sendMsg(wD3, { type: 'dutyComplete', dutyId });
+    assert(mk(wD3, 'error').some(e => e.message.includes('只能完成自己的')), '非值班人完成他人值班被拒');
+    // 调换给第三人
+    await sendMsg(wD2, { type: 'dutySwap', dutyId, account: cD });
+    duties = last(wD2, 'duties');
+    assert(duties.records[0].account === cD, '值班调换后归属第三人');
+    assert(mk(wD3, 'dutySwapped').length >= 1, '被调换人收到 dutySwapped 单发通知');
+    // 第三人完成值班
+    await sendMsg(wD3, { type: 'dutyComplete', dutyId });
+    duties = last(wD3, 'duties');
+    assert(duties.records[0].status === 'completed', '值班完成后状态为 completed');
+    const stD = last(wD3, 'stats');
+    assert(stD && stD.stats.dutyCount === 1 && stD.stats.helperCount === 1, '完成值班累计 dutyCount 与 helperCount');
+    assert(duties.stats && duties.stats.todayCount === 1, 'duties 广播携带今日值班统计');
+    wD1.close(); wD2.close(); wD3.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

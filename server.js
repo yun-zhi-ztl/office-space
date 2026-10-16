@@ -34,6 +34,7 @@ const tasksModule = require('./src/modules/tasks');
 const notificationsModule = require('./src/modules/notifications');
 const leavesModule = require('./src/modules/leaves');
 const meetingNotesModule = require('./src/modules/meetingNotes');
+const dutiesModule = require('./src/modules/duties');
 
 // ---------- 上下文 ----------
 const api = createContext();
@@ -82,6 +83,7 @@ const tasks = tasksModule(api);
 const notifications = notificationsModule(api);
 const leaves = leavesModule(api);
 const meetingNotes = meetingNotesModule(api);
+const duties = dutiesModule(api);
 
 // ---------- 分页加载 ----------
 function handleFetchPage(ws, user, space, msg) {
@@ -173,6 +175,8 @@ wss.on('connection', (ws) => {
         leaves.handleLeaves(ws, user, space, msg); break;
       case 'meetingNoteCreate': case 'meetingNoteEdit': case 'meetingNoteRemove':
         meetingNotes.handleMeetingNotes(ws, user, space, msg); break;
+      case 'dutyAssign': case 'dutyComplete': case 'dutySwap': case 'dutyCancel':
+        duties.handleDuties(ws, user, space, msg); break;
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
       case 'announce': extras.announce(ws, user, space, msg); break;
       case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;
@@ -413,6 +417,16 @@ setInterval(() => {
         for (const acc of sp.admins) api.sendToAccount(acc, { type: 'leaveSla', leaveId: r.id, category: r.category, name: r.name, startAt: r.startAt });
       }
       leaves.leavesBroadcast(sp);
+    }
+    // 今日值班提醒：每个未完成值班每日只提醒一次
+    const dutyReminders = api.dueDutyReminders(sp, now);
+    if (dutyReminders.length) {
+      for (const d of dutyReminders) {
+        d.reminderAt = api.todayKey(now);
+        api.saveEntity(sp.id, 'duty', d.id, d);
+        api.sendToAccount(d.account, { type: 'dutyReminder', dutyId: d.id, date: d.date, category: d.category });
+      }
+      duties.dutiesBroadcast(sp);
     }
     // 高优先级报修升级：超过阈值仍未解决时升级提醒一次
     const repairEscalations = api.dueRepairEscalations(sp, now);

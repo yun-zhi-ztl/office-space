@@ -22,6 +22,7 @@ function createContext() {
   const MATERIAL_PRIORITIES = ['high', 'normal', 'low'];
   const MOOD_EMOJIS = ['😊', '😐', '😴', '😡', '🤩', '🥲'];
   const EVENT_CATEGORIES = ['培训', '分享会', '团建', '生日会', '会议', '其它'];
+  const DUTY_CATEGORIES = ['环境', '接待', '值班', '其它'];
   const POLL_MAX_OPTIONS = 5;
   const KNOWLEDGE_CATEGORIES = ['规章制度', '操作指引', '设备说明', '常见问题', '其他'];
   const TASK_PRIORITIES = ['high', 'normal', 'low'];
@@ -351,7 +352,7 @@ function createContext() {
   // ---------- 空间 ----------
   function weekKey(ts) { const d = new Date(ts || Date.now()); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
   function newWeekly() { return { key: weekKey(), visits: 0, borrows: 0, requests: 0, repairs: 0, meetings: 0, attends: 0, desks: 0, ooo: 0, events: 0, polls: 0, tasks: 0 }; }
-  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, meetingActualDuration: 0, meetingOnTime: 0, meetingLate: 0, helperCount: 0, favoriteRooms: [], roomRatesGiven: 0, favoriteCount: 0, attendanceCount: 0, earlyCount: 0, deskCount: 0, oooCount: 0, eventCount: 0, eventAttendCount: 0, pollCreateCount: 0, pollVoteCount: 0, knowledgeCount: 0, knowledgeLikeCount: 0, taskCreateCount: 0, taskDoneCount: 0, attendanceStreak: 0, attendancePerfectMonths: 0, weekly: newWeekly() }; }
+  function newStats() { return { totalVisits: 0, totalDuration: 0, favoriteStall: null, onTimeRate: 0, consecutiveOnTime: 0, maxDuration: 0, nightVisits: 0, grabSuccess: 0, ratingsGiven: 0, borrowCount: 0, borrowDuration: 0, requestCount: 0, repairCount: 0, meetingCount: 0, meetingDuration: 0, meetingActualDuration: 0, meetingOnTime: 0, meetingLate: 0, helperCount: 0, dutyCount: 0, favoriteRooms: [], roomRatesGiven: 0, favoriteCount: 0, attendanceCount: 0, earlyCount: 0, deskCount: 0, oooCount: 0, eventCount: 0, eventAttendCount: 0, pollCreateCount: 0, pollVoteCount: 0, knowledgeCount: 0, knowledgeLikeCount: 0, taskCreateCount: 0, taskDoneCount: 0, attendanceStreak: 0, attendancePerfectMonths: 0, weekly: newWeekly() }; }
   function recordWeekly(user, field) { if (!user.stats.weekly || user.stats.weekly.key !== weekKey()) user.stats.weekly = newWeekly(); user.stats.weekly[field] = (user.stats.weekly[field] || 0) + 1; }
   function weeklyScore(stats) { const w = stats.weekly; if (!w || w.key !== weekKey()) return 0; return (w.visits || 0) + (w.borrows || 0) + (w.requests || 0) + (w.repairs || 0) + (w.meetings || 0) + (w.attends || 0) + (w.desks || 0) + (w.ooo || 0) + (w.events || 0) + (w.polls || 0) + (w.tasks || 0); }
   function borrowOverdue(b, now) {
@@ -499,6 +500,7 @@ function createContext() {
       notifications: new Map(), tasks: new Map(),
       leaves: new Map(),
       meetingNotes: new Map(),
+      duties: new Map(),
     };
     sp.weeklyReportDate = null;
     sp.stalls = buildStalls(squat == null ? 4 : squat, urinal == null ? 3 : urinal);
@@ -912,7 +914,7 @@ function createContext() {
         rows.push({ account: p.account, username: p.nick || p.account, avatar: p.avatar || '🧑', stats: mt, achievements: p.achievements || [], weekly: weeklyScore(p.stats || {}), meetingOnTimeRate: mtTotal ? Math.round((mt.meetingOnTime || 0) / mtTotal * 100) : 0 });
       }
     }
-    const score = (s) => (s.totalVisits || 0) + (s.borrowCount || 0) + (s.requestCount || 0) + (s.repairCount || 0) + (s.meetingCount || 0);
+    const score = (s) => (s.totalVisits || 0) + (s.borrowCount || 0) + (s.requestCount || 0) + (s.repairCount || 0) + (s.meetingCount || 0) + (s.dutyCount || 0);
     const maxWeekly = rows.reduce((m, r) => Math.max(m, r.weekly || 0), 0);
     rows.forEach((r) => { r.mvp = (r.weekly || 0) > 0 && (r.weekly || 0) === maxWeekly; });
     rows.sort((a, b) => score(b.stats) - score(a.stats));
@@ -1043,6 +1045,33 @@ function createContext() {
       if (r.date === key) counts[r.emoji] = (counts[r.emoji] || 0) + 1;
     }
     return { total: [...space.moods.values()].filter((r) => r.date === key).length, counts };
+  }
+
+  // ---------- 值班排班序列化 ----------
+  function dutiesPublic(space, info, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const today = todayKey(nowMs);
+    return [...space.duties.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.createdAt || 0) - (b.createdAt || 0))).map((r) => {
+      const who = info.get(r.account);
+      return { id: r.id, date: r.date, category: r.category, note: r.note || '', account: r.account, name: who ? who.display : r.name, status: r.status, createdAt: r.createdAt, completedAt: r.completedAt || null, isToday: r.date === today };
+    });
+  }
+  function dutyStats(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const today = todayKey(nowMs);
+    const all = [...space.duties.values()];
+    const todayDuties = all.filter((r) => r.date === today);
+    return {
+      total: all.length,
+      todayCount: todayDuties.length,
+      todayCompleted: todayDuties.filter((r) => r.status === 'completed').length,
+      upcomingCount: all.filter((r) => r.date > today && r.status === 'assigned').length,
+    };
+  }
+  // 今日值班提醒：每个未完成值班每日只提醒一次（按 reminderAt 去重）
+  function dueDutyReminders(space, now) {
+    const key = todayKey(now);
+    return [...space.duties.values()].filter((r) => r.date === key && r.status === 'assigned' && r.reminderAt !== key);
   }
 
   // ---------- 活动序列化 ----------
@@ -1319,6 +1348,10 @@ function createContext() {
     const info = spaceUserInfo(sp.id);
     broadcast(sp.id, 'mood', { records: moodPublic(sp, info), stats: moodStats(sp) });
   }
+  function dutyBroadcast(sp) {
+    const info = spaceUserInfo(sp.id);
+    broadcast(sp.id, 'duties', { records: dutiesPublic(sp, info), stats: dutyStats(sp) });
+  }
   // 请假审批：成员提交请假申请，管理员审批；全员可见申请记录
   function leavesPublic(space, info, now) {
     const nowMs = now == null ? Date.now() : now;
@@ -1442,6 +1475,7 @@ function createContext() {
     oooBroadcast(sp);
     feedbackBroadcast(sp);
     moodBroadcast(sp);
+    dutyBroadcast(sp);
     eventsBroadcast(sp);
     pollsBroadcast(sp);
     knowledgeBroadcast(sp);
@@ -1472,6 +1506,7 @@ function createContext() {
     { id: 'meeter', name: '会议达人', desc: '累计会议时长超过60分钟', icon: '🗓️', check: (u) => (u.stats.meetingDuration || 0) >= 60 },
     { id: 'meetingPunctual', name: '会议守时', desc: '累计5次准时开始会议', icon: '⏰', check: (u) => (u.stats.meetingOnTime || 0) >= 5 },
     { id: 'logistician', name: '后勤达人', desc: '处理申领或解决报修累计5次', icon: '🛎️', check: (u) => (u.stats.helperCount || 0) >= 5 },
+    { id: 'dutyMaker', name: '值日达人', desc: '累计完成值班5次', icon: '🧹', check: (u) => (u.stats.dutyCount || 0) >= 5 },
     { id: 'roomGuide', name: '会议室向导', desc: '给会议室评分3次', icon: '📝', check: (u) => (u.stats.roomRatesGiven || 0) >= 3 },
     { id: 'collector', name: '收藏家', desc: '收藏3个会议室', icon: '⭐', check: (u) => (u.stats.favoriteCount || 0) >= 3 },
     { id: 'earlyBird', name: '早到达人', desc: '累计3天在9点前打卡', icon: '🐦', check: (u) => (u.stats.earlyCount || 0) >= 3 },
@@ -1510,6 +1545,7 @@ function createContext() {
     meeter: { field: 'meetingDuration', target: 60 },
     meetingPunctual: { field: 'meetingOnTime', target: 5 },
     logistician: { field: 'helperCount', target: 5 },
+    dutyMaker: { field: 'dutyCount', target: 5 },
     roomGuide: { field: 'roomRatesGiven', target: 3 },
     collector: { field: 'favoriteCount', target: 3 },
     earlyBird: { field: 'earlyCount', target: 3 },
@@ -1674,7 +1710,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, ROOM_APPROVAL_SLA_MS, LEAVE_APPROVAL_SLA_MS, MEETING_ONTIME_GRACE_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, LEAVE_CATEGORIES, MEETING_NOTE_MAX_LEN, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, EVENT_CATEGORIES, POLL_MAX_OPTIONS, KNOWLEDGE_CATEGORIES, TASK_PRIORITIES, TASK_STATUSES, NOTIFICATION_LEVELS, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, ROOM_APPROVAL_SLA_MS, LEAVE_APPROVAL_SLA_MS, MEETING_ONTIME_GRACE_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, LEAVE_CATEGORIES, MEETING_NOTE_MAX_LEN, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, EVENT_CATEGORIES, DUTY_CATEGORIES, POLL_MAX_OPTIONS, KNOWLEDGE_CATEGORIES, TASK_PRIORITIES, TASK_STATUSES, NOTIFICATION_LEVELS, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -1686,11 +1722,11 @@ function createContext() {
     // 持久化
     saveSpace, saveAccount, saveProfile, saveEntity, deleteEntity, saveStallRating, saveStatsToSpace,
     // 空间
-    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueRoomApprovalReminders, dueLeaveSlaReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
+    weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueRoomApprovalReminders, dueLeaveSlaReminders, dueDutyReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser,
     // 序列化
-    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, dutiesPublic, dutyStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
     // 广播
-    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, eventsBroadcast, pollsBroadcast, knowledgeBroadcast, tasksBroadcast, leavesBroadcast, meetingNotesBroadcast, notificationsBroadcast, noticesBroadcast, pushNotification, pushNotice, visitorsBroadcast,
+    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, dutyBroadcast, eventsBroadcast, pollsBroadcast, knowledgeBroadcast, tasksBroadcast, leavesBroadcast, meetingNotesBroadcast, notificationsBroadcast, noticesBroadcast, pushNotification, pushNotice, visitorsBroadcast,
     // 坑位辅助
     activeStallCount, checkAchievements, notifyUrge, ACHIEVEMENT_DEFS,
     achievementProgress, achievementDefsPublic,

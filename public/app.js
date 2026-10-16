@@ -31,7 +31,7 @@ const S = {
   attendanceCalendar:null,
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['dash','概览','📊'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -69,6 +69,7 @@ function dispatch(m){
     case 'mood': S.DB.mood={ records:m.records||[], stats:m.stats||{} }; break;
     case 'leaves': S.DB.leaves={ leaves:m.leaves||[], stats:m.stats||{} }; break;
     case 'meetingNotes': S.DB.meetingNotes={ notes:m.notes||[], stats:m.stats||{} }; break;
+    case 'duties': S.DB.duties=m.records||[]; S.DB.dutyStats=m.stats||{}; break;
     case 'events': S.DB.events=m.events||[]; S.eventTotal=m.total||0; S.eventOffset=S.DB.events.length; S.eventStats=m.stats||{}; break;
     case 'polls': S.DB.polls=m.polls||[]; S.pollTotal=m.total||0; S.pollOffset=S.DB.polls.length; S.pollStats=m.stats||{}; break;
     case 'knowledge': S.DB.knowledge=m.knowledge||[]; S.knowledgeTotal=m.total||0; S.knowledgeOffset=S.DB.knowledge.length; S.knowledgeStats=m.stats||{}; break;
@@ -106,6 +107,11 @@ function dispatch(m){
     case 'leaveSla': toast('⏳ 请假申请待审批超时：'+(m.name||'')+' · '+(m.category||''),'warn'); render(); break;
     case 'meetingNoteCreated': if(S.admin) toast('📝 会议纪要已更新：'+(m.noteId||''),'info'); break;
     case 'meetingNoteUpdated': toast('✔ 会议纪要已保存','success'); render(); break;
+    case 'dutyAssigned': toast('🛎️ 值班已安排：'+(m.category||'')+' · '+(m.date||''),'success'); render(); break;
+    case 'dutyCompleted': toast('✅ 值班已完成','success'); render(); break;
+    case 'dutySwapped': toast('🔁 值班已调换','success'); render(); break;
+    case 'dutyCancelled': toast('已取消值班','info'); render(); break;
+    case 'dutyReminder': toast('🛎️ 今日值班：'+(m.category||'')+' · '+(m.date||''),'info'); render(); break;
     case 'eventCreated': toast('🎉 活动已创建','success'); render(); break;
     case 'eventRsvpChanged': { const ev=(S.DB.events||[]).find(e=>e.id===m.rsvpId); if(ev) ev.myRsvp=m.status; toast('✔ 已更新参与状态（'+({going:'参加',maybe:'可能',not_going:'不参加'}[m.status]||m.status)+'）','success'); render(); break; }
     case 'eventCancelled': toast('已取消活动','warn'); render(); break;
@@ -176,7 +182,7 @@ function dispatch(m){
   if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','spaceTrend','notices','digest'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
@@ -1176,6 +1182,53 @@ function renderMeetingNotes(){
       </span><span class="fs">${(mine||S.admin)?`<button class="btn green sm" onclick="openMeetingNoteEdit('${n.id}')">编辑</button><button class="btn danger sm" onclick="meetingNoteRemove('${n.id}')">删除</button>`:''}</span></div>`;
     }).join(''):'<div class="empty">还没有会议纪要</div>'}</div>`;
 }
+/* ============ 值班排班 ============ */
+function memberOpts(exclude){
+  return (S.DB.users||[]).filter(u=>u.account!==exclude).map(u=>`<option value="${u.account}">${esc(u.nickname||u.account)}</option>`).join('');
+}
+function renderDuties(){
+  const d=S.DB.duties||[], me=S.me.account, st=S.DB.dutyStats||{}, today=new Date().toISOString().slice(0,10);
+  const todayDuties=d.filter(r=>r.date===today);
+  const upcoming=d.filter(r=>r.date>today && r.status==='assigned').slice(0,20);
+  const mineToday=d.filter(r=>r.date===today && r.account===me);
+  const card=(x,y,z)=>`<div class="card"><h3>${x}</h3><div style="font-size:30px;font-weight:800">${y}</div><div class="meta">${z}</div></div>`;
+  $('#main').innerHTML = `<div class="topbar"><div><h1>值班排班</h1><div class="sub">环境 / 接待 / 值班等公共事务的按日排班与轮转</div></div>
+    ${S.admin?'<button class="btn pri" onclick="openDutyAssign()">＋ 安排值班</button>':''}</div>
+    <div class="cards">${card('📅 今日值班',st.todayCount||0,'人')}${card('✅ 今日已完成',st.todayCompleted||0,'项')}${card('🗓️ 未来值班',st.upcomingCount||0,'项')}${card('📌 累计排班',st.total||0,'项')}</div>
+    ${mineToday.length?`<div class="notice" style="margin-top:14px">🛎️ 你今日有 ${mineToday.length} 项值班：${mineToday.map(r=>`${esc(r.category)}${r.status==='completed'?'（已完成）':''}`).join('、')}</div>`:''}
+    <h3 style="margin:22px 0 10px">📅 今日值班</h3>
+    <div class="list">${todayDuties.length?todayDuties.map(r=>dutyRow(r,me)).join(''):'<div class="empty">今日暂无值班安排</div>'}</div>
+    <h3 style="margin:22px 0 10px">🗓️ 未来值班</h3>
+    <div class="list">${upcoming.length?upcoming.map(r=>dutyRow(r,me)).join(''):'<div class="empty">暂无未来值班</div>'}</div>`;
+}
+function dutyRow(r,me){
+  const isMe=r.account===me;
+  const done=r.status==='completed';
+  return `<div class="row"><span><span class="who">${esc(r.name||r.account)}</span> · <b>${r.date}</b> · ${esc(r.category)}${r.note?' <div class="desc">'+esc(r.note)+'</div>':''}${r.isToday?' <span class="badge info">今日</span>':''}${done?' <span class="badge ok">已完成</span>':'<span class="badge warn">待完成</span>'}</span>
+    <span class="fs">${isMe||S.admin?`<button class="btn green sm" onclick="completeDuty('${r.id}')">完成</button><button class="btn sm" onclick="openDutySwap('${r.id}')">调换</button><button class="btn danger sm" onclick="cancelDuty('${r.id}')">取消</button>`:''}</span></div>`;
+}
+function openDutyAssign(){
+  const today=new Date().toISOString().slice(0,10);
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>安排值班</h2><div class="form">
+    <div class="fld"><label>日期</label><input id="duDate" type="date" value="${today}"></div>
+    <div class="fld"><label>成员</label><select id="duAcc">${memberOpts()}</select></div>
+    <div class="fld"><label>类别</label><select id="duCat"><option>环境</option><option>接待</option><option>值班</option><option>其它</option></select></div>
+    <div class="fld"><label>备注（可选）</label><input id="duNote" maxlength="80" placeholder="如：倒垃圾 + 清洁茶水间"></div>
+    <button class="btn pri" onclick="submitDutyAssign()">保存</button></div>`);
+}
+function submitDutyAssign(){
+  wsSend({type:'dutyAssign',date:$('#duDate').value,account:$('#duAcc').value,category:$('#duCat').value,note:$('#duNote').value});
+  closeModal();
+}
+function completeDuty(id){ wsSend({type:'dutyComplete',dutyId:id}); }
+function openDutySwap(id){
+  const r=(S.DB.duties||[]).find(x=>x.id===id);
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>调换值班 · ${esc(r.category||'')} ${esc(r.date||'')}</h2><div class="form">
+    <div class="fld"><label>转给</label><select id="duSwapAcc">${memberOpts(r.account)}</select></div>
+    <button class="btn pri" onclick="submitDutySwap('${id}')">确认调换</button></div>`);
+}
+function submitDutySwap(id){ wsSend({type:'dutySwap',dutyId:id,account:$('#duSwapAcc').value}); closeModal(); }
+function cancelDuty(id){ if(confirm('确认取消该值班？')) wsSend({type:'dutyCancel',dutyId:id}); }
 function openMeetingNoteCreate(){
   const res=(S.DB.reservations||[]).filter(r=>r.status!=='cancelled');
   const opts=res.length?res.map(r=>`<option value="${r.id}">${esc(r.title||'')} · ${fmtTime(r.startAt)}（${r.ownerName||''}）</option>`).join(''):'';

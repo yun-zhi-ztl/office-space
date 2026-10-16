@@ -41,6 +41,7 @@ assertEq(stats.borrowDuration, 0, 'newStats 初始 borrowDuration=0');
 assertEq(stats.meetingDuration, 0, 'newStats 初始 meetingDuration=0');
 assertEq(stats.meetingActualDuration, 0, 'newStats 初始 meetingActualDuration=0');
 assertEq(stats.helperCount, 0, 'newStats 初始 helperCount=0');
+assertEq(stats.dutyCount, 0, 'newStats 初始 dutyCount=0');
 const weekUser = { stats };
 api.recordWeekly(weekUser, 'visits');
 api.recordWeekly(weekUser, 'borrows');
@@ -79,7 +80,7 @@ const p3 = api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id =
 assert(p3.unlocked === true, '累计 10 次解锁蹲坑之王');
 assertEq(p3.pct, 100, '蹲坑之王达成后进度 100');
 const pub = api.achievementDefsPublic(user);
-assertEq(pub.length, 28, '成就公开列表含 28 项');
+assertEq(pub.length, 29, '成就公开列表含 29 项');
 assert(pub.every((a) => a.id && a.name && a.desc && a.icon), '公开成就含 id/name/desc/icon');
 user.stats.borrowCount = 3;
 assert(api.achievementProgress(user, api.ACHIEVEMENT_DEFS.find((d) => d.id === 'borrower')).unlocked === true, '借用 3 次解锁借阅达人');
@@ -1057,6 +1058,31 @@ assertEq(mnPub[0].roomName, '大会议室', 'meetingNotesPublic 关联会议室'
 const mnSt = api.meetingNotesStats(mnSp, mnNow);
 assertEq(mnSt.total, 2, 'meetingNotesStats 统计总数');
 assertEq(mnSt.todayCount, 2, 'meetingNotesStats 统计今日更新');
+
+// ---------- 值班排班序列化与统计 ----------
+console.log('\n📋 51b. 值班排班序列化 / 统计');
+const spDuty = api.createSpace('duty', '值班空间', 1, 0);
+const dutyNow = new Date('2026-10-16T10:00:00+08:00').getTime();
+const dutyToday = api.todayKey(dutyNow);
+const dutyTomorrow = api.todayKey(dutyNow + 86400000);
+spDuty.duties.set('d1', { id: 'd1', date: dutyToday, account: 'alice', name: '甲', category: '环境', note: '倒垃圾', status: 'assigned', createdAt: dutyNow, completedAt: null, reminderAt: null });
+spDuty.duties.set('d2', { id: 'd2', date: dutyToday, account: 'bob', name: '乙', category: '接待', note: '', status: 'completed', createdAt: dutyNow - 1000, completedAt: dutyNow, reminderAt: dutyToday });
+spDuty.duties.set('d3', { id: 'd3', date: dutyTomorrow, account: 'carol', name: '丙', category: '值班', note: '', status: 'assigned', createdAt: dutyNow, completedAt: null, reminderAt: null });
+const duPub = api.dutiesPublic(spDuty, api.spaceUserInfo(spDuty.id), dutyNow);
+assertEq(duPub.length, 3, 'dutiesPublic 返回全部值班');
+assertEq(duPub.find((r) => r.id === 'd2').status, 'completed', 'dutiesPublic 暴露已完成状态');
+assertEq(duPub.find((r) => r.id === 'd1').isToday, true, 'dutiesPublic 标记今日值班');
+const duSt = api.dutyStats(spDuty, dutyNow);
+assertEq(duSt.todayCount, 2, 'dutyStats 统计今日值班数');
+assertEq(duSt.todayCompleted, 1, 'dutyStats 统计今日已完成数');
+assertEq(duSt.upcomingCount, 1, 'dutyStats 统计未来值班数');
+const reminds = api.dueDutyReminders(spDuty, dutyNow);
+assertEq(reminds.length, 1, 'dueDutyReminders 仅返回今日未完成且未提醒的值班');
+// 值日达人成就
+const dutyUser = { stats: api.newStats(), achievements: [] };
+dutyUser.stats.dutyCount = 5;
+api.checkAchievements(dutyUser);
+assert(dutyUser.achievements.includes('dutyMaker'), '完成值班 5 次解锁值日达人');
 
 // ---------- 新成就 ----------
 console.log('\n📋 52. 待办任务 / 连续打卡成就');
