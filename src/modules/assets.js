@@ -20,7 +20,7 @@ module.exports = function assetsModule(api) {
       const status = ASSET_STATUSES.includes(msg.status) ? msg.status : 'in_use';
       const note = (msg.note || '').trim().slice(0, 120);
       const now = Date.now();
-      const asset = { id: genId('ast', null), name, category, location, owner, status, condition: 'intact', note, checks: [], createdAt: now, updatedAt: now };
+      const asset = { id: genId('ast', null), name, category, location, owner, status, condition: 'intact', note, checks: [], inspects: [], inspectIntervalDays: Math.max(0, parseInt(msg.inspectIntervalDays, 10) || 0), lastCheckAt: 0, createdAt: now, updatedAt: now };
       space.assets.set(asset.id, asset);
       saveEntity(space.id, 'asset', asset.id, asset);
       assetsBroadcast(space);
@@ -38,6 +38,7 @@ module.exports = function assetsModule(api) {
       if (msg.owner !== undefined) asset.owner = (msg.owner || '').trim().slice(0, 40);
       if (msg.status !== undefined && ASSET_STATUSES.includes(msg.status)) asset.status = msg.status;
       if (msg.note !== undefined) asset.note = (msg.note || '').trim().slice(0, 120);
+      if (msg.inspectIntervalDays !== undefined) asset.inspectIntervalDays = Math.max(0, parseInt(msg.inspectIntervalDays, 10) || 0);
       asset.updatedAt = Date.now();
       saveEntity(space.id, 'asset', asset.id, asset);
       assetsBroadcast(space);
@@ -65,6 +66,24 @@ module.exports = function assetsModule(api) {
         pushNotification(space, { type: 'assetChecked', level: msg.condition === 'missing' ? 'warn' : 'info', title: '资产状态变更', body: asset.name + ' · ' + ({ intact: '完好', damaged: '损坏', missing: '丢失' }[msg.condition]) });
         sendToAccount(asset.owner || '', { type: 'assetChecked', assetId: asset.id, assetName: asset.name, condition: msg.condition });
       }
+    } else if (msg.type === 'assetInspect') {
+      const asset = space.assets.get(msg.id);
+      if (!asset) return sendTo(ws, serError('资产不存在'));
+      if (msg.result !== 'pass' && msg.result !== 'issue' && msg.result !== 'fail') return sendTo(ws, serError('请选择巡检结果'));
+      const note = (msg.note || '').trim().slice(0, 120);
+      asset.inspects = asset.inspects || [];
+      asset.inspects.push({ account: user.account, accountName: user.nickname, result: msg.result, note, at: Date.now() });
+      asset.lastCheckAt = Date.now();
+      if (msg.result !== 'pass') {
+        asset.condition = msg.result === 'fail' ? 'damaged' : 'damaged';
+        if (asset.status !== 'scrapped') asset.status = 'maintenance';
+      }
+      asset.updatedAt = Date.now();
+      saveEntity(space.id, 'asset', asset.id, asset);
+      assetsBroadcast(space);
+      broadcastLeaderboard(space);
+      pushNotification(space, { type: 'assetInspected', level: msg.result === 'pass' ? 'info' : 'warn', title: '资产巡检登记', body: asset.name + ' · ' + ({ pass: '通过', issue: '发现问题', fail: '不通过' }[msg.result]) + (note ? ' · ' + note : '') });
+      if (msg.result !== 'pass') sendToAccount(asset.owner || '', { type: 'assetInspected', assetId: asset.id, assetName: asset.name, result: msg.result });
     }
   }
 

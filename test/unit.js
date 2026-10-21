@@ -1701,6 +1701,23 @@ printerModule2.handlePrint({}, { account: 'alice' }, prSpace, { type: 'printSubm
 printerModule2.handlePrint({}, { account: 'admin' }, prSpace, { type: 'printerDelete', id: prtB.id });
 assert(prSent.some((m) => m.message && m.message.includes('无法删除')), '有待打印任务时不能删除打印机');
 
+// ---------- 资产巡检 ----------
+console.log('\n📋 62. 资产巡检（周期判定 / 统计 / 概览）');
+const iSp = api.createSpace('s62', '巡检空间', 1, 1);
+const iNow = Date.now();
+iSp.assets.set('a1', { id: 'a1', name: '投影仪', inspectIntervalDays: 0, lastCheckAt: 0 });
+iSp.assets.set('a2', { id: 'a2', name: '灭火器', inspectIntervalDays: 30, lastCheckAt: 0 });
+iSp.assets.set('a3', { id: 'a3', name: '电箱', inspectIntervalDays: 30, lastCheckAt: iNow });
+iSp.assets.set('a4', { id: 'a4', name: '咖啡机', inspectIntervalDays: 30, lastCheckAt: iNow - 31 * 86400000 });
+assertEq(api.assetInspectOverdue(iSp.assets.get('a1'), iNow), false, '未纳入巡检不算迟检');
+assertEq(api.assetInspectOverdue(iSp.assets.get('a2'), iNow), true, '从未检查即迟检');
+assertEq(api.assetInspectOverdue(iSp.assets.get('a3'), iNow), false, '周期内不迟检');
+assertEq(api.assetInspectOverdue(iSp.assets.get('a4'), iNow), true, '超过周期判为迟检');
+const iStats = api.assetsStats(iSp);
+assertEq(iStats.inspectTracked, 3, 'assetsStats 统计纳入巡检数');
+assertEq(iStats.inspectOverdue, 2, 'assetsStats 统计迟检数');
+assertEq(api.buildDigest(iSp, { account: 'alice' }, iNow).inspectOverdueCount, 2, '概览 digest 统计迟检资产');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

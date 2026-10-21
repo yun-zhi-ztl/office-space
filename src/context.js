@@ -1192,10 +1192,19 @@ function createContext() {
 
   // ---------- 资产序列化 ----------
   function assetsPublic(space, info) {
+    const now = Date.now();
     return [...space.assets.values()].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)).map((r) => {
       const owner = info.get(r.owner);
-      return { id: r.id, name: r.name, category: r.category, location: r.location || '', owner: r.owner || '', ownerName: owner ? owner.display : r.owner || '', status: r.status, condition: r.condition || 'intact', note: r.note || '', createdAt: r.createdAt || 0, updatedAt: r.updatedAt || 0, checks: (r.checks || []).slice(-10).reverse().map((c) => ({ account: c.account, accountName: c.accountName, condition: c.condition, note: c.note || '', at: c.at })) };
+      const inspects = (r.inspects || []);
+      return { id: r.id, name: r.name, category: r.category, location: r.location || '', owner: r.owner || '', ownerName: owner ? owner.display : r.owner || '', status: r.status, condition: r.condition || 'intact', note: r.note || '', createdAt: r.createdAt || 0, updatedAt: r.updatedAt || 0, inspectIntervalDays: r.inspectIntervalDays || 0, lastCheckAt: r.lastCheckAt || 0, inspectOverdue: assetInspectOverdue(r, now), lastInspect: inspects.length ? { account: inspects[inspects.length - 1].account, accountName: inspects[inspects.length - 1].accountName, result: inspects[inspects.length - 1].result, note: inspects[inspects.length - 1].note || '', at: inspects[inspects.length - 1].at } : null, checks: (r.checks || []).slice(-10).reverse().map((c) => ({ account: c.account, accountName: c.accountName, condition: c.condition, note: c.note || '', at: c.at })) };
     });
+  }
+  function assetInspectOverdue(asset, now) {
+    const interval = asset.inspectIntervalDays || 0;
+    if (interval <= 0) return false;
+    const nowMs = now == null ? Date.now() : now;
+    if (!asset.lastCheckAt) return true;
+    return asset.lastCheckAt + interval * 86400000 < nowMs;
   }
   function assetsStats(space) {
     const all = [...space.assets.values()];
@@ -1207,7 +1216,9 @@ function createContext() {
     }
     const damaged = all.filter((a) => a.condition === 'damaged').length;
     const missing = all.filter((a) => a.condition === 'missing').length;
-    return { total: all.length, byStatus, byCategory, damaged, missing };
+    const inspectTracked = all.filter((a) => (a.inspectIntervalDays || 0) > 0).length;
+    const inspectOverdue = all.filter((a) => assetInspectOverdue(a)).length;
+    return { total: all.length, byStatus, byCategory, damaged, missing, inspectTracked, inspectOverdue };
   }
 
   // ---------- 钥匙 / 门禁卡序列化 ----------
@@ -1980,7 +1991,7 @@ function createContext() {
     const parkingOccupied = [...space.parkingReservations.values()].filter((r) => r.status === 'checked_in');
     const dayVehAt = todayVehicleBookings.slice(0, 5);
     return { todayMeetingCount: todayMeetings.length, todayMeetings: todayMeetings.slice(0, 5), todayMeetingMinutes, todayBorrowMinutes, overdueCount: overdue.length, myBorrows: myBorrows.length, pendingMaterialsCount: pendingMaterials.length, openRepairsCount: openRepairs.length, resolvedRepairsCount: resolvedRepairs.length, resolvedMaterialsCount: resolvedMaterials.length, pendingVisitorsCount: pendingVisitors.length, pendingVisitors: pendingVisitors.slice(0, 5).map((v) => ({ visitorName: v.visitorName, hostName: v.hostName, status: v.status })), attendanceCheckedIn: todayAttendance.checkedIn, attendanceLate: todayAttendance.late, attendanceCompleteRate: todayAttendance.completeRate, oooActiveCount: oooStatsToday.activeCount, activeOoo, deskTodayCount, deskUtilizationPct: deskStatsToday.utilizationPct, todayEventCount: todayEvents.length, todayEvents: todayEvents.slice(0, 5).map((e) => ({ id: e.id, title: e.title, startAt: e.startAt, endAt: e.endAt })), upcomingEventCount: myUpcomingEvents.length, mvp,
-      incomingParcelsCount: incomingParcels.length, overdueParcelsCount: overdueParcels.length, activeLockersCount: activeLockers.length, lockerTotal: space.lockers.length, vehiclesInUseCount: vehiclesInUse.length, todayVehicleBookingsCount: todayVehicleBookings.length, todayVehicleBookings: dayVehAt.map((r) => { const v = space.vehicles.find((x) => x.id === r.vehicleId); return { id: r.id, vehicle: v ? v.name : '', startAt: r.startAt, endAt: r.endAt }; }), maintenanceVehiclesCount: maintenanceVehicles.length, parkingOccupiedCount: parkingOccupied.length, parkingTotal: space.parkingSpots.length };
+      incomingParcelsCount: incomingParcels.length, overdueParcelsCount: overdueParcels.length, activeLockersCount: activeLockers.length, lockerTotal: space.lockers.length, vehiclesInUseCount: vehiclesInUse.length, todayVehicleBookingsCount: todayVehicleBookings.length, todayVehicleBookings: dayVehAt.map((r) => { const v = space.vehicles.find((x) => x.id === r.vehicleId); return { id: r.id, vehicle: v ? v.name : '', startAt: r.startAt, endAt: r.endAt }; }), maintenanceVehiclesCount: maintenanceVehicles.length, parkingOccupiedCount: parkingOccupied.length, parkingTotal: space.parkingSpots.length, inspectOverdueCount: [...space.assets.values()].filter((a) => assetInspectOverdue(a)).length };
   }
 
   // ---------- 我的待办 ----------
@@ -2186,7 +2197,7 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueRoomApprovalReminders, dueLeaveSlaReminders, dueDutyReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser, ensureInvites, genInviteCode, createInvite, useInvite, revokeInvite, invitesPublic, inviteStatus, auditLog, auditLogsPublic,
     // 序列化
-    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, dutiesPublic, dutyStats, assetsPublic, assetsStats, keysPublic, keysStats, keyRequestsPublic, fridgeItemsPublic, fridgeStats, fridgeLogsPublic, parkingSpotsPublic, parkingStats, parkingReservationsPublic, parcelsPublic, parcelStats, lockersPublic, lockerStats, lockerReservationsPublic, vehiclesPublic, vehicleStats, vehicleReservationsPublic, spaceSearch, lostPublic, lostStats, printersPublic, printJobsPublic, printStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, dutiesPublic, dutyStats, assetsPublic, assetsStats, keysPublic, keysStats, keyRequestsPublic, fridgeItemsPublic, fridgeStats, fridgeLogsPublic, parkingSpotsPublic, parkingStats, parkingReservationsPublic, parcelsPublic, parcelStats, lockersPublic, lockerStats, lockerReservationsPublic, vehiclesPublic, vehicleStats, vehicleReservationsPublic, spaceSearch, lostPublic, lostStats, printersPublic, printJobsPublic, printStats, assetInspectOverdue, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
     // 广播
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, dutyBroadcast, eventsBroadcast, pollsBroadcast, knowledgeBroadcast, tasksBroadcast, leavesBroadcast, meetingNotesBroadcast, notificationsBroadcast, noticesBroadcast, pushNotification, pushNotice, visitorsBroadcast, parcelsBroadcast, lockersBroadcast, vehiclesBroadcast, lostBroadcast, printBroadcast,
     // 坑位辅助

@@ -162,6 +162,12 @@
   - `printSubmit` 任意成员，仅 `ok` 状态打印机可提交，页数 1-999、份数 1-99；`printDone` 仅管理员；`printPick` 本人或管理员（未打印完成不可取）；`printCancel` 仅管理员。
   - 统计待打印、今日已打印、按打印机状态分布。
 
+### 资产巡检（assets）
+- `asset` 新增巡检元数据：`inspectIntervalDays`（巡检周期天数，0 = 不巡检）、`lastCheckAt`（上次巡检时间）、`inspects`（巡检记录数组，元素 `{ account, accountName, result, note, at }`）。
+  - `assetInspectOverdue(asset, now)`：周期 > 0 且从未巡检、或 `lastCheckAt + 周期 < now` 时判定为「迟检」。
+  - `assetInspect`：成员 / 管理员登记巡检结果（`pass` / `issue` / `fail`），刷新 `lastCheckAt`；不通过自动置 `damaged` 并进入 `maintenance`，单发通知资产负责人。
+  - `assetCreate` / `assetUpdate` 携带 `inspectIntervalDays`；`assetsStats` 统计纳入巡检数与迟检数；`digest` 暴露 `inspectOverdueCount` 供概览展示。
+
 ### 物资申领（materials）
 - `material_request`: `{ id, requesterAccount, requesterName, name, qty, unit, reason, priority, status, handlerAccount?, handlerName?, createdAt, handledAt? }`
   - 状态：`pending` / `fulfilled` / `cancelled`
@@ -392,6 +398,7 @@
 | `lostResolve` / `lostReopen` / `lostDelete` | 标记已解决 / 重新开启 / 删除记录 | member / owner / admin |
 | `printerCreate` / `printerUpdate` / `printerDelete` | 新增 / 编辑 / 删除共享打印机 | admin |
 | `printSubmit` / `printDone` / `printPick` / `printCancel` | 提交打印任务 / 标记已打印 / 取走 / 取消 | member / owner / admin |
+| `assetInspect` | 登记资产巡检结果（通过 / 发现问题 / 不通过） | member |
 
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，

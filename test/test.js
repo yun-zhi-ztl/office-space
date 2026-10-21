@@ -2677,6 +2677,34 @@ async function runTests() {
     wP1.close(); wP2.close();
   }
 
+  // ========== 测试62: 资产巡检 ==========
+  console.log('\n📋 测试62: 资产巡检（周期/巡检/迟检统计）');
+  {
+    const spIn = (await httpJson('POST', '/api/spaces', { name: '巡检办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aIn = 'in_a_' + runKey, bIn = 'in_b_' + runKey;
+    await reg(aIn, 'pw', '巡检管理员'); await reg(bIn, 'pw', '巡检成员');
+    const wI1 = await createWSClient(); await loginTo(wI1, spIn.id, aIn, 'pw');
+    const wI2 = await createWSClient(); await loginTo(wI2, spIn.id, bIn, 'pw');
+    await sendMsg(wI1, { type: 'assetCreate', name: 'A 灭火器', inspectIntervalDays: 30 });
+    await sendMsg(wI1, { type: 'assetCreate', name: 'B 电箱', inspectIntervalDays: 30 });
+    let ia0 = last(wI2, 'assets');
+    assert(ia0 && ia0.assets.length === 2 && ia0.assets.every(a => a.inspectOverdue === true), '未巡检的纳入巡检资产判为迟检');
+    assert(ia0.stats.inspectOverdue === 2, 'assetsStats 统计迟检资产');
+    const aId = ia0.assets.find(a => a.name === 'A 灭火器').id;
+    await sendMsg(wI2, { type: 'assetInspect', id: aId, result: 'pass' });
+    ia0 = last(wI2, 'assets');
+    assert(ia0.assets.find(a => a.id === aId).inspectOverdue === false, '巡检通过后不再迟检');
+    assert(ia0.assets.find(a => a.id === aId).lastInspect && ia0.assets.find(a => a.id === aId).lastInspect.result === 'pass', '记录最近巡检结果');
+    assert(ia0.stats.inspectOverdue === 1, '迟检数减少为 1');
+    const bId = ia0.assets.find(a => a.name === 'B 电箱').id;
+    await sendMsg(wI2, { type: 'assetInspect', id: bId, result: 'fail', note: '接线老化' });
+    ia0 = last(wI2, 'assets');
+    const bAsset = ia0.assets.find(a => a.id === bId);
+    assert(bAsset.condition === 'damaged' && bAsset.status === 'maintenance', '巡检不通过自动标记损坏/维护中');
+    assert(ia0.stats.inspectOverdue === 0, '全部巡检后迟检归零');
+    wI1.close(); wI2.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

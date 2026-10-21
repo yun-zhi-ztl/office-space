@@ -462,6 +462,7 @@ function renderDash(){
       ${dig.vehiclesInUseCount?`<div class="row"><span>🚗 行驶车辆 ${dig.vehiclesInUseCount}${dig.todayVehicleBookingsCount?` · 今日预借 ${dig.todayVehicleBookingsCount}${dig.vehiclesInUseCount===0?`（${dig.todayVehicleBookings.map(v=>esc(v.vehicle)).join('、')}）`:''}`:''}</span></div>`:''}
       ${dig.maintenanceVehiclesCount?`<div class="row"><span>🛠️ 保养中车辆 ${dig.maintenanceVehiclesCount}</span></div>`:''}
       ${dig.parkingOccupiedCount?`<div class="row"><span>🅿️ 停车占用 ${dig.parkingOccupiedCount}/${dig.parkingTotal||0}</span></div>`:''}
+      ${dig.inspectOverdueCount?`<div class="row"><span>🔍 迟检资产 ${dig.inspectOverdueCount} 项</span></div>`:''}
     </div>`:''}
     <h3 style="margin:22px 0 10px">🟢 在线状态</h3>
     <div class="fs">${(d.users||[]).map(u=>`<span class="badge info">${esc(u.avatar||'' )} ${esc(u.display||u.username)}${u.emergencyMode?' 🆘':''}${u.status&&u.status.emoji?' '+esc(u.status.emoji):''} ${u.status?esc(u.status.label):'在岗'}</span>`).join('')||'<span class="hint">仅自己在线</span>'}</div>
@@ -1771,16 +1772,20 @@ function renderAssets(){
   const cards = list.map(a=>{
     const sb = statusBadge[a.status]||['grey',a.status];
     const cb = condBadge[a.condition]||['grey',a.condition];
-    return `<div class="card"><h3>${esc(a.name)} <span class="badge ${sb[0]}">${sb[1]}</span> <span class="badge ${cb[0]}">${cb[1]}</span></h3>
-      <div class="meta">${esc(a.category)}${a.location?' · '+esc(a.location):''}${a.owner?' · '+esc(a.ownerName||a.owner):''}</div>
+    const insp = a.inspectIntervalDays>0;
+    const lastI = a.lastInspect;
+    return `<div class="card"><h3>${esc(a.name)} <span class="badge ${sb[0]}">${sb[1]}</span> <span class="badge ${cb[0]}">${cb[1]}</span>${insp?(a.inspectOverdue?` <span class="badge bad">🔍 迟检</span>`:` <span class="badge info">已检</span>`):''}</h3>
+      <div class="meta">${esc(a.category)}${a.location?' · '+esc(a.location):''}${a.owner?' · '+esc(a.ownerName||a.owner):''}${insp?' · 巡检周期 '+a.inspectIntervalDays+'天':''}</div>
       ${a.note?'<div class="meta">'+esc(a.note)+'</div>':''}
-      <div class="foot">${S.admin?`<button class="btn sm" onclick="openAssetEdit('${a.id}')">编辑</button><button class="btn danger sm" onclick="deleteAsset('${a.id}')">删除</button>`:''}<button class="btn sm" onclick="openAssetCheck('${a.id}')">标记状态</button></div></div>`;
+      ${lastI?`<div class="meta">🔍 最近巡检 ${({pass:'通过',issue:'发现问题',fail:'不通过'})[lastI.result]||lastI.result}${lastI.note?' · '+esc(lastI.note):''} · ${fmtTime(lastI.at)}</div>`:''}
+      <div class="foot">${S.admin?`<button class="btn sm" onclick="openAssetEdit('${a.id}')">编辑</button><button class="btn danger sm" onclick="deleteAsset('${a.id}')">删除</button>`:''}<button class="btn sm" onclick="openAssetCheck('${a.id}')">标记状态</button>${insp?`<button class="btn pri sm" onclick="openAssetInspect('${a.id}')">巡检</button>`:''}</div></div>`;
   }).join('');
   $('#main').innerHTML = `<div class="topbar"><div><h1>资产台账</h1><div class="sub">空间固定资产 / 办公设备 / 家具 / 电器登记与状态</div></div>
     ${S.admin?'<button class="btn pri" onclick="openAssetCreate()">新增资产</button>':''}</div>
     <div class="grid">
       ${st.total!=null?`<div class="card"><h3>📦 资产总数</h3><div class="num">${st.total}</div><div class="meta">在用 ${(st.byStatus&&st.byStatus.in_use||0)} · 闲置 ${(st.byStatus&&st.byStatus.idle||0)} · 维护中 ${(st.byStatus&&st.byStatus.maintenance||0)} · 已报废 ${(st.byStatus&&st.byStatus.scrapped||0)}</div></div>`:''}
       <div class="card"><h3>🛠️ 异常资产</h3><div class="num">${st.damaged||0} / ${st.missing||0}</div><div class="meta">损坏 ${st.damaged||0} · 丢失 ${st.missing||0}</div></div>
+      <div class="card"><h3>🔍 迟检资产</h3><div class="num">${st.inspectOverdue||0}<span class="meta"> / ${st.inspectTracked||0}</span></div><div class="meta">纳入巡检 ${st.inspectTracked||0} 项 · 已逾期 ${st.inspectOverdue||0}</div></div>
       ${cards||'<div class="empty">暂无资产</div>'}</div>`;
 }
 function openAssetCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>新增资产</h2><div class="form">
@@ -1789,24 +1794,31 @@ function openAssetCreate(){ openModal(`<span class="close" onclick="closeModal()
   <div class="fld"><label>位置</label><input id="astLoc" placeholder="如：3F 会议室"></div>
   <div class="fld"><label>负责人</label><input id="astOwner" placeholder="可留空"></div>
   <div class="fld"><label>状态</label><select id="astStatus"><option value="in_use">在用</option><option value="idle">闲置</option><option value="maintenance">维护中</option></select></div>
+  <div class="fld"><label>巡检周期（天，0 不巡检）</label><input id="astInsp" type="number" value="0" min="0"></div>
   <div class="fld"><label>备注</label><input id="astNote" placeholder="可选"></div>
   <button class="btn pri" onclick="submitAssetCreate()">创建</button></div>`); }
-function submitAssetCreate(){ wsSend({type:'assetCreate',name:$('#astName').value,category:$('#astCat').value,location:$('#astLoc').value,owner:$('#astOwner').value,status:$('#astStatus').value,note:$('#astNote').value}); closeModal(); }
+function submitAssetCreate(){ wsSend({type:'assetCreate',name:$('#astName').value,category:$('#astCat').value,location:$('#astLoc').value,owner:$('#astOwner').value,status:$('#astStatus').value,inspectIntervalDays:+$('#astInsp').value||0,note:$('#astNote').value}); closeModal(); }
 function openAssetEdit(id){ const a=(S.DB.assets||[]).find(x=>x.id===id); if(!a) return; openModal(`<span class="close" onclick="closeModal()">×</span><h2>编辑资产 · ${esc(a.name)}</h2><div class="form">
   <div class="fld"><label>资产名称</label><input id="astName" value="${esc(a.name)}"></div>
   <div class="fld"><label>类别</label><select id="astCat">${['固定资产','办公设备','家具','电器','其它'].map(c=>`<option ${c===a.category?'selected':''}>${c}</option>`).join('')}</select></div>
   <div class="fld"><label>位置</label><input id="astLoc" value="${esc(a.location||'')}"></div>
   <div class="fld"><label>负责人</label><input id="astOwner" value="${esc(a.owner||'')}"></div>
   <div class="fld"><label>状态</label><select id="astStatus"><option value="in_use" ${a.status==='in_use'?'selected':''}>在用</option><option value="idle" ${a.status==='idle'?'selected':''}>闲置</option><option value="maintenance" ${a.status==='maintenance'?'selected':''}>维护中</option><option value="scrapped" ${a.status==='scrapped'?'selected':''}>已报废</option></select></div>
+  <div class="fld"><label>巡检周期（天，0 不巡检）</label><input id="astInsp" type="number" value="${a.inspectIntervalDays||0}" min="0"></div>
   <div class="fld"><label>备注</label><input id="astNote" value="${esc(a.note||'')}"></div>
   <button class="btn pri" onclick="submitAssetEdit('${id}')">保存</button></div>`); }
-function submitAssetEdit(id){ wsSend({type:'assetUpdate',id,name:$('#astName').value,category:$('#astCat').value,location:$('#astLoc').value,owner:$('#astOwner').value,status:$('#astStatus').value,note:$('#astNote').value}); closeModal(); }
+function submitAssetEdit(id){ wsSend({type:'assetUpdate',id,name:$('#astName').value,category:$('#astCat').value,location:$('#astLoc').value,owner:$('#astOwner').value,status:$('#astStatus').value,inspectIntervalDays:+$('#astInsp').value||0,note:$('#astNote').value}); closeModal(); }
 function deleteAsset(id){ const a=(S.DB.assets||[]).find(x=>x.id===id); if(confirm('确认删除资产「'+(a?a.name:'')+'」？')) wsSend({type:'assetDelete',id}); }
 function openAssetCheck(id){ const a=(S.DB.assets||[]).find(x=>x.id===id); if(!a) return; openModal(`<span class="close" onclick="closeModal()">×</span><h2>标记资产状态 · ${esc(a.name)}</h2><div class="form">
   <div class="fld"><label>状态</label><select id="astCond"><option value="intact">完好</option><option value="damaged">损坏</option><option value="missing">丢失</option></select></div>
   <div class="fld"><label>说明（可选）</label><input id="astCheckNote" placeholder="如：屏幕花屏"></div>
   <button class="btn pri" onclick="submitAssetCheck('${id}')">提交</button></div>`); }
 function submitAssetCheck(id){ wsSend({type:'assetCheck',id,condition:$('#astCond').value,note:$('#astCheckNote').value}); closeModal(); }
+function openAssetInspect(id){ const a=(S.DB.assets||[]).find(x=>x.id===id); if(!a) return; openModal(`<span class="close" onclick="closeModal()">×</span><h2>资产巡检 · ${esc(a.name)}</h2><div class="form">
+  <div class="fld"><label>巡检结果</label><select id="astRes"><option value="pass">通过</option><option value="issue">发现问题</option><option value="fail">不通过</option></select></div>
+  <div class="fld"><label>备注（可选）</label><input id="astInspNote" placeholder="如：电源线老化需更换"></div>
+  <button class="btn pri" onclick="submitAssetInspect('${id}')">提交巡检</button></div>`); }
+function submitAssetInspect(id){ wsSend({type:'assetInspect',id,result:$('#astRes').value,note:$('#astInspNote').value}); closeModal(); }
 /* 钥匙 / 门禁卡借用 */
 function renderKeys(){
   const list = S.DB.keys||[]; const st = S.DB.keysStats||{};

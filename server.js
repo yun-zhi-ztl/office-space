@@ -207,7 +207,7 @@ wss.on('connection', (ws) => {
         meetingNotes.handleMeetingNotes(ws, user, space, msg); break;
       case 'dutyAssign': case 'dutyComplete': case 'dutySwap': case 'dutyCancel':
         duties.handleDuties(ws, user, space, msg); break;
-      case 'assetCreate': case 'assetUpdate': case 'assetDelete': case 'assetCheck':
+      case 'assetCreate': case 'assetUpdate': case 'assetDelete': case 'assetCheck': case 'assetInspect':
         assets.handleAssets(ws, user, space, msg); break;
       case 'keyCreate': case 'keyDelete': case 'keyUpdate': case 'keyRequest': case 'keyApprove': case 'keyReject': case 'keyReturn': case 'remindKeyOverdue':
         keys.handleKeys(ws, user, space, msg); break;
