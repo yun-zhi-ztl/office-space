@@ -2573,6 +2573,11 @@ async function runTests() {
     await sendMsg(wS1, { type: 'spaceSearch', q: '' });
     sr = last(wS1, 'searchResults');
     assert(sr && sr.hits.length === 0, '空关键词返回空');
+    // 新模块纳入搜索：登记一个包裹后可按快递公司检索到
+    await sendMsg(wS1, { type: 'parcelCreate', recipientAccount: aS, courier: '韵达' });
+    await sendMsg(wS1, { type: 'spaceSearch', q: '韵达' });
+    sr = last(wS1, 'searchResults');
+    assert(sr && sr.hits.some((h) => h.type === 'parcels'), '搜索命中包裹');
     wS1.close();
   }
 

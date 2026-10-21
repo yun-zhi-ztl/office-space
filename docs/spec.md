@@ -410,7 +410,7 @@
 | `lockerReserve` / `lockerCancel` / `lockerCheckin` / `lockerCheckout` / `lockerRemind` | 预约 / 取消 / 签到 / 签退 / 一键催还逾期储物柜 | member / owner / admin |
 | `vehicleCreate` / `vehicleUpdate` / `vehicleDelete` | 新增 / 编辑 / 删除公司车辆 | admin |
 | `vehicleReserve` / `vehicleCancel` / `vehicleCheckin` / `vehicleCheckout` | 按时间段借用 / 取消 / 出车（登记里程）/ 还车（登记里程） | member / owner / admin |
-| `spaceSearch` | 全局检索（会议室 / 设备 / 申领 / 报修 / 待办 / 知识库 / 公告 / 资产 / 人员），返回 `searchResults` | member |
+| `spaceSearch` | 全局检索（会议室 / 设备 / 申领 / 报修 / 待办 / 知识库 / 公告 / 资产 / 人员 / 包裹 / 储物柜 / 用车 / 失物 / 打印机 / 请假 / 工位 / 值班），返回 `searchResults` | member |
 | `lostReport` | 上报丢失 / 捡到物品 | member |
 | `lostResolve` / `lostReopen` / `lostDelete` | 标记已解决 / 重新开启 / 删除记录 | member / owner / admin |
 | `printerCreate` / `printerUpdate` / `printerDelete` | 新增 / 编辑 / 删除共享打印机 | admin |

@@ -1860,6 +1860,29 @@ assertEq(mym.remindersCount, 1, '只含本人启用中的备忘');
 assert(mym.reminders[0] && mym.reminders[0].text === '清冰箱' && mym.reminders[0].repeat === 'weekly', '返回本人备忘内容与重复类型');
 assertEq(api.buildMyReminders(remSP, { account: 'bob' }, Date.now()).remindersCount, 1, '各用户返回各自的启用备忘');
 
+// ---------- 全局搜索扩展（新模块） ----------
+console.log('\n📋 70. 全局搜索扩展（新模块）');
+const sx = api.createSpace('s70', '搜索扩展', 1, 1);
+sx.parcels.set('p1', { id: 'p1', recipientName: '甲', courier: '顺丰', trackingNumber: 'SF123', createdAt: 1 });
+sx.lockers.push({ id: 'lk1', name: '3F 寄存柜', location: '3F', createdAt: 1 });
+sx.vehicles.push({ id: 'vh1', name: '公务轿车', plateNumber: '京A123', createdAt: 1 });
+sx.lostFound.push({ id: 'lf1', name: '黑色钱包', location: '食堂', type: 'lost', createdAt: 1 });
+sx.printers.push({ id: 'prt1', name: '激光机', location: '茶水间', createdAt: 1 });
+sx.borrows.set('b1', { id: 'b1', borrowerName: '乙', borrowedAt: 1, dueAt: 2 });
+sx.leaves.set('lv1', { id: 'lv1', category: '年假', name: '丙', createdAt: 1 });
+sx.desks.push({ id: 'dk1', name: '共享工位 A' });
+sx.duties.set('du1', { id: 'du1', category: '环境', date: '2026-10-20', name: '丁', account: 'd' });
+const si = new Map([['a', { account: 'a', display: '甲', role: 'member' }]]);
+assert(api.spaceSearch(sx, si, '顺丰').hits.some((h) => h.type === 'parcels'), '搜索命中包裹');
+assert(api.spaceSearch(sx, si, '寄存柜').hits.some((h) => h.type === 'lockers'), '搜索命中储物柜');
+assert(api.spaceSearch(sx, si, '京A123').hits.some((h) => h.type === 'vehicles'), '搜索命中车辆');
+assert(api.spaceSearch(sx, si, '钱包').hits.some((h) => h.type === 'lost'), '搜索命中失物');
+assert(api.spaceSearch(sx, si, '激光机').hits.some((h) => h.type === 'print'), '搜索命中打印机');
+assert(api.spaceSearch(sx, si, '乙').hits.some((h) => h.type === 'tools'), '搜索命中借用人');
+assert(api.spaceSearch(sx, si, '年假').hits.some((h) => h.type === 'leave'), '搜索命中请假');
+assert(api.spaceSearch(sx, si, '共享工位').hits.some((h) => h.type === 'desks'), '搜索命中工位');
+assert(api.spaceSearch(sx, si, '环境').hits.some((h) => h.type === 'duties'), '搜索命中值班');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

@@ -1512,6 +1512,24 @@ function createContext() {
     for (const a of space.assets ? [...space.assets.values()] : []) if (m(a.name) || m(a.category) || m(a.location)) push(hits, 'assets', '🗄️', a.id, a.name, (a.category || '') + (a.location ? ' · ' + a.location : ''), a.createdAt);
     // 人员（当前在线/在空间成员）
     for (const d of info ? info.values() : []) if (m(d.display || d.username) || m(d.account)) push(hits, 'users', '👤', d.account, d.display || d.username, d.role === 'admin' ? '管理员' : '成员', 0);
+    // 包裹
+    for (const p of space.parcels ? [...space.parcels.values()] : []) if (m(p.recipientName) || m(p.recipientAccount) || m(p.courier) || m(p.trackingNumber)) push(hits, 'parcels', '📬', p.id, (p.recipientName || p.recipientAccount) + ' 的包裹', p.courier || '', p.createdAt);
+    // 储物柜
+    for (const l of space.lockers || []) if (m(l.name) || m(l.location)) push(hits, 'lockers', '🗄️', l.id, l.name, l.location || '储物柜', l.createdAt);
+    // 用车
+    for (const v of space.vehicles || []) if (m(v.name) || m(v.plateNumber)) push(hits, 'vehicles', '🚘', v.id, v.name, v.plateNumber || '', v.createdAt);
+    // 失物招领
+    for (const x of space.lostFound || []) if (m(x.name) || m(x.location)) push(hits, 'lost', '🧢', x.id, x.name, (x.type === 'lost' ? '丢失' : '拾物') + (x.location ? ' · ' + x.location : ''), x.createdAt);
+    // 打印机
+    for (const p of space.printers || []) if (m(p.name) || m(p.location)) push(hits, 'print', '🖨️', p.id, p.name, p.location || '打印机', p.createdAt);
+    // 借用（按借用人检索）
+    for (const b of space.borrows ? [...space.borrows.values()] : []) if (m(b.borrowerName)) push(hits, 'tools', '🔧', b.id, b.borrowerName + ' 借用的设备', '到期 ' + (b.dueAt ? new Date(b.dueAt).toISOString().slice(0, 10) : ''), b.borrowedAt);
+    // 请假
+    for (const l of space.leaves ? [...space.leaves.values()] : []) if (m(l.category) || m(l.name)) push(hits, 'leave', '📅', l.id, l.category || '请假', l.name || '', l.createdAt);
+    // 工位
+    for (const x of space.desks || []) if (m(x.name)) push(hits, 'desks', '🪑', x.id, x.name, '工位', 0);
+    // 值班
+    for (const d of space.duties ? [...space.duties.values()] : []) if (m(d.category) || m(d.date) || m(d.name) || m(d.account)) push(hits, 'duties', '🛎️', d.id, (d.category || '值班') + ' · ' + (d.date || ''), d.name || d.account || '', 0);
     return { q, hits };
   }
 

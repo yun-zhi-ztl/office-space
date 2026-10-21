@@ -2252,8 +2252,8 @@ function submitMemoCreate(){ const at=$('#memAt').value; wsSend({type:'reminderC
 function toggleMemo(id){ wsSend({type:'reminderToggle',id}); }
 function deleteMemo(id){ if(confirm('删除该提醒？')) wsSend({type:'reminderDelete',id}); }
 /* 统一空间搜索 */
-const SEARCH_MOD = { rooms:'rooms', tools:'tools', materials:'materials', repairs:'repairs', tasks:'tasks', knowledge:'knowledge', notices:'dash', assets:'assets', users:null };
-const SEARCH_LABEL = { rooms:'会议室', tools:'设备', materials:'申领', repairs:'报修', tasks:'待办', knowledge:'知识库', notices:'公告', assets:'资产', users:'人员' };
+const SEARCH_MOD = { rooms:'rooms', tools:'tools', materials:'materials', repairs:'repairs', tasks:'tasks', knowledge:'knowledge', notices:'dash', assets:'assets', users:null, parcels:'parcels', lockers:'lockers', vehicles:'vehicles', lost:'lost', print:'print', leave:'leave', desks:'desks', duties:'duties' };
+const SEARCH_LABEL = { rooms:'会议室', tools:'设备/借用', materials:'申领', repairs:'报修', tasks:'待办', knowledge:'知识库', notices:'公告', assets:'资产', users:'人员', parcels:'包裹', lockers:'储物柜', vehicles:'用车', lost:'失物', print:'打印机', leave:'请假', desks:'工位', duties:'值班' };
 let _searchTimer = null;
 function openSearch(){
   openModal(`<span class="close" onclick="closeModal()">×</span><h2>🔍 搜索空间</h2><div class="form">
