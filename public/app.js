@@ -5,6 +5,13 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;',
 function toast(msg, kind){ const w=$('#toasts'),t=document.createElement('div'); t.className='toast '+(kind||''); t.textContent=msg; w.appendChild(t); setTimeout(()=>t.remove(), 3200); }
 function pad(n){return (n<10?'0':'')+n;}
 function fmtTime(ms){ const d=new Date(ms); return `${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+/* 统一列表筛选：客户端按关键词过滤当前列表 */
+let _listF={};
+function fbox(key, label){ const q=_listF[key]||''; return `<div class="fs" style="margin-bottom:8px"><input id="f_${key}" placeholder="${label}" value="${esc(q)}" oninput="setListFilter('${key}',this.value)"></div>`; }
+function setListFilter(key,v){ _listF[key]=v||''; render(); const el=document.getElementById('f_'+key); if(el){ el.focus(); try{ const len=el.value.length; el.setSelectionRange(len,len); }catch(e){} } }
+function listOf(arr,key,keys){ const q=(_listF[key]||'').trim().toLowerCase(); if(!q) return arr||[]; return (arr||[]).filter(x=>keys.some(k=>String(x[k]==null?'':x[k]).toLowerCase().includes(q))); }
+/* 清空所有筛选 */
+function clearListFilters(){ _listF={}; render(); }
 function fmtCountdown(ms){ if(ms<=0)return '已到期'; const s=Math.floor(ms/1000); return `${Math.floor(s/60)}:${pad(s%60)}`; }
 function http(method,path,body){ return fetch(path,{method,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined}).then(r=>r.json().catch(()=>({}))); }
 
@@ -815,7 +822,8 @@ function renderTools(){
     ${S.admin?'<button class="btn pri" onclick="openToolCreate()">＋ 新增设备</button>':''}
     ${overdueCount?`<button class="btn danger" onclick="remindOverdue()">⏰ 批量催还 ${overdueCount} 人</button>`:''}
     <button class="btn" onclick="exportModuleCsv('borrows',BW_COLS)">导出 CSV</button></div>
-    <div class="cards">${d.tools.map(t=>`<div class="card"><h3>${esc(t.name)} <span class="badge ${t.available>0?'ok':'bad'}">${t.available}/${t.total}</span></h3>
+    ${fbox('tools','🔍 筛选设备名称 / 类别')}
+    <div class="cards">${listOf(d.tools,'tools',['name','category']).map(t=>`<div class="card"><h3>${esc(t.name)} <span class="badge ${t.available>0?'ok':'bad'}">${t.available}/${t.total}</span></h3>
       <div class="meta">${t.category}${t.location?' · '+esc(t.location):''}${t.minAvailable&&t.minAvailable>1?' · 阈值 '+t.minAvailable:''}${wlByTool[t.id]&&wlByTool[t.id].length?` · 排队 ${wlByTool[t.id].length} 人`:''}${wlByTool[t.id]&&wlByTool[t.id].find(w=>w.account===me)?' · 你已排队':''}</div>
       <div class="meta">${t.lowStock?'<span class="badge bad">库存告急</span>':''}</div>
       <div class="bar"><i style="width:${t.total?Math.round(t.available/t.total*100):0}%"></i></div>
@@ -902,8 +910,9 @@ function renderMaterials(){
   const tplList=(S.DB.materialTemplates||[]).map(t=>`<div class="row"><span><span class="who">📋 ${esc(t.name)}</span> <span class="when">默认 ×${t.defaultQty}${t.defaultUnit?' '+esc(t.defaultUnit):''}</span><div class="desc">${esc(t.defaultReason||'')}</div></span>${S.admin?`<button class="btn danger sm" onclick="deleteTemplate('${t.id}')">删除</button>`:''}</div>`).join('');
   $('#main').innerHTML = `<div class="topbar"><div><h1>物资申领</h1><div class="sub">需要电池、文具等物资时提交申请，由同事/管理员处理</div></div>
     <button class="btn pri" onclick="openMaterialRequest()">＋ 我要申领</button><button class="btn" onclick="exportModuleCsv('materials',MAT_COLS)">导出 CSV</button>${S.admin?'<button class="btn" onclick="batchMaterialFulfill()">✔ 批量满足当前页</button><button class="btn" onclick="openTemplateCreate()">＋ 常用模板</button>':''}</div>
+    ${fbox('materials','🔍 筛选物资 / 申请人 / 理由')}
     ${S.admin?`<h3 style="margin:14px 0 8px">📋 常用物资模板</h3><div class="list">${tplList||'<div class="empty">暂无模板</div>'}</div>`:''}
-    <div class="list">${d.requests.map(r=>{ const st=r.status; const badge=st==='pending'?'warn':st==='fulfilled'?'ok':'grey'; const canAssign=r.requesterAccount===me||S.admin; const canFulfill=st==='pending'&&!(r.handlerAccount&&r.handlerAccount!==me&&!S.admin); const handled=r.handledAt?` · 处理 ${Math.max(0,Math.round((r.handledAt-r.createdAt)/60000))} 分钟`:''; return `<div class="row"><span><span class="who">${esc(r.requesterName)}</span> 申领 <b>${esc(r.name)}</b> ×${r.qty}${r.unit?' '+esc(r.unit):''}${r.handlerName?` · 负责人 ${esc(r.handlerName)}`:''}<div class="desc">${esc(r.reason||'')}</div><div class="when">${fmtTime(r.createdAt)}${handled}</div></span>
+    <div class="list">${listOf(d.requests,'materials',['name','requesterName','reason']).map(r=>{ const st=r.status; const badge=st==='pending'?'warn':st==='fulfilled'?'ok':'grey'; const canAssign=r.requesterAccount===me||S.admin; const canFulfill=st==='pending'&&!(r.handlerAccount&&r.handlerAccount!==me&&!S.admin); const handled=r.handledAt?` · 处理 ${Math.max(0,Math.round((r.handledAt-r.createdAt)/60000))} 分钟`:''; return `<div class="row"><span><span class="who">${esc(r.requesterName)}</span> 申领 <b>${esc(r.name)}</b> ×${r.qty}${r.unit?' '+esc(r.unit):''}${r.handlerName?` · 负责人 ${esc(r.handlerName)}`:''}<div class="desc">${esc(r.reason||'')}</div><div class="when">${fmtTime(r.createdAt)}${handled}</div></span>
       <span class="fs">${st==='pending'?'<input type="checkbox" class="batch" data-id="'+r.id+'">':''}<span class="badge ${badge}">${st==='pending'?'待处理':st==='fulfilled'?'已满足':'已取消'}</span><span class="badge ${r.priority==='high'?'danger':r.priority==='low'?'grey':''}">${r.priority==='high'?'高':r.priority==='low'?'低':'普通'}</span>
       ${st==='pending'?`${r.requesterAccount===me?`<button class="btn danger sm" onclick="cancelRequest('${r.id}')">取消</button>`:(canFulfill?`<button class="btn green sm" onclick="fulfillRequest('${r.id}')">已满足</button>`:'')}${canAssign?`<button class="btn sm" onclick="openAssign('material','${r.id}')">指派</button><button class="btn sm" onclick="updateMaterialPriority('${r.id}','${r.priority}')">改优先级</button>`:''}`:''}
       </span></div>`; }).join('')||'<div class="empty">暂无申领记录</div>'}
@@ -997,8 +1006,9 @@ function renderRepairs(){
   const pLabel=p=>p==='high'?'高':p==='normal'?'中':'低';
   $('#main').innerHTML = `<div class="topbar"><div><h1>报修</h1><div class="sub">上报厕所、灯光、空调等设施故障并及时跟进</div></div>
     <button class="btn pri" onclick="openRepair()">＋ 我要报修</button><button class="btn" onclick="exportModuleCsv('repairs',REP_COLS)">导出 CSV</button>${S.admin?'<button class="btn" onclick="batchRepairResolve()">✔ 批量解决当前页</button>':''}</div>
+    ${fbox('repairs','🔍 筛选位置 / 类别 / 描述 / 单号')}
     ${repairStatsBarHtml()}
-    <div class="list">${d.repairs.map(r=>{ const canAssign=r.reporterAccount===me||S.admin; const handled=r.handledAt?` · 处理 ${Math.max(0,Math.round((r.handledAt-r.createdAt)/60000))} 分钟`:''; return `<div class="row"><span><span class="who">${esc(r.category)} · ${esc(r.location)}</span> ${r.code?`<span class="badge ${r.status==='resolved'?'ok':r.status==='cancelled'?'grey':'info'}">${esc(r.code)}</span>`:''} <span class="when">${esc(r.reporterName)} ${fmtTime(r.createdAt)}${r.handlerName?` · 负责人 ${esc(r.handlerName)}`:''}${handled}</span><div class="desc">${esc(r.description)}</div>${repairCommentListHtml(r)}</span>
+    <div class="list">${listOf(d.repairs,'repairs',['description','location','category','code']).map(r=>{ const canAssign=r.reporterAccount===me||S.admin; const handled=r.handledAt?` · 处理 ${Math.max(0,Math.round((r.handledAt-r.createdAt)/60000))} 分钟`:''; return `<div class="row"><span><span class="who">${esc(r.category)} · ${esc(r.location)}</span> ${r.code?`<span class="badge ${r.status==='resolved'?'ok':r.status==='cancelled'?'grey':'info'}">${esc(r.code)}</span>`:''} <span class="when">${esc(r.reporterName)} ${fmtTime(r.createdAt)}${r.handlerName?` · 负责人 ${esc(r.handlerName)}`:''}${handled}</span><div class="desc">${esc(r.description)}</div>${repairCommentListHtml(r)}</span>
       <span class="fs">${(r.status==='reported'||r.status==='in_progress')?'<input type="checkbox" class="batch" data-id="'+r.id+'">':''}
       <span class="badge ${badge(r.status)}">${label(r.status)}</span>
       <span class="badge ${pBadge(r.priority)}">${pLabel(r.priority)}优先</span>
