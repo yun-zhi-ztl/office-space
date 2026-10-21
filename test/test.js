@@ -3004,6 +3004,29 @@ async function runTests() {
     wA.close(); wB.close();
   }
 
+  // ========== 测试76: 会议纪要分享给参会人 ==========
+  console.log('\n📋 测试76: 会议纪要分享给参会人');
+  {
+    const spMn = (await httpJson('POST', '/api/spaces', { name: '纪要分享', squat_count: 1, urinal_count: 1 })).json;
+    const aMn = 'mn_a_' + runKey, bMn = 'mn_b_' + runKey;
+    await reg(aMn, 'pw', '纪要甲'); await reg(bMn, 'pw', '纪要乙');
+    const wA = await createWSClient(); await loginTo(wA, spMn.id, aMn, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spMn.id, bMn, 'pw');
+    await sendMsg(wA, { type: 'roomCreate', name: '分享间', capacity: 4 });
+    const roomId = last(wA, 'rooms').rooms[0].id;
+    const sStart = Date.now() + 86400000, sEnd = sStart + 3600000;
+    await sendMsg(wA, { type: 'roomBook', roomId, title: '周会', startAt: sStart, endAt: sEnd, attendees: [bMn] });
+    const rId = last(wA, 'rooms').reservations.find(r => r.roomId === roomId).id;
+    await sendMsg(wA, { type: 'meetingNoteCreate', reservationId: rId, title: '周会纪要', content: '结论如下' });
+    const ntId = last(wA, 'meetingNotes').notes.find(n => n.reservationId === rId).id;
+    await sendMsg(wA, { type: 'meetingNoteNotify', noteId: ntId });
+    const notifyRes = last(wA, 'meetingNoteNotified');
+    assert(notifyRes && notifyRes.count >= 1, '确认已通知参会人');
+    const shared = last(wB, 'meetingNoteShared');
+    assert(shared && shared.noteId === ntId, '参会人实时收到纪要分享');
+    wA.close(); wB.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

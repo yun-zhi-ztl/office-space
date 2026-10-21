@@ -64,6 +64,17 @@ module.exports = function meetingNotesModule(api) {
       api.checkAchievements(user);
       api.saveProfile(user);
       sendTo(ws, { type: 'taskCreated', taskId: rec.id, title: rec.title });
+    } else if (msg.type === 'meetingNoteNotify') {
+      // 会议纪要一键分享给该次会议参会人
+      const note = space.meetingNotes.get(msg.noteId);
+      if (!note) return sendTo(ws, serError('会议纪要不存在'));
+      if (note.account !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('只能分享自己创建的纪要'));
+      const res = space.roomReservations.get(note.reservationId);
+      const targets = [res && res.ownerAccount, ...((res && res.attendees) || [])].filter(Boolean);
+      if (!targets.length) return sendTo(ws, serError('该会议暂无可分享的参会人'));
+      let n = 0;
+      for (const acc of targets) { if (acc === user.account) continue; api.sendToAccount(acc, { type: 'meetingNoteShared', noteId: note.id, title: note.title || '会议纪要' }); n++; }
+      sendTo(ws, { type: 'meetingNoteNotified', count: n });
     }
   }
 

@@ -177,6 +177,8 @@ function dispatch(m){
     case 'knowledgeLiked': { const k=(S.DB.knowledge||[]).find(x=>x.id===m.id); if(k){ k.liked=m.liked; k.likeCount=Math.max(0,(k.likeCount||0)+(m.liked?1:-1)); } toast(m.liked?'👍 已点赞':'已取消点赞','success'); render(); break; }
     case 'knowledgeCommented': { const k=(S.DB.knowledge||[]).find(x=>x.id===m.id); if(k){ k.commentCount=(k.commentCount||0)+1; } toast('💬 评论成功','success'); render(); break; }
     case 'taskCreated': toast('📝 任务已创建','success'); render(); break;
+    case 'meetingNoteNotified': toast('📨 已通知 '+(m.count||0)+' 位参会人','success'); break;
+    case 'meetingNoteShared': toast('📨 '+(m.fromName||'')+' 分享了会议纪要：'+(m.title||''),'info'); break;
     case 'taskAssigned': toast('📌 任务已指派给你：'+(m.title||''),'info'); render(); break;
     case 'taskCommented': { const t=(S.DB.tasks||[]).find(x=>x.id===m.taskId); if(t){ t.commentCount=(t.commentCount||0)+1; } toast('💬 任务已评论','success'); render(); break; }
     case 'taskUpdated': toast('✔ 任务已更新','success'); render(); break;
@@ -1403,7 +1405,7 @@ function renderMeetingNotes(){
       return `<div class="row"><span><span class="who">${esc(n.title||'（无标题）')}</span> <span class="badge">${esc(n.name||n.account)}</span>
         <div class="desc">${esc((n.content||'').slice(0,120))}${(n.content||'').length>120?'…':''}</div>
         <div class="when">${n.reservationTitle?esc(n.reservationTitle)+' · ':''}${n.roomName?esc(n.roomName):''}${who} · ${fmtTime(n.updatedAt||n.createdAt)} 更新</div>
-      </span><span class="fs">${(mine||S.admin)?`<button class="btn sm" onclick="meetingNoteToTask('${n.id}')">→ 待办</button><button class="btn green sm" onclick="openMeetingNoteEdit('${n.id}')">编辑</button><button class="btn danger sm" onclick="meetingNoteRemove('${n.id}')">删除</button>`:''}</span></div>`;
+      </span><span class="fs">${(mine||S.admin)?`<button class="btn sm" onclick="meetingNoteToTask('${n.id}')">→ 待办</button><button class="btn sm" onclick="meetingNoteNotify('${n.id}')">📨 通知参会人</button><button class="btn green sm" onclick="openMeetingNoteEdit('${n.id}')">编辑</button><button class="btn danger sm" onclick="meetingNoteRemove('${n.id}')">删除</button>`:''}</span></div>`;
     }).join(''):'<div class="empty">还没有会议纪要</div>'}</div>`;
 }
 /* ============ 值班排班 ============ */
@@ -1485,6 +1487,7 @@ function submitMeetingNoteEdit(){
 }
 function meetingNoteRemove(id){ wsSend({type:'meetingNoteRemove',noteId:id}); }
 function meetingNoteToTask(id){ if(confirm('把这条会议纪要转成待办任务？')) wsSend({type:'meetingNoteToTask',noteId:id}); }
+function meetingNoteNotify(id){ if(confirm('把这条纪要发给该次会议的参会人？')) wsSend({type:'meetingNoteNotify',noteId:id}); }
 
 /* ============ 意见反馈 ============ */
 function renderFeedback(){

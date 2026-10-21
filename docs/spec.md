@@ -432,6 +432,7 @@
 | `announceSchedule` | 管理员定时发布公告（设定未来 `publishAt`，到点由周期任务自动上墙），返回 `noticeScheduled` | admin |
 | `notifyMember` | 给同空间成员发私信提醒（写入带 `to` 的通知，仅收件人 / 管理员可见并实时推送），返回 `notifySent` | member |
 | `meetingNoteToTask` | 把会议纪要一键转成空间待办任务（作者或管理员），返回 `taskCreated` | member / admin |
+| `meetingNoteNotify` | 作者 / 管理员把会议纪要一键分享给该次预约的参会人（含组织者，实时 `meetingNoteShared`），返回 `meetingNoteNotified` | member / admin |
 
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，
