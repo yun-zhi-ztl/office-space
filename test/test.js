@@ -2915,6 +2915,27 @@ async function runTests() {
     wA.close();
   }
 
+  // ========== 测试72: 公告定时发布 ==========
+  console.log('\n📋 测试72: 公告定时发布（管理员限定/排期存留）');
+  {
+    const spSc = (await httpJson('POST', '/api/spaces', { name: '排期办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aSc = 'sc_a_' + runKey, bSc = 'sc_b_' + runKey;
+    await reg(aSc, 'pw', '排期管理员'); await reg(bSc, 'pw', '排期成员');
+    const wA = await createWSClient(); await loginTo(wA, spSc.id, aSc, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spSc.id, bSc, 'pw');
+    await sendMsg(wB, { type: 'announceSchedule', text: 'x', publishAt: Date.now() + 3600000 });
+    const errSc = mk(wB, 'error').pop();
+    assert(errSc && errSc.message.includes('仅管理员'), '非管理员不能定时发布');
+    await sendMsg(wA, { type: 'announceSchedule', text: '排期公告', publishAt: Date.now() - 1000 });
+    const errPast = mk(wA, 'error').pop();
+    assert(errPast && errPast.message.includes('晚于当前'), '过去时间被拒');
+    const pub = Date.now() + 3600000;
+    await sendMsg(wA, { type: 'announceSchedule', text: '下周一通知', publishAt: pub });
+    const ss = last(wA, 'notices').notices.find(n => n.text === '下周一通知');
+    assert(ss && ss.publishAt === pub && ss.publishAt > Date.now(), '排期公告被保存且未上墙');
+    wA.close(); wB.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

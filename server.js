@@ -246,6 +246,7 @@ wss.on('connection', (ws) => {
         reminders.handleReminders(ws, user, space, msg); break;
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
       case 'announce': extras.announce(ws, user, space, msg); break;
+      case 'announceSchedule': extras.announceSchedule(ws, user, space, msg); break;
       case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;
       case 'spaceAdminSet': extras.adminSet(ws, user, space, msg); break;
       case 'spaceKick': extras.kick(ws, user, space, msg); break;
@@ -515,6 +516,12 @@ setInterval(() => {
         for (const acc of sp.admins) api.sendToAccount(acc, { type: 'repairEscalated', repairId: r.id, category: r.category, location: r.location });
       }
       repairs.repairsBroadcast(sp);
+    }
+    // 定时发布公告：到点的排期公告转为已发布并广播
+    const scheduledNotices = api.dueScheduledNotices(sp, now);
+    if (scheduledNotices.length) {
+      for (const n of scheduledNotices) api.saveEntity(sp.id, 'notice', n.id, n);
+      api.broadcast(sp.id, 'notices', { notices: sp.notices });
     }
     // 自定义备忘提醒：到点推送给本人；每天/每周/每月按周期自动排下一次
     const memoReminders = api.dueRecurReminders(sp, now);

@@ -429,6 +429,7 @@
 | `noticeRequire` | 把公告设为 / 取消「必读」 | admin |
 | `noticeRead` | 成员标记已读某公告（写入 `readBy`） | member |
 | `noticeRemindUnread` | 一键提醒公告未读成员，返回 `noticeRemindSent` | admin |
+| `announceSchedule` | 管理员定时发布公告（设定未来 `publishAt`，到点由周期任务自动上墙），返回 `noticeScheduled` | admin |
 
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，

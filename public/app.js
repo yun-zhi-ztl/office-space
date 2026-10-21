@@ -228,6 +228,7 @@ function dispatch(m){
     case 'spaceInviteRequire': if(S.space) S.space.requireInvite=!!m.requireInvite; render(); break;
     case 'auditLogs': S.auditLogs=m.logs||[]; render(); break;
     case 'noticeUpdated': toast('✔ 公告已更新','success'); render(); break;
+    case 'noticeScheduled': toast('⏰ 公告已定时，到点自动发布','success'); render(); break;
     case 'noticeRemindSent': toast('📢 已提醒 '+(m.count||0)+' 位未读成员阅读公告','success'); break;
     case 'adminSet': if(S.me && m.account===S.me.account){ S.admin=!!m.admin; renderSidebar(); } render(); break;
     case 'spaceKicked': if(S.me && m.account===S.me.account){ toast('你已被管理员移除空间','warn'); S.me=null; S.admin=false; S.space=null; renderGate(); } else { toast('已移除成员 '+(m.accountName||'')+'','info'); render(); } break;
@@ -435,6 +436,9 @@ function renderDash(){
   const overdue=(d.tools||[]).reduce((a,t)=>a.concat((t.activeBorrows||[]).filter(b=>b.overdue)),[]);
   const mvp=(d.leaderboard||[]).find(r=>r.mvp);
   const dig=S.digest;
+  const _nnow=Date.now();
+  const visNotices=(d.notices||[]).filter(n=>!(n.publishAt&&n.publishAt>_nnow));
+  const schedCount=(d.notices||[]).filter(n=>n.publishAt&&n.publishAt>_nnow).length;
   const myBorrowMin=(S.me&&S.me.stats&&S.me.stats.borrowDuration)||0;
   const myMeetingMin=(S.me&&S.me.stats&&S.me.stats.meetingDuration)||0;
   const fmtMin=(m)=>`${Math.floor(m/60)}h${m%60}m`;
@@ -483,9 +487,9 @@ function renderDash(){
     </div>`:''}
     <h3 style="margin:22px 0 10px">🟢 在线状态</h3>
     <div class="fs">${(d.users||[]).map(u=>`<span class="badge info">${esc(u.avatar||'' )} ${esc(u.display||u.username)}${u.emergencyMode?' 🆘':''}${u.status&&u.status.emoji?' '+esc(u.status.emoji):''} ${u.status?esc(u.status.label):'在岗'}</span>`).join('')||'<span class="hint">仅自己在线</span>'}</div>
-    <h3 style="margin:22px 0 10px">📢 公告</h3>
-    <div class="fs" style="margin-bottom:10px"><input id="annInput" placeholder="向整个空间喊一句话..."><button class="btn pri" onclick="doAnnounce()">喊话</button></div>
-    <div class="list">${(d.notices||[]).slice().sort((a,b)=>((b.pinned?1:0)-(a.pinned?1:0))||((b.ts||0)-(a.ts||0))).map(n=>`<div class="row"><span><span class="who">${n.pinned?'📌':''} ${esc(n.from)} ${noticeReadHead(n)}</span> <span class="when">${fmtTime(n.ts)}</span><div>${esc(n.text)}</div>${noticeReadBadge(n)}<div class="fs" style="margin-top:6px">${noticeReactions(n).map(r=>`<button class="btn sm ${r.me?'pri':''}" onclick="reactNotice('${n.id}','${r.e}')">${r.e} ${r.count}</button>`).join(' ')}</div></span>${S.admin?`<button class="btn sm" onclick="doAnnounceEdit('${n.id}')">编辑</button>${n.pinned?'<button class="btn sm" onclick="doAnnouncePin(\'${n.id}\',false)">取消置顶</button>':'<button class="btn sm" onclick="doAnnouncePin(\'${n.id}\',true)">置顶</button>'}<button class="btn danger sm" onclick="removeNotice('${n.id}')">删除</button>`:''}</div>`).join('')||'<div class="empty">还没有公告</div>'}
+    <h3 style="margin:22px 0 10px">📢 公告${schedCount?` <span class="badge info">待发布 ${schedCount}</span>`:''}</h3>
+    <div class="fs" style="margin-bottom:10px"><input id="annInput" placeholder="向整个空间喊一句话..."><button class="btn pri" onclick="doAnnounce()">喊话</button>${S.admin?'<button class="btn sm" onclick="openScheduleNotice()">⏰ 定时发布</button>':''}</div>
+    <div class="list">${visNotices.slice().sort((a,b)=>((b.pinned?1:0)-(a.pinned?1:0))||((b.ts||0)-(a.ts||0))).map(n=>`<div class="row"><span><span class="who">${n.pinned?'📌':''} ${esc(n.from)} ${noticeReadHead(n)}</span> <span class="when">${fmtTime(n.ts)}</span><div>${esc(n.text)}</div>${noticeReadBadge(n)}<div class="fs" style="margin-top:6px">${noticeReactions(n).map(r=>`<button class="btn sm ${r.me?'pri':''}" onclick="reactNotice('${n.id}','${r.e}')">${r.e} ${r.count}</button>`).join(' ')}</div></span>${S.admin?`<button class="btn sm" onclick="doAnnounceEdit('${n.id}')">编辑</button>${n.pinned?'<button class="btn sm" onclick="doAnnouncePin(\'${n.id}\',false)">取消置顶</button>':'<button class="btn sm" onclick="doAnnouncePin(\'${n.id}\',true)">置顶</button>'}<button class="btn danger sm" onclick="removeNotice('${n.id}')">删除</button>`:''}</div>`).join('')||'<div class="empty">还没有公告</div>'}
     </div>
     ${overdue.length?`<h3 style="margin:22px 0 10px">⏰ 逾期借用 · 占用王</h3><div class="list">${overdue.map(b=>`<div class="row"><span>${esc(b.borrowerName)} ×${b.qty} · 已借 ${b.days} 天</span><button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒归还</button></div>`).join('')}</div>`:''}
     ${S.weeklyReport?`<h3 style="margin:22px 0 10px">📅 本周空间周报 <span class="badge info">${fmtTime(S.weeklyReport.weekStart)}</span></h3><div class="list">
@@ -529,6 +533,16 @@ function noticeReadBadge(n){
 function noticeRead(id){ wsSend({type:'noticeRead',noticeId:id}); }
 function noticeRequire(id){ wsSend({type:'noticeRequire',noticeId:id}); }
 function noticeRemindUnread(id){ if(confirm('提醒所有未读成员阅读该公告？')) wsSend({type:'noticeRemindUnread',noticeId:id}); }
+/* 公告定时发布 */
+function openScheduleNotice(){
+  const n=new Date(); n.setHours(n.getHours()+2, 0, 0, 0);
+  const iso=new Date(n.getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>定时发布公告</h2><div class="form">
+    <div class="fld"><label>内容</label><input id="schText" placeholder="公告内容"></div>
+    <div class="fld"><label>发布时间</label><input id="schAt" type="datetime-local" value="${iso}"></div>
+    <button class="btn pri" onclick="submitScheduleNotice()">定时</button></div>`);
+}
+function submitScheduleNotice(){ const at=$('#schAt').value; wsSend({type:'announceSchedule',text:$('#schText').value,publishAt:at?new Date(at).getTime():0}); closeModal(); }
 function reactNotice(id, e){ wsSend({type:'noticeReact',noticeId:id,reaction:e}); }
 function removeNotice(id){ if(confirm('确认删除该公告？')) wsSend({type:'removeNotice',noticeId:id}); }
 function remindReturn(id){ wsSend({type:'remindReturn',borrowId:id}); }

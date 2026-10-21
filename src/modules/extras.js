@@ -264,5 +264,22 @@ module.exports = function extrasModule(api) {
     sendTo(ws, { type: 'noticeRemindSent', count: n });
   }
 
-  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace, adminSet: handleAdminSet, kick: handleKick, pause: handlePause, removeNotice: handleRemoveNotice, noticeReact: handleNoticeReact, noticeUnreact: handleNoticeUnreact, inviteCreate: handleInviteCreate, inviteRevoke: handleInviteRevoke, inviteList: handleInviteList, inviteRequire: handleInviteRequire, auditList: handleAuditList, announceEdit: handleAnnounceEdit, announcePin: handleAnnouncePin, noticeRead: handleNoticeRead, noticeRequire: handleNoticeRequire, noticeRemindUnread: handleNoticeRemindUnread };
+  // 公告定时发布：admin 设定未来发布时间，到点由周期任务自动上墙
+  function handleAnnounceSchedule(ws, user, space, msg) {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可定时发布公告'));
+    const text = (msg.text || '').trim().slice(0, 120);
+    if (!text) return sendTo(ws, serError('公告不能为空'));
+    const publishAt = Math.floor(+msg.publishAt || 0);
+    if (publishAt <= Date.now()) return sendTo(ws, serError('发布时间需晚于当前'));
+    const notice = { id: api.genId('nt', null), text, from: user.nickname || user.account, ts: Date.now(), pinned: false, reactions: [], readBy: [], publishAt };
+    space.notices.push(notice);
+    space.notices.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    if (space.notices.length > 50) space.notices.length = 50;
+    saveEntity(space.id, 'notice', notice.id, notice);
+    noticesBroadcast(space);
+    auditLog(space, user, '定时发布公告', text);
+    sendTo(ws, { type: 'noticeScheduled', noticeId: notice.id, publishAt });
+  }
+
+  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace, adminSet: handleAdminSet, kick: handleKick, pause: handlePause, removeNotice: handleRemoveNotice, noticeReact: handleNoticeReact, noticeUnreact: handleNoticeUnreact, inviteCreate: handleInviteCreate, inviteRevoke: handleInviteRevoke, inviteList: handleInviteList, inviteRequire: handleInviteRequire, auditList: handleAuditList, announceEdit: handleAnnounceEdit, announcePin: handleAnnouncePin, noticeRead: handleNoticeRead, noticeRequire: handleNoticeRequire, noticeRemindUnread: handleNoticeRemindUnread, announceSchedule: handleAnnounceSchedule };
 };

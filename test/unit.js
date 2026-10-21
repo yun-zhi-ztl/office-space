@@ -1965,6 +1965,20 @@ assert(freeDesks.some((d) => d.id === 'dk1') && !freeDesks.some((d) => d.id === 
 assertEq(freeDesks.length, 1, '仅返回未占用工位');
 assertEq(api.suggestFreeDesks(fdSp, 0, 0).length, 0, '无效时段返回空');
 
+// ---------- 定时发布公告 ----------
+console.log('\n📋 75. 定时发布公告');
+const scNow = Date.now();
+const schSp = api.createSpace('s75', '排期空间', 1, 1);
+schSp.notices.push({ id: 'n1', text: '已到点', publishAt: scNow - 1000 });
+schSp.notices.push({ id: 'n2', text: '未到点', publishAt: scNow + 999999 });
+schSp.notices.push({ id: 'n3', text: '立即', publishAt: 0 });
+const due = api.dueScheduledNotices(schSp, scNow);
+assertEq(due.length, 1, '仅到点排期公告转为已发布');
+const scN1 = schSp.notices.find((n) => n.id === 'n1');
+assert(scN1.publishedAt > 0 && scN1.publishAt === 0, '已发布公告清除 publishAt 并记录发布时间');
+assertEq(schSp.notices.find((n) => n.id === 'n2').publishAt > scNow, true, '未到点公告保留排期');
+assertEq(api.dueScheduledNotices(schSp, scNow + 1000).length, 0, '已发布不重复触发');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);
