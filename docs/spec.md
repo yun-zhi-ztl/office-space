@@ -168,6 +168,10 @@
   - `assetInspect`：成员 / 管理员登记巡检结果（`pass` / `issue` / `fail`），刷新 `lastCheckAt`；不通过自动置 `damaged` 并进入 `maintenance`，单发通知资产负责人。
   - `assetCreate` / `assetUpdate` 携带 `inspectIntervalDays`；`assetsStats` 统计纳入巡检数与迟检数；`digest` 暴露 `inspectOverdueCount` 供概览展示。
 
+### 会议室忙闲热图（bookingHeatmap）
+- `api.bookingHeatmap(space, now)`：按当天小时（8:00-20:00，13 个时段）统计同时被占用的会议室间数，返回 `{ date, totalRooms, hours: [{ hour, occupied }], busiest: { hour, occupied } }`；取消 / 已过期场次不参与统计。
+- 客户端在会议室模块 `getBookingHeatmap` 拉取，前端以热力条展示峰值时段。
+
 ### 物资申领（materials）
 - `material_request`: `{ id, requesterAccount, requesterName, name, qty, unit, reason, priority, status, handlerAccount?, handlerName?, createdAt, handledAt? }`
   - 状态：`pending` / `fulfilled` / `cancelled`
@@ -399,6 +403,7 @@
 | `printerCreate` / `printerUpdate` / `printerDelete` | 新增 / 编辑 / 删除共享打印机 | admin |
 | `printSubmit` / `printDone` / `printPick` / `printCancel` | 提交打印任务 / 标记已打印 / 取走 / 取消 | member / owner / admin |
 | `assetInspect` | 登记资产巡检结果（通过 / 发现问题 / 不通过） | member |
+| `getBookingHeatmap` | 获取今日会议室忙闲热图，返回 `bookingHeatmap` | member |
 
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，

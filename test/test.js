@@ -2705,6 +2705,25 @@ async function runTests() {
     wI1.close(); wI2.close();
   }
 
+  // ========== 测试63: 会议室忙闲热图 ==========
+  console.log('\n📋 测试63: 会议室忙闲热图');
+  {
+    const spH = (await httpJson('POST', '/api/spaces', { name: '热图办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aH = 'hm_a_' + runKey;
+    await reg(aH, 'pw', '热图管理员');
+    const wH = await createWSClient(); await loginTo(wH, spH.id, aH, 'pw');
+    await sendMsg(wH, { type: 'roomCreate', name: '热图A', capacity: 4 });
+    await sendMsg(wH, { type: 'roomCreate', name: '热图B', capacity: 6 });
+    await sendMsg(wH, { type: 'getBookingHeatmap' });
+    const hmMsg = last(wH, 'bookingHeatmap');
+    assert(hmMsg && hmMsg.heatmap, '收到忙闲热图数据');
+    assert(hmMsg.heatmap.hours && hmMsg.heatmap.hours.length === 13, '热图覆盖 8:00-20:00 13 小时');
+    assert(hmMsg.heatmap.totalRooms === 2, '热图统计会议室总数');
+    assert(typeof hmMsg.heatmap.busiest.hour === 'number' && hmMsg.heatmap.busiest.hour >= 8 && hmMsg.heatmap.busiest.hour <= 20, '热图含峰值时段');
+    assert(hmMsg.heatmap.hours.every(x => typeof x.occupied === 'number'), '每小时占用为数值');
+    wH.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

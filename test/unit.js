@@ -1718,6 +1718,25 @@ assertEq(iStats.inspectTracked, 3, 'assetsStats 统计纳入巡检数');
 assertEq(iStats.inspectOverdue, 2, 'assetsStats 统计迟检数');
 assertEq(api.buildDigest(iSp, { account: 'alice' }, iNow).inspectOverdueCount, 2, '概览 digest 统计迟检资产');
 
+// ---------- 会议室忙闲热图 ----------
+console.log('\n📋 63. 会议室忙闲热图');
+const hmBase = new Date(); hmBase.setHours(12, 0, 0, 0); const hmNow = hmBase.getTime();
+const hd = new Date(hmNow); const d0 = new Date(hd.getFullYear(), hd.getMonth(), hd.getDate()).getTime();
+const hSp = api.createSpace('s63', '热图空间', 2, 1);
+hSp.rooms.push({ id: 'rm1', name: 'Rm1', capacity: 4 }, { id: 'rm2', name: 'Rm2', capacity: 4 });
+hSp.roomReservations.set('a', { id: 'a', roomId: 'rm1', startAt: d0 + 9 * 3600000, endAt: d0 + 10 * 3600000, status: 'pending' });
+hSp.roomReservations.set('b', { id: 'b', roomId: 'rm2', startAt: d0 + 9 * 3600000 + 30 * 60000, endAt: d0 + 10 * 3600000 + 30 * 60000, status: 'pending' });
+hSp.roomReservations.set('c', { id: 'c', roomId: 'rm1', startAt: d0 + 11 * 3600000, endAt: d0 + 12 * 3600000, status: 'pending' });
+hSp.roomReservations.set('x', { id: 'x', roomId: 'rm2', startAt: d0 + 10 * 3600000, endAt: d0 + 11 * 3600000, status: 'cancelled' });
+const hm = api.bookingHeatmap(hSp, hmNow);
+assertEq(hm.hours.length, 13, '热图覆盖 8:00-20:00 共 13 小时');
+assertEq(hm.totalRooms, 2, '热图统计会议室总数');
+assertEq(hm.hours.find((x) => x.hour === 9).occupied, 2, '9 点两间会议室被占用');
+assertEq(hm.hours.find((x) => x.hour === 10).occupied, 1, '10 点一间被占用（取消场次不计）');
+assertEq(hm.hours.find((x) => x.hour === 11).occupied, 1, '11 点一间被占用');
+assertEq(hm.busiest.hour, 9, '峰值时段为 9 点');
+assertEq(hm.busiest.occupied, 2, '峰值占用 2 间');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

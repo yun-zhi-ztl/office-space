@@ -100,6 +100,7 @@ function dispatch(m){
     case 'vehicles': S.DB.vehicles={vehicles:m.vehicles||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
     case 'lostFound': S.DB.lost={items:m.items||[],stats:m.stats||{}}; break;
     case 'print': S.DB.print={printers:m.printers||[],jobs:m.jobs||[],stats:m.stats||{}}; break;
+    case 'bookingHeatmap': S.DB.bookingHeatmap=m.heatmap||null; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; S.DB.repairStats=m.stats||null; break;
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
     case 'page': handlePage(m); break;
@@ -222,7 +223,7 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceCalendar','spaceTrend','notices','digest','assets','keys','fridge','parking','parcels','lockers','vehicles','lostFound','print'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceCalendar','spaceTrend','notices','digest','assets','keys','fridge','parking','parcels','lockers','vehicles','lostFound','print','bookingHeatmap'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
 function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); else if(S.module==='cal') renderSpaceCalendar(); else if(S.module==='assets') renderAssets(); else if(S.module==='keys') renderKeys(); else if(S.module==='fridge') renderFridge(); else if(S.module==='parking') renderParking(); else if(S.module==='parcels') renderParcels(); else if(S.module==='lockers') renderLockers(); else if(S.module==='vehicles') renderVehicles(); else if(S.module==='lost') renderLost(); else if(S.module==='print') renderPrint(); }
@@ -232,7 +233,7 @@ function renderPauseBanner(){
   else { b.style.display='none'; }
 }
 function renderAll(){ render(); }
-function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); if(mod==='keys') wsSend({type:'getKeys'}); if(mod==='fridge') wsSend({type:'getFridge'}); if(mod==='parking') wsSend({type:'getParking'}); if(mod==='parcels') wsSend({type:'getParcels'}); if(mod==='lockers') wsSend({type:'getLockers'}); if(mod==='vehicles') wsSend({type:'getVehicles'}); if(mod==='lost') wsSend({type:'getLost'}); if(mod==='print') wsSend({type:'getPrint'}); }
+function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); if(mod==='keys') wsSend({type:'getKeys'}); if(mod==='fridge') wsSend({type:'getFridge'}); if(mod==='parking') wsSend({type:'getParking'}); if(mod==='parcels') wsSend({type:'getParcels'}); if(mod==='lockers') wsSend({type:'getLockers'}); if(mod==='vehicles') wsSend({type:'getVehicles'}); if(mod==='lost') wsSend({type:'getLost'}); if(mod==='print') wsSend({type:'getPrint'}); if(mod==='rooms') wsSend({type:'getBookingHeatmap'}); }
 
 /* 分页：广播已按最近 PAGE 下发，前端按 offset 加载更多 */
 const PAGE = 30;
@@ -537,6 +538,7 @@ function renderRooms(){
   const rooms = favFilter==='fav' ? d.rooms.filter(r=>favIds.includes(r.id)) : d.rooms;
   $('#main').innerHTML = `<div class="topbar"><div><h1>会议室预约</h1><div class="sub">预约时段、冲突自动检测、实时同步</div></div>
     <div class="btn grp"><button class="btn ${favFilter==='all'?'pri':''}" onclick="setRoomFavFilter('all')">全部</button><button class="btn ${favFilter==='fav'?'pri':''}" onclick="setRoomFavFilter('fav')">⭐ 我的收藏 (${favIds.length})</button><button class="btn" onclick="openSuggest()">✨ 智能选房</button><button class="btn" onclick="exportModuleCsv('rooms',ROOM_COLS)">导出 CSV</button>${S.admin?'<button class="btn pri" onclick="openRoomCreate()">＋ 新增会议室</button>':''}</div></div>
+    ${roomHeatmapHtml()}
     <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))">${rooms.map(r=>roomCard(r)).join('')||'<div class="empty">还没有会议室，管理员可新增</div>'}</div>
     ${roomInsightsHtml()}
     <h3 style="margin:22px 0 10px">📅 全部预约</h3>
@@ -545,6 +547,14 @@ function renderRooms(){
     <div class="list">${(d.waitlist||[]).length?d.waitlist.map(w=>{ const rm=d.rooms.find(x=>x.id===w.roomId); const mine=w.ownerAccount===me; return `<div class="row"><span><span class="who">${esc(rm?rm.name:'会议室')}</span> · ${esc(w.title)} <span class="when">${fmtTime(w.startAt)} → ${fmtTime(w.endAt)}</span><div class="when">${esc(w.ownerName)}${mine?'（你）':''} · ${fmtTime(w.createdAt)}</div></span>
       <span class="fs">${mine?`<button class="btn danger sm" onclick="cancelWaitlist('${w.id}')">取消候补</button>`:'<span class="badge warn">候补中</span>'}</span></div>`; }).join(''):'<div class="empty">暂无候补</div>'}</div>
     ${(S.DB.revOffset||0)<(S.DB.revTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('rooms')">加载更多（${S.DB.revTotal-(S.DB.revOffset||0)}）</button></div>`:''}`;
+}
+// 会议室忙闲热图
+function roomHeatmapHtml(){
+  const hm=S.DB.bookingHeatmap||null;
+  if(!hm || !hm.hours) return '';
+  const max=Math.max(1,...hm.hours.map(x=>x.occupied));
+  return `<div class="card" style="grid-column:1/-1"><h3>📈 今日忙闲（会议室占用） <span class="badge info">峰值 ${hm.busiest.hour}:00 · ${hm.busiest.occupied} 间同时占用 / 共 ${hm.totalRooms}</span></h3>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${hm.hours.map(x=>{const pct=Math.round(x.occupied/max*100); const col=x.occupied===0?'#16a34a':(x.occupied>=hm.totalRooms?'#dc2626':(pct>=60?'#f59e0b':'#0ea5e9')); return `<div style="flex:1;min-width:42px;text-align:center;border:1px solid var(--border,#334155);border-radius:8px;padding:6px 2px" title="${x.hour}:00-${x.hour+1}:00 · ${x.occupied}/${hm.totalRooms} 间"><div style="height:44px;display:flex;align-items:flex-end;justify-content:center"><div style="height:${Math.max(4,Math.round(38*pct/100))}px;width:70%;background:${col};border-radius:4px;opacity:.9"></div></div><div style="font-size:11px;color:var(--muted)">${x.hour}:00</div><b style="font-size:12px">${x.occupied}</b></div>`;}).join('')}</div></div>`;
 }
 // 会议室洞察：评分口碑榜 + 使用率排行
 function roomInsightsHtml(){
