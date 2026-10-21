@@ -424,6 +424,7 @@
 | `getRisk` | 获取空间风险台账（迟检 / 逾期 / 待处理聚合），返回 `riskBoard` | member |
 | `spaceExport` | 管理员导出整个空间数据为 JSON 备份，返回 `spaceExport`（含 `meta` 与 `data` 全集合） | admin |
 | `spaceImport` | 管理员把备份 JSON 恢复到当前空间（按容器类型还原 Map / 数组 / Set，成员与管理员并集合并），返回 `spaceImported`（含 `result`） | admin |
+| `roomBatchBook` | 一次批量创建会议室预约（`items` 数组，冲突 / 过期 / 超时长自动跳过并返回原因），返回 `roomBatchBook`（含 `created` / `skipped`） | member |
 | `reminderCreate` / `reminderDelete` / `reminderToggle` | 创建 / 删除 / 停用启用备忘提醒 | member |
 | `getReminders` | 获取本人的备忘提醒列表，返回 `reminders` | member |
 | `noticeRequire` | 把公告设为 / 取消「必读」 | admin |

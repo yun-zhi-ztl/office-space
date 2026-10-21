@@ -116,6 +116,7 @@ function dispatch(m){
     case 'print': S.DB.print={printers:m.printers||[],jobs:m.jobs||[],stats:m.stats||{}}; break;
     case 'bookingHeatmap': S.DB.bookingHeatmap=m.heatmap||null; break;
     case 'suggestSlots': renderSuggestSlots(m.slots||[]); break;
+    case 'roomBatchBook': { const sk=m.skipped||[]; if(m.created) toast('🗓️ 批量创建 '+m.created+' 场会议'+(sk.length?' · 跳过 '+sk.length+' 场':''),(sk.length?'warn':'success')); if(sk.length){ const r=sk[0]; toast('⏭️ 跳过：'+(r.title||'')+'（'+(r.reason||'')+'）'+(sk.length>1?' 等 '+sk.length+' 项':''),'warn'); } render(); break; }
     case 'suggestDesks': renderFreeDesks(m.desks||[]); break;
     case 'riskBoard': S.DB.risk={items:m.board.items||[],total:m.board.total||0}; break;
     case 'reminders': S.DB.memo={items:m.reminders||[]}; break;
@@ -602,7 +603,7 @@ function renderRooms(){
   const favIds = S.favorites || [];
   const rooms = favFilter==='fav' ? d.rooms.filter(r=>favIds.includes(r.id)) : d.rooms;
   $('#main').innerHTML = `<div class="topbar"><div><h1>会议室预约</h1><div class="sub">预约时段、冲突自动检测、实时同步</div></div>
-    <div class="btn grp"><button class="btn ${favFilter==='all'?'pri':''}" onclick="setRoomFavFilter('all')">全部</button><button class="btn ${favFilter==='fav'?'pri':''}" onclick="setRoomFavFilter('fav')">⭐ 我的收藏 (${favIds.length})</button><button class="btn" onclick="openSuggest()">✨ 智能选房</button><button class="btn" onclick="exportModuleCsv('rooms',ROOM_COLS)">导出 CSV</button>${S.admin?'<button class="btn pri" onclick="openRoomCreate()">＋ 新增会议室</button>':''}</div></div>
+    <div class="btn grp"><button class="btn ${favFilter==='all'?'pri':''}" onclick="setRoomFavFilter('all')">全部</button><button class="btn ${favFilter==='fav'?'pri':''}" onclick="setRoomFavFilter('fav')">⭐ 我的收藏 (${favIds.length})</button><button class="btn" onclick="openSuggest()">✨ 智能选房</button><button class="btn" onclick="exportModuleCsv('rooms',ROOM_COLS)">导出 CSV</button><button class="btn" onclick="openBatchBook()">🗓️ 批量安排</button>${S.admin?'<button class="btn pri" onclick="openRoomCreate()">＋ 新增会议室</button>':''}</div></div>
     ${roomHeatmapHtml()}
     <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))">${rooms.map(r=>roomCard(r)).join('')||'<div class="empty">还没有会议室，管理员可新增</div>'}</div>
     ${roomInsightsHtml()}
@@ -2327,6 +2328,30 @@ function submitFreeDesk(){
   const s=new Date($('#fdkStart').value).getTime(), e=new Date($('#fdkEnd').value).getTime();
   if(!(e>s)){ toast('请选择有效起止时间','error'); return; }
   wsSend({type:'suggestDesks',startAt:s,endAt:e});
+}
+/* 会议室批量安排 */
+function openBatchBook(){
+  const rooms=(S.DB.rooms||[]).map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('');
+  if(!rooms){ toast('还没有会议室','info'); return; }
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>批量安排会议室</h2><div class="form">
+    <div class="fld"><label>会议室</label><select id="bbRoom">${rooms}</select></div>
+    <div class="fld"><label>时段（每行一个）</label><textarea id="bbText" rows="6" placeholder="2026-10-23 09:00-10:00 | 周会&#10;2026-10-24 14:00-15:00 | 评审&#10;2026-10-25 10:00-11:00 | 复盘"></textarea></div>
+    <button class="btn pri" onclick="submitBatchBook()">批量创建</button>
+    <div class="hint">冲突 / 无效的时段会自动跳过</div></div>`);
+}
+function submitBatchBook(){
+  const roomId=$('#bbRoom').value;
+  const txt=$('#bbText').value||'';
+  const items=[];
+  for(const line of txt.split('\n')){
+    const l=line.trim(); if(!l) continue;
+    const m=l.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})-(\d{2}:\d{2})\s*\|?\s*(.*)$/);
+    if(!m) continue;
+    const s=new Date(m[1]+'T'+m[2]+':00').getTime(); const e=new Date(m[1]+'T'+m[3]+':00').getTime();
+    if(e>s) items.push({startAt:s,endAt:e,title:(m[4]||'会议').trim()});
+  }
+  if(!items.length){ toast('没有可解析的时段，每行格式：日期 开始-结束 | 标题','error'); return; }
+  wsSend({type:'roomBatchBook',roomId,items}); closeModal();
 }
 function renderFreeDesks(desks){
   const box=$('#fdk-list'); if(!box) return;

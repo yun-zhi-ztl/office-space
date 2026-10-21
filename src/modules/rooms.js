@@ -227,6 +227,30 @@ module.exports = function roomsModule(api) {
       recordWeekly(user, 'meetings');
       roomsBroadcast(space);
       if (room.requireApproval) pushNotification(space, { type: 'roomApprovalRequested', level: 'info', title: '会议室预约待审批', body: room.name + ' · ' + title });
+    } else if (msg.type === 'roomBatchBook') {
+      // 批量安排会议室：一次创建多个时段的预约，冲突项自动跳过
+      if (space.paused) return sendTo(ws, serError('空间已暂停，暂不可预约'));
+      const room = space.rooms.find((r) => r.id === msg.roomId);
+      if (!room) return sendTo(ws, serError('会议室不存在'));
+      const items = Array.isArray(msg.items) ? msg.items.slice(0, 30) : [];
+      if (!items.length) return sendTo(ws, serError('请提供要安排的会议时段'));
+      const nowT = Date.now();
+      const created = [], skipped = [];
+      for (const it of items) {
+        const startAt = Math.floor(+it.startAt || 0), endAt = Math.floor(+it.endAt || 0);
+        const title = String(it.title || '').trim().slice(0, 40) || '会议';
+        if (!(startAt > nowT) || !(endAt > startAt)) { skipped.push({ title, reason: '时间无效或已过去' }); continue; }
+        const durationMs = endAt - startAt;
+        if (durationMs < (room.minMinutes || 5) * 60000 || durationMs > (room.maxMinutes || 720) * 60000) { skipped.push({ title, reason: '时长超出范围' }); continue; }
+        const clash = slotClash(space, room.id, startAt, endAt) || created.some((c) => startAt < c.endAt && c.startAt < endAt);
+        if (clash) { skipped.push({ title, reason: '时段已被占用' }); continue; }
+        const res = { id: genId('res', null), roomId: room.id, ownerAccount: user.account, ownerName: user.nickname, title, startAt, endAt, note: String(it.note || '').trim().slice(0, 120), participants: Math.max(1, parseInt(it.participants, 10) || 1), attendees: [], attendedAccounts: [], equipment: [], status: room.requireApproval ? 'pending_approval' : 'pending', repeat: null, seriesId: null, seriesIndex: 0, remindAt: Math.max(Date.now(), startAt - ROOM_REMIND_WINDOW_MS), reminded: false, approvalRemindedAt: null };
+        space.roomReservations.set(res.id, res);
+        saveEntity(space.id, 'room_reservation', res.id, res);
+        created.push({ id: res.id, startAt, endAt });
+      }
+      if (created.length) { recordWeekly(user, 'meetings'); roomsBroadcast(space); }
+      sendTo(ws, { type: 'roomBatchBook', roomId: room.id, created: created.length, skipped });
     } else if (msg.type === 'reservationCancel') {
       const res = space.roomReservations.get(msg.reservationId);
       if (!res) return sendTo(ws, serError('预约不存在'));

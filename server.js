@@ -182,7 +182,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }
 
     switch (msg.type) {
-      case 'roomCreate': case 'roomTag': case 'roomApproval': case 'roomEquipment': case 'roomMaintenance': case 'roomRemove': case 'roomBook': case 'reservationCancel': case 'reservationCancelSeries': case 'reservationApprove': case 'reservationReject': case 'reservationReschedule': case 'reservationAttendees': case 'roomWaitlist': case 'roomWaitlistCancel': case 'roomStart': case 'roomEnd': case 'roomExtend': case 'roomDoorCodeRequest': case 'meetingAttend': case 'roomRate': case 'roomFavorite':
+      case 'roomCreate': case 'roomTag': case 'roomApproval': case 'roomEquipment': case 'roomMaintenance': case 'roomRemove': case 'roomBook': case 'roomBatchBook': case 'reservationCancel': case 'reservationCancelSeries': case 'reservationApprove': case 'reservationReject': case 'reservationReschedule': case 'reservationAttendees': case 'roomWaitlist': case 'roomWaitlistCancel': case 'roomStart': case 'roomEnd': case 'roomExtend': case 'roomDoorCodeRequest': case 'meetingAttend': case 'roomRate': case 'roomFavorite':
         rooms.handleRooms(ws, user, space, msg); break;
       case 'toolCreate': case 'toolDelete': case 'toolAdjust': case 'toolBorrow': case 'toolReturn': case 'toolExtend': case 'toolWaitlist': case 'remindOverdue':
         tools.handleTools(ws, user, space, msg); break;

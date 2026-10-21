@@ -3027,6 +3027,32 @@ async function runTests() {
     wA.close(); wB.close();
   }
 
+  // ========== 测试77: 会议室批量安排 ==========
+  console.log('\n📋 测试77: 会议室批量安排（成功 / 冲突 / 过期跳过）');
+  {
+    const spRb = (await httpJson('POST', '/api/spaces', { name: '批量办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aRb = 'rb_a_' + runKey;
+    await reg(aRb, 'pw', '批量管理员');
+    const wA = await createWSClient(); await loginTo(wA, spRb.id, aRb, 'pw');
+    await sendMsg(wA, { type: 'roomCreate', name: '批量间', capacity: 4 });
+    const roomId = last(wA, 'rooms').rooms[0].id;
+    const t0 = Date.now() + 86400000;
+    const items = [
+      { startAt: t0, endAt: t0 + 3600000, title: '晨会' },
+      { startAt: t0 + 2 * 86400000, endAt: t0 + 2 * 86400000 + 3600000, title: '评审' },
+      { startAt: t0 + 1800000, endAt: t0 + 5400000, title: '冲突会' },  // 与晨会重叠
+      { startAt: Date.now() - 1000, endAt: Date.now() + 1000, title: '过期会' },
+    ];
+    await sendMsg(wA, { type: 'roomBatchBook', roomId, items });
+    const rb = last(wA, 'roomBatchBook');
+    assert(rb && rb.created === 2, '批量创建 2 场成功');
+    assert(rb && rb.skipped.length === 2, '跳过冲突 / 过期 2 场');
+    assert(rb.skipped.some(s => s.reason && s.reason.includes('占用')) && rb.skipped.some(s => s.reason && s.reason.includes('已过去')), '跳过原因正确');
+    const rv = last(wA, 'rooms').reservations;
+    assert(rv.filter(r => r.status !== 'cancelled').length === 2, '预约中只保留批量创建的 2 场');
+    wA.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);
