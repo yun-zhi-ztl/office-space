@@ -171,6 +171,7 @@
 ### 会议室 / 工位忙闲热图（bookingHeatmap）
 - `api.bookingHeatmap(space, now)`：按当天小时（8:00-20:00，13 个时段）分别统计同时被占用的会议室与工位数，返回 `{ date, totalRooms, hours: [{hour,occupied}], busiest, deskTotal, deskHours, desksBusiest }`；取消 / 已过期场次不计。
 - 客户端在会议室 / 工位模块 `getBookingHeatmap` 拉取一次，前端以热力条展示各自峰值时段。
+- `suggestFreeSlots(space, roomId, durationMin, now, days)`：在 9:00-21:00 内以 30 分钟粒度、避开 `pending / pending_approval / active` 预约与已过时段，给出未来 1-7 天的可用空闲时段（最多 12 条）。
 
 ### 风险台账（risk）
 - `spaceRiskBoard(space, now)`：聚合空间内全部迟检 / 逾期 / 待处理项——迟检资产、逾期包裹、逾期未还设备、逾期未清储物柜、待审批会议预约、未办结报修、待处理申领、待审批请假，逐项带 `type` / `priority`（高 / 中）/ `title` / `sub` / `ts`。
@@ -418,6 +419,7 @@
 | `printSubmit` / `printDone` / `printPick` / `printCancel` | 提交打印任务 / 标记已打印 / 取走 / 取消 | member / owner / admin |
 | `assetInspect` | 登记资产巡检结果（通过 / 发现问题 / 不通过） | member |
 | `getBookingHeatmap` | 获取今日会议室忙闲热图，返回 `bookingHeatmap` | member |
+| `suggestSlots` | 给定时长推荐会议室未来几天的空闲时段（9:00-21:00 内不与其他预约冲突），返回 `suggestSlots` | member |
 | `getRisk` | 获取空间风险台账（迟检 / 逾期 / 待处理聚合），返回 `riskBoard` | member |
 | `spaceExport` | 管理员导出整个空间数据为 JSON 备份，返回 `spaceExport`（含 `meta` 与 `data` 全集合） | admin |
 | `reminderCreate` / `reminderDelete` / `reminderToggle` | 创建 / 删除 / 停用启用备忘提醒 | member |

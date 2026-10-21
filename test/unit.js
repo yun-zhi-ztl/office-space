@@ -1912,6 +1912,22 @@ for (let i = 0; i < 15; i++) {
 }
 assertEq(api.spaceHealthScore(floodHS, hsNow).score, 0, '多类隐患爆表时健康分截断为 0');
 
+// ---------- 会议室空闲时间建议 ----------
+console.log('\n📋 72. 会议室空闲时间建议');
+const sgBase = new Date(); sgBase.setHours(12, 0, 0, 0); const sgNow = sgBase.getTime();
+const sdRef = new Date(sgNow); const sd0 = new Date(sdRef.getFullYear(), sdRef.getMonth(), sdRef.getDate()).getTime();
+const sugSp = api.createSpace('s72', '空闲空间', 1, 0);
+sugSp.rooms.push({ id: 'rm1', name: 'Rm', capacity: 4 });
+const slotStart = sd0 + 13 * 3600000;
+sugSp.roomReservations.set('x', { id: 'x', roomId: 'rm1', status: 'pending', startAt: slotStart, endAt: slotStart + 3600000 });
+const slots = api.suggestFreeSlots(sugSp, 'rm1', 60, sgNow, 1);
+assert(slots.length > 0, '存在可用空闲时段');
+assert(!slots.some((s) => s.startAt < slotStart + 3600000 && s.endAt > slotStart), '不包含与已占用时段冲突的区间');
+assert(slots.every((s) => s.endAt - s.startAt === 3600000), '每个建议时长正确');
+const slots2 = api.suggestFreeSlots(sugSp, 'rm1', 60, sgNow, 3);
+assert(slots2.length >= slots.length, '未来天数增多可用时段不减');
+assertEq(api.suggestFreeSlots(sugSp, 'nope', 60, sgNow, 1).length, 0, '房间不存在返回空');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

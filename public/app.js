@@ -107,6 +107,7 @@ function dispatch(m){
     case 'lostFound': S.DB.lost={items:m.items||[],stats:m.stats||{}}; break;
     case 'print': S.DB.print={printers:m.printers||[],jobs:m.jobs||[],stats:m.stats||{}}; break;
     case 'bookingHeatmap': S.DB.bookingHeatmap=m.heatmap||null; break;
+    case 'suggestSlots': renderSuggestSlots(m.slots||[]); break;
     case 'riskBoard': S.DB.risk={items:m.board.items||[],total:m.board.total||0}; break;
     case 'reminders': S.DB.memo={items:m.reminders||[]}; break;
     case 'reminderDue': toast('⏰ 备忘提醒：'+(m.text||''),'warn'); render(); break;
@@ -619,7 +620,7 @@ function roomCard(r){
     <div class="meta">容量 ${r.capacity} 人 · 预约 ${r.minMinutes||5}-${r.maxMinutes||720} 分钟${r.location?' · '+esc(r.location):''}${r.description?'<div>'+esc(r.description)+'</div>':''}${r.tags&&r.tags.length?'<div style="margin-top:4px">'+r.tags.map(t=>`<span class="badge grey">${esc(t)}</span>`).join('')+'</div>':''}${r.equipment&&r.equipment.length?'<div style="margin-top:4px">'+r.equipment.map(e=>`<span class="badge grey">${esc(e)}</span>`).join('')+'</div>':''}${r.maintenance?'<div style="margin-top:4px"><span class="badge bad">维护中</span></div>':''}${r.requireApproval?'<div style="margin-top:4px"><span class="badge warn">需审批</span></div>':''}</div>
     ${rate}
     <div class="meta">${upcoming.length?upcoming.map(u=>`· ${fmtTime(u.startAt)} → ${fmtTime(u.endAt)} <b>${esc(u.title)}</b>${u.ownerAccount===me?'（你）':''}`).join('<br>'):'今日暂无预约'}</div>
-    <div class="foot"><button class="btn pri sm" onclick="openBook('${r.id}')">预约</button>${S.admin?`<button class="btn sm" onclick="openRoomTag('${r.id}')">标签</button><button class="btn sm" onclick="openRoomEquipment('${r.id}')">设备</button><button class="btn sm" onclick="openRoomMaintenance('${r.id}')">维护</button><button class="btn ${r.requireApproval?'warn':''} sm" onclick="roomApproval('${r.id}',${!r.requireApproval})">${r.requireApproval?'审批关闭':'审批开启'}</button>`:''}</div></div>`;
+    <div class="foot"><button class="btn sm" onclick="openFreeSuggest('${r.id}')">找空闲</button><button class="btn pri sm" onclick="openBook('${r.id}')">预约</button>${S.admin?`<button class="btn sm" onclick="openRoomTag('${r.id}')">标签</button><button class="btn sm" onclick="openRoomEquipment('${r.id}')">设备</button><button class="btn sm" onclick="openRoomMaintenance('${r.id}')">维护</button><button class="btn ${r.requireApproval?'warn':''} sm" onclick="roomApproval('${r.id}',${!r.requireApproval})">${r.requireApproval?'审批关闭':'审批开启'}</button>`:''}</div></div>`;
 }
 function openRoomTag(id){
   const r=(S.DB.rooms||[]).find(x=>x.id===id); if(!r) return;
@@ -2249,6 +2250,20 @@ function renderRisk(){
 }
 function refreshRisk(){ wsSend({type:'getRisk'}); }
 function jumpRisk(type){ const mod=RISK_JUMP[type]; if(mod) switchModule(mod); }
+/* 会议室空闲时间建议 */
+function openFreeSuggest(roomId){
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>推荐空闲时段</h2><div class="form">
+    <div class="fld"><label>时长（分钟）</label><input id="suggDur" type="number" value="60" min="15"></div>
+    <div class="fld"><label>未来几天</label><select id="suggDays"><option>1</option><option selected>3</option><option>7</option></select></div>
+    <button class="btn pri" onclick="submitFreeSuggest('${roomId}')">推荐</button>
+    <div id="sugg-list" class="hint">设置时长后点「推荐」（9:00-21:00 内不与其他预约冲突）</div></div>`);
+  setTimeout(()=>{ const d=$('#suggDur'); if(d) d.focus(); },50);
+}
+function submitFreeSuggest(roomId){ wsSend({type:'suggestSlots',roomId,durationMin:+$('#suggDur').value||60,days:parseInt($('#suggDays').value,10)||3}); }
+function renderSuggestSlots(slots){
+  const box=$('#sugg-list'); if(!box) return;
+  box.innerHTML=slots.length?`<div class="list">${slots.map(s=>`<div class="row"><span><span class="who">${s.date} ${fmtTime(s.startAt)} → ${fmtTime(s.endAt)}</span></span></div>`).join('')}</div><div class="hint">共 ${slots.length} 个可用时段</div>`:'<div class="hint">未来几天暂无可用时段，试试加长天数或缩短时长</div>';
+}
 function exportSpace(){ wsSend({type:'spaceExport'}); }
 /* 备忘提醒 */
 const MEMO_REPEAT = { none:'一次性', daily:'每天', weekly:'每周', monthly:'每月' };

@@ -2846,6 +2846,24 @@ async function runTests() {
     wA.close(); wB.close();
   }
 
+  // ========== 测试69: 会议室空闲时间建议 ==========
+  console.log('\n📋 测试69: 会议室空闲时间建议');
+  {
+    const spSg = (await httpJson('POST', '/api/spaces', { name: '空闲办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aSg = 'sg_a_' + runKey;
+    await reg(aSg, 'pw', '空闲管理员');
+    const wA = await createWSClient(); await loginTo(wA, spSg.id, aSg, 'pw');
+    await sendMsg(wA, { type: 'roomCreate', name: '空闲A', capacity: 4 });
+    const roomList = last(wA, 'rooms');
+    const roomId = roomList.rooms[0].id;
+    await sendMsg(wA, { type: 'suggestSlots', roomId, durationMin: 60, days: 3 });
+    const ss = last(wA, 'suggestSlots');
+    assert(ss && Array.isArray(ss.slots) && ss.slots.length > 0, '返回可用空闲时段');
+    assert(ss.slots.every(s => s.startAt && s.endAt && s.endAt > s.startAt), '每个建议为合法时段');
+    assert(ss.slots.every(s => s.endAt - s.startAt === 3600000), '每个建议时长正确（60 分钟）');
+    wA.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

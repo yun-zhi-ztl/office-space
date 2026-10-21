@@ -1412,6 +1412,33 @@ function createContext() {
     return { date: todayKey(nowMs), totalRooms: space.rooms.length, hours, busiest: { hour: busiest.hour, occupied: busiest.occupied }, deskTotal: space.desks.length, deskHours, desksBusiest: { hour: desksBusiest.hour, occupied: desksBusiest.occupied } };
   }
 
+  // 会议室空闲时间建议：给定时长，算出接下来几天 9:00-21:00 内未被预约占用的时段
+  function suggestFreeSlots(space, roomId, durationMin, now, days) {
+    const room = space.rooms.find((r) => r.id === roomId);
+    if (!room) return [];
+    const dur = Math.max(15, Math.min(480, parseInt(durationMin, 10) || 60));
+    const n = Math.max(1, Math.min(7, parseInt(days, 10) || 1));
+    const nowMs = now == null ? Date.now() : now;
+    const busy = [...space.roomReservations.values()].filter((r) => r.roomId === roomId && (r.status === 'pending' || r.status === 'pending_approval' || r.status === 'active'));
+    const day0 = new Date(nowMs); day0.setHours(0, 0, 0, 0);
+    const DAY = 86400000, SLOT = 1800000, openMin = 9 * 60, closeMin = 21 * 60;
+    const out = [];
+    for (let d = 0; d < n; d++) {
+      const ds = day0.getTime() + d * DAY;
+      for (let mins = openMin; mins + dur <= closeMin; mins += 30) {
+        const hs = ds + mins * 60000, he = hs + dur * 60000;
+        if (he <= nowMs) continue;
+        let clash = false;
+        for (const b of busy) if (b.startAt < he && b.endAt > hs) { clash = true; break; }
+        if (!clash) {
+          out.push({ date: todayKey(hs), startAt: hs, endAt: he });
+          if (out.length >= 12) return out;
+        }
+      }
+    }
+    return out;
+  }
+
   // 风险台账：聚合空间内所有迟检 / 逾期 / 待处理项，方便管理员一眼掌握"还有什么没处理"
   function spaceRiskBoard(space, now) {
     const nowMs = now == null ? Date.now() : now;
@@ -2350,7 +2377,7 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueRoomApprovalReminders, dueLeaveSlaReminders, dueDutyReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser, ensureInvites, genInviteCode, createInvite, useInvite, revokeInvite, invitesPublic, inviteStatus, auditLog, auditLogsPublic,
     // 序列化
-    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, dutiesPublic, dutyStats, assetsPublic, assetsStats, keysPublic, keysStats, keyRequestsPublic, fridgeItemsPublic, fridgeStats, fridgeLogsPublic, parkingSpotsPublic, parkingStats, parkingReservationsPublic, parcelsPublic, parcelStats, lockersPublic, lockerStats, lockerReservationsPublic, vehiclesPublic, vehicleStats, vehicleReservationsPublic, spaceSearch, lostPublic, lostStats, printersPublic, printJobsPublic, printStats, assetInspectOverdue, bookingHeatmap, spaceRiskBoard, dueDailyRiskReminder, spaceHealthScore, spaceExport, remindersPublic, dueRecurReminders, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, dutiesPublic, dutyStats, assetsPublic, assetsStats, keysPublic, keysStats, keyRequestsPublic, fridgeItemsPublic, fridgeStats, fridgeLogsPublic, parkingSpotsPublic, parkingStats, parkingReservationsPublic, parcelsPublic, parcelStats, lockersPublic, lockerStats, lockerReservationsPublic, vehiclesPublic, vehicleStats, vehicleReservationsPublic, spaceSearch, lostPublic, lostStats, printersPublic, printJobsPublic, printStats, assetInspectOverdue, bookingHeatmap, spaceRiskBoard, dueDailyRiskReminder, spaceHealthScore, suggestFreeSlots, spaceExport, remindersPublic, dueRecurReminders, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
     // 广播
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, dutyBroadcast, eventsBroadcast, pollsBroadcast, knowledgeBroadcast, tasksBroadcast, leavesBroadcast, meetingNotesBroadcast, notificationsBroadcast, noticesBroadcast, pushNotification, pushNotice, visitorsBroadcast, parcelsBroadcast, lockersBroadcast, vehiclesBroadcast, lostBroadcast, printBroadcast,
     // 坑位辅助
