@@ -2729,6 +2729,28 @@ async function runTests() {
     wH.close();
   }
 
+  // ========== 测试64: 风险台账 ==========
+  console.log('\n📋 测试64: 风险台账（迟检/待处理聚合）');
+  {
+    const spRk = (await httpJson('POST', '/api/spaces', { name: '风险办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aRk = 'rk_a_' + runKey, bRk = 'rk_b_' + runKey;
+    await reg(aRk, 'pw', '风险管理员'); await reg(bRk, 'pw', '风险成员');
+    const wA = await createWSClient(); await loginTo(wA, spRk.id, aRk, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spRk.id, bRk, 'pw');
+    await sendMsg(wA, { type: 'assetCreate', name: '灭火器', inspectIntervalDays: 30 });
+    await sendMsg(wB, { type: 'repairCreate', category: '灯光', location: '走廊', description: '灯不亮' });
+    await sendMsg(wB, { type: 'materialRequest', name: '5号电池', qty: 1 });
+    await sendMsg(wA, { type: 'getRisk' });
+    const rb = last(wA, 'riskBoard').board;
+    assert(rb && Array.isArray(rb.items) && rb.total >= 3, '风险台账返回待办聚合');
+    const types = rb.items.map(i => i.type);
+    assert(types.includes('inspection'), '含迟检资产');
+    assert(types.includes('repairs'), '含未办结报修');
+    assert(types.includes('materials'), '含待处理申领');
+    assert(rb.items.every(i => i.priority === 'high' || i.priority === 'normal'), '每项带优先级');
+    wA.close(); wB.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

@@ -172,6 +172,10 @@
 - `api.bookingHeatmap(space, now)`：按当天小时（8:00-20:00，13 个时段）分别统计同时被占用的会议室与工位数，返回 `{ date, totalRooms, hours: [{hour,occupied}], busiest, deskTotal, deskHours, desksBusiest }`；取消 / 已过期场次不计。
 - 客户端在会议室 / 工位模块 `getBookingHeatmap` 拉取一次，前端以热力条展示各自峰值时段。
 
+### 风险台账（risk）
+- `spaceRiskBoard(space, now)`：聚合空间内全部迟检 / 逾期 / 待处理项——迟检资产、逾期包裹、逾期未还设备、逾期未清储物柜、待审批会议预约、未办结报修、待处理申领、待审批请假，逐项带 `type` / `priority`（高 / 中）/ `title` / `sub` / `ts`。
+- 按高优先级在前、时间倒序返回 `{ total, items(≤50) }`；概览 `digest` 暴露 `riskCount`。
+
 ### 物资申领（materials）
 - `material_request`: `{ id, requesterAccount, requesterName, name, qty, unit, reason, priority, status, handlerAccount?, handlerName?, createdAt, handledAt? }`
   - 状态：`pending` / `fulfilled` / `cancelled`
@@ -404,6 +408,7 @@
 | `printSubmit` / `printDone` / `printPick` / `printCancel` | 提交打印任务 / 标记已打印 / 取走 / 取消 | member / owner / admin |
 | `assetInspect` | 登记资产巡检结果（通过 / 发现问题 / 不通过） | member |
 | `getBookingHeatmap` | 获取今日会议室忙闲热图，返回 `bookingHeatmap` | member |
+| `getRisk` | 获取空间风险台账（迟检 / 逾期 / 待处理聚合），返回 `riskBoard` | member |
 
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，
@@ -412,7 +417,7 @@
 
 ## 5. 前端
 
-单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 物资库存 / 报修 / 访客登记 / 考勤打卡 / 工位预约 / 外出登记 / 请假审批 / 会议纪要 / 意见反馈 / 心情打卡 / 活动管理 / 投票 / 知识库 / 待办任务 / 通知中心 / 坑位看板 / 我的日程 / 空间趋势 / 资产台账 / 钥匙门禁 / 冰箱食品 / 车辆停车 / 包裹快递 / 储物柜 / 用车申请 / 失物招领 / 文印服务），
+单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 物资库存 / 报修 / 访客登记 / 考勤打卡 / 工位预约 / 外出登记 / 请假审批 / 会议纪要 / 意见反馈 / 心情打卡 / 活动管理 / 投票 / 知识库 / 待办任务 / 通知中心 / 坑位看板 / 我的日程 / 空间趋势 / 资产台账 / 钥匙门禁 / 冰箱食品 / 车辆停车 / 包裹快递 / 储物柜 / 用车申请 / 失物招领 / 文印服务 / 风险台账），
 个人资料入口位于侧栏底部；桌面与移动端响应式，原生 HTML/CSS/JS，无构建步骤；静态文件由 Express 托管；
 会议室预约支持每天 / 每周周期预约（列表按 `seriesId` 聚合展示并整组取消）；
 会议室卡片展示设备清单徽标与「维护中」标记；管理员可为会议室设置设备清单、维护时段（维护期间不可预约）；预约时可勾选实际使用设备（仅保留会议室已有设备）；

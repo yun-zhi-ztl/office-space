@@ -161,6 +161,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'getLost') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'lostFound', items: api.lostPublic(space, info), stats: api.lostStats(space) }); return; }
     if (msg.type === 'getPrint') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'print', printers: api.printersPublic(space, info), jobs: api.printJobsPublic(space, info), stats: api.printStats(space) }); return; }
     if (msg.type === 'getBookingHeatmap') { api.sendTo(ws, { type: 'bookingHeatmap', heatmap: api.bookingHeatmap(space) }); return; }
+    if (msg.type === 'getRisk') { api.sendTo(ws, { type: 'riskBoard', board: api.spaceRiskBoard(space) }); return; }
     if (msg.type === 'getSpaceTrend') { api.sendTo(ws, { type: 'spaceTrend', trend: api.buildSpaceTrend(space, msg.days) }); return; }
     if (msg.type === 'getAttendanceCalendar') { api.sendTo(ws, { type: 'attendanceCalendar', calendar: api.attendanceCalendar(space, user.account, msg.year, msg.month) }); return; }
     if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }

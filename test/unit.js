@@ -1748,6 +1748,28 @@ assertEq(dhm.deskHours.find((x) => x.hour === 9).occupied, 2, '9 点两个工位
 assertEq(dhm.deskHours.find((x) => x.hour === 11).occupied, 0, '取消工位场次不计');
 assertEq(dhm.desksBusiest.hour, 9, '工位峰值时段为 9 点');
 
+// ---------- 风险台账 ----------
+console.log('\n📋 64. 风险台账（迟检/逾期/待处理聚合）');
+const rn = Date.now();
+const rsp = api.createSpace('s64', '风险空间', 1, 1);
+rsp.assets.set('a1', { id: 'a1', name: '灭火器', inspectIntervalDays: 30, lastCheckAt: 0 });
+rsp.parcels.set('p1', { id: 'p1', courier: '顺丰', trackingNumber: 'SF1', recipientName: '甲', status: 'incoming', expectedAt: rn - 1000, lastRemindedAt: 0 });
+rsp.borrows.set('b1', { id: 'b1', toolId: 'tl1', borrowerName: '乙', borrowedAt: rn - 10 * 86400000, dueAt: rn - 1000, returnedAt: null, status: 'borrowed' });
+rsp.lockerReservations.set('lr1', { id: 'lr1', lockerId: 'lk1', account: '丙', status: 'checked_in', dueAt: rn - 1000 });
+rsp.roomReservations.set('rr1', { id: 'rr1', roomId: 'rm1', title: '评审', ownerName: '丁', startAt: rn, endAt: rn + 3600000, status: 'pending_approval' });
+rsp.repairs.set('rp1', { id: 'rp1', code: 'RP-1', description: '灯坏', location: '走廊', category: '灯光', status: 'reported', createdAt: rn });
+rsp.materialRequests.set('mr1', { id: 'mr1', name: '电池', requesterName: '戊', status: 'pending', createdAt: rn });
+rsp.leaves.set('lv1', { id: 'lv1', category: '事假', name: '己', status: 'pending', createdAt: rn });
+const rb = api.spaceRiskBoard(rsp, rn);
+assertEq(rb.total, 8, '风险台账聚合 8 类待办项');
+assert(rb.items.some((i) => i.type === 'inspection') && rb.items.some((i) => i.type === 'parcels') && rb.items.some((i) => i.type === 'tools') && rb.items.some((i) => i.type === 'lockers'), '含迟检/逾期包裹/借款/储物柜');
+assert(rb.items.some((i) => i.type === 'rooms') && rb.items.some((i) => i.type === 'repairs') && rb.items.some((i) => i.type === 'materials') && rb.items.some((i) => i.type === 'leave'), '含待审批/报修/申领/请假');
+const rIdx = {}; rb.items.forEach((x, i) => { if (rIdx[x.type] === undefined) rIdx[x.type] = i; });
+assertEq(rb.items[rIdx.inspection].priority, 'high', '迟检为高优先');
+assertEq(rb.items[rIdx.repairs].priority, 'normal', '未办结报修为中优先');
+assert(rb.items.every((x, i) => i === 0 || (('high' === x.priority ? 0 : 1) >= ('high' === rb.items[i - 1].priority ? 0 : 1))), '高优先级置前');
+assertEq(api.buildDigest(rsp, { account: 'x' }, rn).riskCount, 8, '概览 digest 统计风险待办')
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

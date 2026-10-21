@@ -42,9 +42,10 @@ const S = {
   vehicles:{vehicles:[],stats:{},reservations:[]},
   lost:{items:[],stats:{}},
   print:{printers:[],jobs:[],stats:{}},
+  risk:{items:[],total:0},
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'],['schedule','我的日程','🗓️'],['cal','空间日历','📅'],['assets','资产台账','🗄️'],['keys','钥匙门禁','🔑'],['fridge','冰箱食品','🥤'],['parking','车辆停车','🚗'],['parcels','包裹快递','📦'],['lockers','储物柜','🗄️'],['vehicles','用车申请','🚘'],['lost','失物招领','🧢'],['print','文印服务','🖨️'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'],['schedule','我的日程','🗓️'],['cal','空间日历','📅'],['assets','资产台账','🗄️'],['keys','钥匙门禁','🔑'],['fridge','冰箱食品','🥤'],['parking','车辆停车','🚗'],['parcels','包裹快递','📦'],['lockers','储物柜','🗄️'],['vehicles','用车申请','🚘'],['lost','失物招领','🧢'],['print','文印服务','🖨️'],['risk','风险台账','⚠️'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -101,6 +102,7 @@ function dispatch(m){
     case 'lostFound': S.DB.lost={items:m.items||[],stats:m.stats||{}}; break;
     case 'print': S.DB.print={printers:m.printers||[],jobs:m.jobs||[],stats:m.stats||{}}; break;
     case 'bookingHeatmap': S.DB.bookingHeatmap=m.heatmap||null; break;
+    case 'riskBoard': S.DB.risk={items:m.board.items||[],total:m.board.total||0}; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; S.DB.repairStats=m.stats||null; break;
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
     case 'page': handlePage(m); break;
@@ -223,17 +225,17 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceCalendar','spaceTrend','notices','digest','assets','keys','fridge','parking','parcels','lockers','vehicles','lostFound','print','bookingHeatmap'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceCalendar','spaceTrend','notices','digest','assets','keys','fridge','parking','parcels','lockers','vehicles','lostFound','print','bookingHeatmap','riskBoard'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); else if(S.module==='cal') renderSpaceCalendar(); else if(S.module==='assets') renderAssets(); else if(S.module==='keys') renderKeys(); else if(S.module==='fridge') renderFridge(); else if(S.module==='parking') renderParking(); else if(S.module==='parcels') renderParcels(); else if(S.module==='lockers') renderLockers(); else if(S.module==='vehicles') renderVehicles(); else if(S.module==='lost') renderLost(); else if(S.module==='print') renderPrint(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); else if(S.module==='cal') renderSpaceCalendar(); else if(S.module==='assets') renderAssets(); else if(S.module==='keys') renderKeys(); else if(S.module==='fridge') renderFridge(); else if(S.module==='parking') renderParking(); else if(S.module==='parcels') renderParcels(); else if(S.module==='lockers') renderLockers(); else if(S.module==='vehicles') renderVehicles(); else if(S.module==='lost') renderLost(); else if(S.module==='print') renderPrint(); else if(S.module==='risk') renderRisk(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
   else { b.style.display='none'; }
 }
 function renderAll(){ render(); }
-function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); if(mod==='keys') wsSend({type:'getKeys'}); if(mod==='fridge') wsSend({type:'getFridge'}); if(mod==='parking') wsSend({type:'getParking'}); if(mod==='parcels') wsSend({type:'getParcels'}); if(mod==='lockers') wsSend({type:'getLockers'}); if(mod==='vehicles') wsSend({type:'getVehicles'}); if(mod==='lost') wsSend({type:'getLost'}); if(mod==='print') wsSend({type:'getPrint'}); if(mod==='rooms') wsSend({type:'getBookingHeatmap'}); if(mod==='desks') wsSend({type:'getBookingHeatmap'}); }
+function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); if(mod==='keys') wsSend({type:'getKeys'}); if(mod==='fridge') wsSend({type:'getFridge'}); if(mod==='parking') wsSend({type:'getParking'}); if(mod==='parcels') wsSend({type:'getParcels'}); if(mod==='lockers') wsSend({type:'getLockers'}); if(mod==='vehicles') wsSend({type:'getVehicles'}); if(mod==='lost') wsSend({type:'getLost'}); if(mod==='print') wsSend({type:'getPrint'}); if(mod==='risk') wsSend({type:'getRisk'}); if(mod==='rooms') wsSend({type:'getBookingHeatmap'}); if(mod==='desks') wsSend({type:'getBookingHeatmap'}); }
 
 /* 分页：广播已按最近 PAGE 下发，前端按 offset 加载更多 */
 const PAGE = 30;
@@ -464,6 +466,7 @@ function renderDash(){
       ${dig.maintenanceVehiclesCount?`<div class="row"><span>🛠️ 保养中车辆 ${dig.maintenanceVehiclesCount}</span></div>`:''}
       ${dig.parkingOccupiedCount?`<div class="row"><span>🅿️ 停车占用 ${dig.parkingOccupiedCount}/${dig.parkingTotal||0}</span></div>`:''}
       ${dig.inspectOverdueCount?`<div class="row"><span>🔍 迟检资产 ${dig.inspectOverdueCount} 项</span></div>`:''}
+      ${dig.riskCount?`<div class="row"><span>⚠️ 风险台账待办 ${dig.riskCount} 项 <button class="btn sm" onclick="switchModule('risk')">查看</button></span></div>`:''}
     </div>`:''}
     <h3 style="margin:22px 0 10px">🟢 在线状态</h3>
     <div class="fs">${(d.users||[]).map(u=>`<span class="badge info">${esc(u.avatar||'' )} ${esc(u.display||u.username)}${u.emergencyMode?' 🆘':''}${u.status&&u.status.emoji?' '+esc(u.status.emoji):''} ${u.status?esc(u.status.label):'在岗'}</span>`).join('')||'<span class="hint">仅自己在线</span>'}</div>
@@ -2189,6 +2192,27 @@ function submitPrint(id){ wsSend({type:'printSubmit',printerId:id,fileName:$('#p
 function printDone(id){ wsSend({type:'printDone',id}); }
 function printPick(id){ if(confirm('确认取走这份打印件？')) wsSend({type:'printPick',id}); }
 function printCancel(id){ if(confirm('确认取消该打印任务？')) wsSend({type:'printCancel',id}); }
+/* 风险台账 */
+const RISK_JUMP = { inspection:'assets', parcels:'parcels', tools:'tools', lockers:'lockers', rooms:'rooms', repairs:'repairs', materials:'materials', leave:'leave' };
+const RISK_LABEL = { inspection:'资产迟检', parcels:'包裹逾期', tools:'设备逾期未还', lockers:'储物柜逾期未清', rooms:'会议待审批', repairs:'未办结报修', materials:'待处理申领', leave:'请假待审批' };
+const RISK_ICON = { inspection:'🔍', parcels:'📬', tools:'⏰', lockers:'🗄️', rooms:'🗓️', repairs:'🛠️', materials:'📦', leave:'📅' };
+function renderRisk(){
+  const r=S.DB.risk||{items:[],total:0};
+  const inspCount=r.items.filter(i=>i.type==='inspection').length;
+  $('#main').innerHTML = `<div class="topbar"><div><h1>风险台账</h1><div class="sub">聚合空间内迟检 / 逾期 / 待处理项，一点跳转处理</div></div>
+    <button class="btn sm" onclick="refreshRisk()">刷新</button></div>
+    <div class="cards">
+      <div class="card"><h3>⚠️ 待办总数</h3><div class="num">${r.total||0}</div><div class="meta">高优先级优先</div></div>
+      <div class="card"><h3>🔍 迟检资产</h3><div class="num">${inspCount}</div><div class="meta">纳入巡检但已逾期</div></div>
+      <div class="card"><h3>📥 逾期 / 待处理</h3><div class="num">${(r.total||0)-inspCount}</div><div class="meta">报修 / 申领 / 审批 / 借用等</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">⚠️ 全部待处理项</h3>
+    <div class="list">${r.items.length?r.items.map(i=>`
+      <div class="row"><span><span class="who">${RISK_ICON[i.type]||'•'} ${esc(i.title)} <span class="badge ${i.priority==='high'?'bad':'warn'}">${i.priority==='high'?'高':'中'}</span></span><div class="meta">${RISK_LABEL[i.type]||i.type}${i.sub?' · '+esc(i.sub):''}</div></span>
+      <span class="fs">${RISK_JUMP[i.type]?`<button class="btn sm" onclick="jumpRisk('${i.type}')">去处理</button>`:''}</span></div>`).join(''):'<div class="empty">🎉 暂无待处理的隐患项</div>'}</div>`;
+}
+function refreshRisk(){ wsSend({type:'getRisk'}); }
+function jumpRisk(type){ const mod=RISK_JUMP[type]; if(mod) switchModule(mod); }
 /* 统一空间搜索 */
 const SEARCH_MOD = { rooms:'rooms', tools:'tools', materials:'materials', repairs:'repairs', tasks:'tasks', knowledge:'knowledge', notices:'dash', assets:'assets', users:null };
 const SEARCH_LABEL = { rooms:'会议室', tools:'设备', materials:'申领', repairs:'报修', tasks:'待办', knowledge:'知识库', notices:'公告', assets:'资产', users:'人员' };
