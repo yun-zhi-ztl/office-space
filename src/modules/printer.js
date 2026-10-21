@@ -11,7 +11,7 @@ module.exports = function printerModule(api) {
       if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可新增打印机'));
       const name = (msg.name || '').trim().slice(0, 30);
       if (!name) return sendTo(ws, serError('请输入打印机名称'));
-      const printer = { id: genId('prt', null), name, location: (msg.location || '').trim().slice(0, 40), color: !!msg.color, duplex: !!msg.duplex, status: PRINTER_STATUSES.includes(msg.status) ? msg.status : 'ok', note: (msg.note || '').trim().slice(0, 120), createdAt: Date.now() };
+      const printer = { id: genId('prt', null), name, location: (msg.location || '').trim().slice(0, 40), color: !!msg.color, duplex: !!msg.duplex, status: PRINTER_STATUSES.includes(msg.status) ? msg.status : 'ok', quota: Math.max(0, parseInt(msg.quota, 10) || 0), note: (msg.note || '').trim().slice(0, 120), createdAt: Date.now() };
       space.printers.push(printer);
       saveEntity(space.id, 'printer', printer.id, printer);
       printBroadcast(space);
@@ -25,6 +25,7 @@ module.exports = function printerModule(api) {
       if (msg.duplex !== undefined) p.duplex = !!msg.duplex;
       if (msg.status !== undefined && PRINTER_STATUSES.includes(msg.status)) p.status = msg.status;
       if (msg.note !== undefined) p.note = (msg.note || '').trim().slice(0, 120);
+      if (msg.quota !== undefined) p.quota = Math.max(0, parseInt(msg.quota, 10) || 0);
       saveEntity(space.id, 'printer', p.id, p);
       printBroadcast(space);
     } else if (msg.type === 'printerDelete') {
@@ -48,6 +49,11 @@ module.exports = function printerModule(api) {
       const copies = parseInt(msg.copies, 10);
       if (!Number.isInteger(pages) || pages < 1 || pages > 999) return sendTo(ws, serError('请输入有效页数'));
       if (!Number.isInteger(copies) || copies < 1 || copies > 99) return sendTo(ws, serError('请选择有效份数'));
+      if (p.quota > 0) {
+        const used = api.printQuotaUsed(space, p.id, user.account);
+        const planned = pages * copies;
+        if (used + planned > p.quota) return sendTo(ws, serError('超出该打印机月度配额（本月已用 ' + used + ' 页 / 上限 ' + p.quota + ' 页）'));
+      }
       const job = { id: genId('pj', null), printerId: p.id, account: user.account, requesterName: user.nickname || user.account, fileName, pages, copies, color: !!msg.color, duplex: !!msg.duplex, note: (msg.note || '').trim().slice(0, 120), status: 'pending', createdAt: Date.now(), doneAt: 0, pickedAt: 0 };
       space.printJobs.set(job.id, job);
       saveEntity(space.id, 'print_job', job.id, job);

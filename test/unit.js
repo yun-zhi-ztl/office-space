@@ -1993,6 +1993,16 @@ assert(carolN.notifications[0].id === 'x2', '非收件人仍可见公开通知')
 const adminN = api.notificationsPublic(privNtSp, { account: 'adminX' });
 assert(adminN.notifications.some((n) => n.id === 'x1'), '管理员可见全员私信');
 
+// ---------- 打印月度配额 ----------
+console.log('\n📋 77. 打印月度配额');
+const pqNow = Date.now();
+const pqSp = api.createSpace('s77', '配额空间', 1, 1);
+pqSp.printJobs.set('a', { id: 'a', printerId: 'prt1', account: 'alice', pages: 3, copies: 2, status: 'pending', createdAt: pqNow - 1000 });
+pqSp.printJobs.set('b', { id: 'b', printerId: 'prt1', account: 'alice', pages: 5, copies: 1, status: 'cancelled', createdAt: pqNow - 500 });
+pqSp.printJobs.set('c', { id: 'c', printerId: 'prt1', account: 'bob', pages: 10, copies: 1, status: 'pending', createdAt: pqNow - 200 });
+assertEq(api.printQuotaUsed(pqSp, 'prt1', 'alice', pqNow), 6, '统计本月已用页数（3×2=6，取消不算）');
+assertEq(api.printQuotaUsed(pqSp, 'prt1', 'bob', pqNow), 10, '各用户独立统计');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

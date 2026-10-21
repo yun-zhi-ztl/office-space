@@ -1368,7 +1368,7 @@ function createContext() {
   function printersPublic(space, info) {
     return space.printers.map((p) => {
       const pending = [...space.printJobs.values()].filter((j) => j.printerId === p.id && j.status === 'pending').length;
-      return { id: p.id, name: p.name, location: p.location || '', color: !!p.color, duplex: !!p.duplex, status: p.status || 'ok', note: p.note || '', pendingJobs: pending, createdAt: p.createdAt || 0 };
+      return { id: p.id, name: p.name, location: p.location || '', color: !!p.color, duplex: !!p.duplex, status: p.status || 'ok', quota: p.quota || 0, note: p.note || '', pendingJobs: pending, createdAt: p.createdAt || 0 };
     });
   }
   function printJobsPublic(space, info) {
@@ -1386,6 +1386,14 @@ function createContext() {
     const all = [...space.printJobs.values()];
     const byStatus = { ok: space.printers.filter((p) => (p.status || 'ok') === 'ok').length, offline: space.printers.filter((p) => p.status === 'offline').length, maintenance: space.printers.filter((p) => p.status === 'maintenance').length };
     return { printers: space.printers.length, byStatus, pendingJobs: all.filter((j) => j.status === 'pending').length, pendingToday: all.filter((j) => j.createdAt >= t0 && j.status === 'pending').length, doneToday: all.filter((j) => j.doneAt && j.doneAt >= t0 && j.doneAt < t1).length };
+  }
+  // 打印月度配额：统计某用户在指定打印机上本月已用页数（页 × 份，取消不算）
+  function printQuotaUsed(space, printerId, account, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const d = new Date(nowMs);
+    const m0 = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+    const m1 = new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
+    return [...space.printJobs.values()].filter((j) => j.printerId === printerId && j.account === account && j.status !== 'cancelled' && j.createdAt >= m0 && j.createdAt < m1).reduce((s, j) => s + (j.pages || 1) * (j.copies || 1), 0);
   }
 
   // 会议室忙闲热图：统计当天每个小时内有多少间会议室被占用（8:00-21:00）
@@ -2424,7 +2432,7 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueRoomApprovalReminders, dueLeaveSlaReminders, dueDutyReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser, ensureInvites, genInviteCode, createInvite, useInvite, revokeInvite, invitesPublic, inviteStatus, auditLog, auditLogsPublic,
     // 序列化
-    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, dutiesPublic, dutyStats, assetsPublic, assetsStats, keysPublic, keysStats, keyRequestsPublic, fridgeItemsPublic, fridgeStats, fridgeLogsPublic, parkingSpotsPublic, parkingStats, parkingReservationsPublic, parcelsPublic, parcelStats, lockersPublic, lockerStats, lockerReservationsPublic, vehiclesPublic, vehicleStats, vehicleReservationsPublic, spaceSearch, lostPublic, lostStats, printersPublic, printJobsPublic, printStats, assetInspectOverdue, bookingHeatmap, spaceRiskBoard, dueDailyRiskReminder, spaceHealthScore, suggestFreeSlots, suggestFreeDesks, spaceExport, spaceImport, remindersPublic, dueRecurReminders, dueScheduledNotices, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, dutiesPublic, dutyStats, assetsPublic, assetsStats, keysPublic, keysStats, keyRequestsPublic, fridgeItemsPublic, fridgeStats, fridgeLogsPublic, parkingSpotsPublic, parkingStats, parkingReservationsPublic, parcelsPublic, parcelStats, lockersPublic, lockerStats, lockerReservationsPublic, vehiclesPublic, vehicleStats, vehicleReservationsPublic, spaceSearch, lostPublic, lostStats, printersPublic, printJobsPublic, printStats, printQuotaUsed, assetInspectOverdue, bookingHeatmap, spaceRiskBoard, dueDailyRiskReminder, spaceHealthScore, suggestFreeSlots, suggestFreeDesks, spaceExport, spaceImport, remindersPublic, dueRecurReminders, dueScheduledNotices, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
     // 广播
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, dutyBroadcast, eventsBroadcast, pollsBroadcast, knowledgeBroadcast, tasksBroadcast, leavesBroadcast, meetingNotesBroadcast, notificationsBroadcast, noticesBroadcast, pushNotification, pushNotice, visitorsBroadcast, parcelsBroadcast, lockersBroadcast, vehiclesBroadcast, lostBroadcast, printBroadcast,
     // 坑位辅助

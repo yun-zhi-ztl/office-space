@@ -2209,7 +2209,7 @@ function renderPrint(){
     <h3 style="margin:22px 0 10px">🖨️ 打印机清单</h3>
     <div class="list">${pr.printers.length?pr.printers.map(x=>`
       <div class="row"><span><span class="who">${esc(x.name)} <span class="badge ${pStatusBadge[x.status]||''}">${pStatusLabel[x.status]||x.status}</span></span>
-        <div class="meta">${x.color?'🖍️ 彩色':'⚫ 黑白'}${x.duplex?' · 📄 双面':''}${x.location?' · '+esc(x.location):''}${x.pendingJobs?` · 排队 ${x.pendingJobs}`:''}</div>
+        <div class="meta">${x.color?'🖍️ 彩色':'⚫ 黑白'}${x.duplex?' · 📄 双面':''}${x.location?' · '+esc(x.location):''}${x.quota?' · 每人月配额 '+x.quota+' 页':''}${x.pendingJobs?` · 排队 ${x.pendingJobs}`:''}</div>
       </span><span class="fs">${S.admin?`<button class="btn sm" onclick="openPrinterEdit('${x.id}')">编辑</button><button class="btn danger sm" onclick="deletePrinter('${x.id}')">删除</button>`:''}${x.status==='ok'?`<button class="btn sm" onclick="openPrintSubmit('${x.id}')">打印</button>`:''}</span></div>`).join(''):'<div class="empty">暂无打印机</div>'}</div>
     <h3 style="margin:22px 0 10px">📋 打印队列</h3>
     <div class="list">${pr.jobs.length?pr.jobs.map(j=>`
@@ -2223,18 +2223,20 @@ function openPrinterCreate(){ openModal(`<span class="close" onclick="closeModal
   <div class="fld"><label><input type="checkbox" id="psColor"> 支持彩色</label></div>
   <div class="fld"><label><input type="checkbox" id="psDuplex"> 支持双面</label></div>
   <div class="fld"><label>初始状态</label><select id="psStatus"><option value="ok">可用</option><option value="offline">离线</option><option value="maintenance">维护中</option></select></div>
+  <div class="fld"><label>每月每人配额（页，0 不限）</label><input id="psQuota" type="number" value="0" min="0"></div>
   <div class="fld"><label>备注</label><input id="psNote" placeholder="可选"></div>
   <button class="btn pri" onclick="submitPrinterCreate()">创建</button></div>`); }
-function submitPrinterCreate(){ wsSend({type:'printerCreate',name:$('#psName').value,location:$('#psLoc').value,color:$('#psColor').checked,duplex:$('#psDuplex').checked,status:$('#psStatus').value,note:$('#psNote').value}); closeModal(); }
+function submitPrinterCreate(){ wsSend({type:'printerCreate',name:$('#psName').value,location:$('#psLoc').value,color:$('#psColor').checked,duplex:$('#psDuplex').checked,status:$('#psStatus').value,quota:+$('#psQuota').value||0,note:$('#psNote').value}); closeModal(); }
 function openPrinterEdit(id){ const p=(S.DB.print&&S.DB.print.printers||[]).find(x=>x.id===id); if(!p) return; openModal(`<span class="close" onclick="closeModal()">×</span><h2>编辑打印机 · ${esc(p.name)}</h2><div class="form">
   <div class="fld"><label>名称</label><input id="psName" value="${esc(p.name)}"></div>
   <div class="fld"><label>位置</label><input id="psLoc" value="${esc(p.location||'')}"></div>
   <div class="fld"><label><input type="checkbox" id="psColor" ${p.color?'checked':''}> 支持彩色</label></div>
   <div class="fld"><label><input type="checkbox" id="psDuplex" ${p.duplex?'checked':''}> 支持双面</label></div>
   <div class="fld"><label>状态</label><select id="psStatus"><option value="ok" ${p.status==='ok'?'selected':''}>可用</option><option value="offline" ${p.status==='offline'?'selected':''}>离线</option><option value="maintenance" ${p.status==='maintenance'?'selected':''}>维护中</option></select></div>
+  <div class="fld"><label>每月每人配额（页，0 不限）</label><input id="psQuota" type="number" value="${p.quota||0}" min="0"></div>
   <div class="fld"><label>备注</label><input id="psNote" value="${esc(p.note||'')}"></div>
   <button class="btn pri" onclick="submitPrinterEdit('${id}')">保存</button></div>`); }
-function submitPrinterEdit(id){ wsSend({type:'printerUpdate',id,name:$('#psName').value,location:$('#psLoc').value,color:$('#psColor').checked,duplex:$('#psDuplex').checked,status:$('#psStatus').value,note:$('#psNote').value}); closeModal(); }
+function submitPrinterEdit(id){ wsSend({type:'printerUpdate',id,name:$('#psName').value,location:$('#psLoc').value,color:$('#psColor').checked,duplex:$('#psDuplex').checked,status:$('#psStatus').value,quota:+$('#psQuota').value||0,note:$('#psNote').value}); closeModal(); }
 function deletePrinter(id){ const p=(S.DB.print&&S.DB.print.printers||[]).find(x=>x.id===id); if(confirm('确认删除打印机「'+(p?p.name:'')+'」？')) wsSend({type:'printerDelete',id}); }
 function openPrintSubmit(id){ const p=(S.DB.print&&S.DB.print.printers||[]).find(x=>x.id===id); openModal(`<span class="close" onclick="closeModal()">×</span><h2>提交打印 · ${esc(p?p.name:'')}</h2><div class="form">
   <div class="fld"><label>文件名</label><input id="pjFile" placeholder="如：周报-0915.pdf"></div>

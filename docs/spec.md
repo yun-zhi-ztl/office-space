@@ -159,7 +159,7 @@
 - `print_job`: `{ id, printerId, account, requesterName?, fileName, pages, copies, color, duplex, note?, status, createdAt, doneAt?, pickedAt? }`
   - 状态：`pending`（待打印）/ `done`（已打印待取）/ `picked`（已取走）/ `cancelled`（已取消）。
   - `printerCreate` / `printerUpdate` / `printerDelete` 由管理员维护；删除前校验该机无 `pending` / `done` 任务。
-  - `printSubmit` 任意成员，仅 `ok` 状态打印机可提交，页数 1-999、份数 1-99；`printDone` 仅管理员；`printPick` 本人或管理员（未打印完成不可取）；`printCancel` 仅管理员。
+  - `printSubmit` 任意成员，仅 `ok` 状态打印机可提交，页数 1-999、份数 1-99；若打印机设了 `quota`（每月每人页数），则按 `printQuotaUsed` 累加本月页数（页 × 份，取消不计），超额拒绝；`printDone` 仅管理员；`printPick` 本人或管理员（未打印完成不可取）；`printCancel` 仅管理员。
   - 统计待打印、今日已打印、按打印机状态分布。
 
 ### 资产巡检（assets）

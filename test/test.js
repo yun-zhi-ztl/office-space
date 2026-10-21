@@ -2984,6 +2984,26 @@ async function runTests() {
     wA.close(); wB.close();
   }
 
+  // ========== 测试75: 打印机月度配额 ==========
+  console.log('\n📋 测试75: 打印机月度配额（超额拒绝）');
+  {
+    const spPq = (await httpJson('POST', '/api/spaces', { name: '配额办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aPq = 'pq_a_' + runKey, bPq = 'pq_b_' + runKey;
+    await reg(aPq, 'pw', '配额管理员'); await reg(bPq, 'pw', '配额成员');
+    const wA = await createWSClient(); await loginTo(wA, spPq.id, aPq, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spPq.id, bPq, 'pw');
+    await sendMsg(wA, { type: 'printerCreate', name: '配额机', quota: 10 });
+    const prtId = last(wB, 'print').printers.find(p => p.name === '配额机').id;
+    await sendMsg(wB, { type: 'printSubmit', printerId: prtId, fileName: 'a.pdf', pages: 4, copies: 2 });
+    assert(mk(wB, 'error').length === 0, '配额内（8 页）可提交');
+    await sendMsg(wB, { type: 'printSubmit', printerId: prtId, fileName: 'b.pdf', pages: 2, copies: 1 });
+    assert(mk(wB, 'error').length === 0, '累计 10 页仍在配额内');
+    await sendMsg(wB, { type: 'printSubmit', printerId: prtId, fileName: 'c.pdf', pages: 3, copies: 1 });
+    const errPq = mk(wB, 'error').pop();
+    assert(errPq && errPq.message.includes('配额'), '累计 13 页超出配额被拒');
+    wA.close(); wB.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);
