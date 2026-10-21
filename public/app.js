@@ -229,6 +229,8 @@ function dispatch(m){
     case 'auditLogs': S.auditLogs=m.logs||[]; render(); break;
     case 'noticeUpdated': toast('✔ 公告已更新','success'); render(); break;
     case 'noticeScheduled': toast('⏰ 公告已定时，到点自动发布','success'); render(); break;
+    case 'privateMessage': toast('✉️ '+(m.fromName||m.from||'有人')+' 提醒你：'+(m.text||''),'info'); break;
+    case 'notifySent': toast('✉️ 已提醒 '+(m.toName||m.to),'success'); break;
     case 'noticeRemindSent': toast('📢 已提醒 '+(m.count||0)+' 位未读成员阅读公告','success'); break;
     case 'adminSet': if(S.me && m.account===S.me.account){ S.admin=!!m.admin; renderSidebar(); } render(); break;
     case 'spaceKicked': if(S.me && m.account===S.me.account){ toast('你已被管理员移除空间','warn'); S.me=null; S.admin=false; S.space=null; renderGate(); } else { toast('已移除成员 '+(m.accountName||'')+'','info'); render(); } break;
@@ -330,6 +332,7 @@ function renderSidebar(){
       ${S.admin?`<button class="btn sm" onclick="exportSpace()">💾 导出备份</button>`:''}
       ${S.admin?`<button class="btn sm" onclick="openSpaceImport()">📥 导入备份</button>`:''}
       ${badgeCount?`<div class="hint" style="margin-bottom:8px">🏅 徽章 ${badgeCount} 枚</div>`:''}
+      <button class="btn sm" onclick="openNotifyMember()">✉️ 提醒成员</button>
       <button class="btn sm" onclick="openProfile()">个人资料</button>
       <button class="btn sm" onclick="doLogout()">退出登录</button>
     </div>`;
@@ -2268,6 +2271,16 @@ function renderRisk(){
 }
 function refreshRisk(){ wsSend({type:'getRisk'}); }
 function jumpRisk(type){ const mod=RISK_JUMP[type]; if(mod) switchModule(mod); }
+/* 成员私信提醒 */
+function openNotifyMember(){
+  const users=(S.DB.users||[]).filter(u=>S.me && u.account!==S.me.account);
+  if(!users.length){ toast('暂无可提醒的成员','info'); return; }
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>✉️ 提醒成员</h2><div class="form">
+    <div class="fld"><label>收件人</label><select id="nmTo">${users.map(u=>`<option value="${esc(u.account)}">${esc(u.display||u.username)}</option>`).join('')}</select></div>
+    <div class="fld"><label>提醒内容</label><input id="nmText" placeholder="如：请查收会议室纪要"></div>
+    <button class="btn pri" onclick="submitNotifyMember()">发送</button></div>`);
+}
+function submitNotifyMember(){ wsSend({type:'notifyMember',to:$('#nmTo').value,text:$('#nmText').value}); closeModal(); }
 /* 会议室空闲时间建议 */
 function openFreeSuggest(roomId){
   openModal(`<span class="close" onclick="closeModal()">×</span><h2>推荐空闲时段</h2><div class="form">

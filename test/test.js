@@ -2936,6 +2936,29 @@ async function runTests() {
     wA.close(); wB.close();
   }
 
+  // ========== 测试73: 成员私信提醒 ==========
+  console.log('\n📋 测试73: 成员私信提醒（送达 / 隐私 / 校验）');
+  {
+    const spNm = (await httpJson('POST', '/api/spaces', { name: '私信办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aNm = 'nm_a_' + runKey, bNm = 'nm_b_' + runKey, cNm = 'nm_c_' + runKey;
+    await reg(aNm, 'pw', '私信甲'); await reg(bNm, 'pw', '私信乙'); await reg(cNm, 'pw', '私信丙');
+    const wA = await createWSClient(); await loginTo(wA, spNm.id, aNm, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spNm.id, bNm, 'pw');
+    await sendMsg(wA, { type: 'notifyMember', to: bNm, text: '请查收纪要' });
+    const pm = last(wB, 'privateMessage');
+    assert(pm && pm.text === '请查收纪要' && pm.fromName, '收件人实时收到私信提醒');
+    const wbN = last(wB, 'notifications');
+    assert(wbN && wbN.notifications.some(n => n.body.includes('请查收纪要')), '收件人通知中心含私信');
+    await sendMsg(wA, { type: 'notifyMember', to: 'nobody', text: 'x' });
+    const errNm = mk(wA, 'error').pop();
+    assert(errNm && errNm.message.includes('不在当前空间'), '非空间成员拒绝私信');
+    // 第三方丙在私信之后登录，其通知不应包含私信
+    const wC = await createWSClient(); await loginTo(wC, spNm.id, cNm, 'pw');
+    const wcN = last(wC, 'notifications');
+    assert(wcN && !wcN.notifications.some(n => n.body && n.body.includes('请查收纪要')), '非收件人看不到私信');
+    wA.close(); wB.close(); wC.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

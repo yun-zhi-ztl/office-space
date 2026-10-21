@@ -247,6 +247,7 @@ wss.on('connection', (ws) => {
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
       case 'announce': extras.announce(ws, user, space, msg); break;
       case 'announceSchedule': extras.announceSchedule(ws, user, space, msg); break;
+      case 'notifyMember': extras.notifyMember(ws, user, space, msg); break;
       case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;
       case 'spaceAdminSet': extras.adminSet(ws, user, space, msg); break;
       case 'spaceKick': extras.kick(ws, user, space, msg); break;

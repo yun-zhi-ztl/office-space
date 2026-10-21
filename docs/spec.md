@@ -430,6 +430,7 @@
 | `noticeRead` | 成员标记已读某公告（写入 `readBy`） | member |
 | `noticeRemindUnread` | 一键提醒公告未读成员，返回 `noticeRemindSent` | admin |
 | `announceSchedule` | 管理员定时发布公告（设定未来 `publishAt`，到点由周期任务自动上墙），返回 `noticeScheduled` | admin |
+| `notifyMember` | 给同空间成员发私信提醒（写入带 `to` 的通知，仅收件人 / 管理员可见并实时推送），返回 `notifySent` | member |
 
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，

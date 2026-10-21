@@ -1771,7 +1771,13 @@ function createContext() {
     };
   }
   function notificationsPublic(space, user) {
-    const list = [...space.notifications.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map((n) => notificationPublic(n, user));
+    // 私信（带 to）仅对收件人本人与管理员可见
+    const visible = [...space.notifications.values()].filter((n) => {
+      if (!n.to) return true;
+      if (user && (n.to === user.account || space.admins.has(user.account))) return true;
+      return false;
+    }).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    const list = visible.map((n) => notificationPublic(n, user));
     return { notifications: list.slice(0, LIST_PAGE), total: list.length, unreadCount: user ? list.filter((n) => !n.read).length : 0 };
   }
 

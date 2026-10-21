@@ -264,6 +264,29 @@ module.exports = function extrasModule(api) {
     sendTo(ws, { type: 'noticeRemindSent', count: n });
   }
 
+  // 成员私信提醒：给同空间的某位成员发一条通知（仅收件人与管理员可见）
+  function handleNotifyMember(ws, user, space, msg) {
+    const to = String(msg.to || '').trim();
+    const text = (msg.text || '').trim().slice(0, 200);
+    if (!to) return sendTo(ws, serError('请选择接收人'));
+    if (!text) return sendTo(ws, serError('请输入提醒内容'));
+    if (to === user.account) return sendTo(ws, serError('不能发给自己'));
+    const info = api.spaceUserInfo(space.id);
+    if (!info.get(to)) return sendTo(ws, serError('接收人不在当前空间'));
+    const fromName = user.nickname || user.account;
+    const notice = { id: api.genId('nt', null), type: 'private', level: 'info', title: '私信提醒', body: fromName + '：' + text, to, from: user.account, createdAt: Date.now(), readBy: {} };
+    space.notifications.set(notice.id, notice);
+    if (space.notifications.size > 200) {
+      const removed = [...space.notifications.entries()].sort((a, b) => a[1].createdAt - b[1].createdAt).slice(0, space.notifications.size - 200);
+      for (const [id] of removed) { space.notifications.delete(id); api.deleteEntity(space.id, 'notification', id); }
+    }
+    api.saveEntity(space.id, 'notification', notice.id, notice);
+    api.sendToAccount(to, { type: 'privateMessage', from: user.account, fromName, text });
+    const toUser = getUserByAccount(to);
+    if (toUser) api.sendToUser(toUser.id, { type: 'notifications', ...api.notificationsPublic(space, toUser) });
+    sendTo(ws, { type: 'notifySent', to, toName: ((info.get(to) || {}).display) || to });
+  }
+
   // 公告定时发布：admin 设定未来发布时间，到点由周期任务自动上墙
   function handleAnnounceSchedule(ws, user, space, msg) {
     if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可定时发布公告'));
@@ -281,5 +304,5 @@ module.exports = function extrasModule(api) {
     sendTo(ws, { type: 'noticeScheduled', noticeId: notice.id, publishAt });
   }
 
-  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace, adminSet: handleAdminSet, kick: handleKick, pause: handlePause, removeNotice: handleRemoveNotice, noticeReact: handleNoticeReact, noticeUnreact: handleNoticeUnreact, inviteCreate: handleInviteCreate, inviteRevoke: handleInviteRevoke, inviteList: handleInviteList, inviteRequire: handleInviteRequire, auditList: handleAuditList, announceEdit: handleAnnounceEdit, announcePin: handleAnnouncePin, noticeRead: handleNoticeRead, noticeRequire: handleNoticeRequire, noticeRemindUnread: handleNoticeRemindUnread, announceSchedule: handleAnnounceSchedule };
+  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace, adminSet: handleAdminSet, kick: handleKick, pause: handlePause, removeNotice: handleRemoveNotice, noticeReact: handleNoticeReact, noticeUnreact: handleNoticeUnreact, inviteCreate: handleInviteCreate, inviteRevoke: handleInviteRevoke, inviteList: handleInviteList, inviteRequire: handleInviteRequire, auditList: handleAuditList, announceEdit: handleAnnounceEdit, announcePin: handleAnnouncePin, noticeRead: handleNoticeRead, noticeRequire: handleNoticeRequire, noticeRemindUnread: handleNoticeRemindUnread, announceSchedule: handleAnnounceSchedule, notifyMember: handleNotifyMember };
 };

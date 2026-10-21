@@ -1979,6 +1979,20 @@ assert(scN1.publishedAt > 0 && scN1.publishAt === 0, '已发布公告清除 publ
 assertEq(schSp.notices.find((n) => n.id === 'n2').publishAt > scNow, true, '未到点公告保留排期');
 assertEq(api.dueScheduledNotices(schSp, scNow + 1000).length, 0, '已发布不重复触发');
 
+// ---------- 成员私信提醒（隐私过滤） ----------
+console.log('\n📋 76. 成员私信提醒（隐私过滤）');
+const privNtSp = api.createSpace('s76', '私信空间', 1, 1);
+privNtSp.admins.add('adminX');
+privNtSp.notifications.set('x1', { id: 'x1', type: 'private', to: 'alice', body: '来自bob的私信', createdAt: 1, readBy: {} });
+privNtSp.notifications.set('x2', { id: 'x2', type: 'info', to: null, body: '空间公开通知', createdAt: 2, readBy: {} });
+const aliceN = api.notificationsPublic(privNtSp, { account: 'alice' });
+assertEq(aliceN.notifications.length, 2, '收件人可见私信 + 公开通知');
+const carolN = api.notificationsPublic(privNtSp, { account: 'carol' });
+assertEq(carolN.notifications.length, 1, '非收件人不可见私信');
+assert(carolN.notifications[0].id === 'x2', '非收件人仍可见公开通知');
+const adminN = api.notificationsPublic(privNtSp, { account: 'adminX' });
+assert(adminN.notifications.some((n) => n.id === 'x1'), '管理员可见全员私信');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);
