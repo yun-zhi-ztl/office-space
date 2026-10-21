@@ -2576,6 +2576,46 @@ async function runTests() {
     wS1.close();
   }
 
+  // ========== 测试59: 概览运营看板（新模块指标） ==========
+  console.log('\n📋 测试59: 概览运营看板（包裹/储物柜/车辆/停车指标）');
+  {
+    const spD = (await httpJson('POST', '/api/spaces', { name: '运营办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aD = 'op_a_' + runKey, bD = 'op_b_' + runKey;
+    await reg(aD, 'pw', '运营管理员'); await reg(bD, 'pw', '运营成员');
+    const wD1 = await createWSClient(); await loginTo(wD1, spD.id, aD, 'pw');
+    const dBase = last(wD1, 'digest').digest;
+    assert(dBase && typeof dBase.incomingParcelsCount === 'number', '登录收到包含新模块指标的 digest');
+    const opNow = Date.now();
+    // 包裹
+    await sendMsg(wD1, { type: 'parcelCreate', recipientAccount: aD, courier: '顺丰' });
+    // 储物柜：新增 + 预借 + 签到
+    await sendMsg(wD1, { type: 'lockerCreate', name: '运营柜', lockerType: 'regular', total: 2 });
+    const lk0 = last(wD1, 'lockers');
+    await sendMsg(wD1, { type: 'lockerReserve', lockerId: lk0.lockers[0].id });
+    const lkr = last(wD1, 'lockers').reservations[0];
+    await sendMsg(wD1, { type: 'lockerCheckin', id: lkr.id });
+    // 车辆：新增 + 预借 + 出车
+    await sendMsg(wD1, { type: 'vehicleCreate', name: '运营轿车', plateNumber: '京A·1', vehicleType: 'sedan' });
+    const vh0 = last(wD1, 'vehicles');
+    await sendMsg(wD1, { type: 'vehicleReserve', vehicleId: vh0.vehicles[0].id, date: '2026-10-20', startAt: opNow + 86400000, endAt: opNow + 2 * 86400000 });
+    const vhRes = last(wD1, 'vehicles').reservations[0];
+    await sendMsg(wD1, { type: 'vehicleCheckin', id: vhRes.id, mileageStart: 100 });
+    // 停车：新增 + 预约 + 签到
+    await sendMsg(wD1, { type: 'spotCreate', name: '运营位', spotType: 'standard', total: 1 });
+    const pk0 = last(wD1, 'parking');
+    await sendMsg(wD1, { type: 'spotReserve', spotId: pk0.spots[0].id, date: '2026-10-20', startAt: opNow + 86400000, endAt: opNow + 2 * 86400000 });
+    const pkRes = last(wD1, 'parking').reservations[0];
+    await sendMsg(wD1, { type: 'spotCheckin', id: pkRes.id });
+    // 再登录一个新用户，其 digest 应反映已播种的数据
+    const wD2 = await createWSClient(); await loginTo(wD2, spD.id, bD, 'pw');
+    const dg2 = last(wD2, 'digest').digest;
+    assert(dg2.incomingParcelsCount >= 1, 'digest 反映待取包裹');
+    assert(dg2.activeLockersCount >= 1, 'digest 反映占用储物柜');
+    assert(dg2.vehiclesInUseCount >= 1, 'digest 反映行驶车辆');
+    assert(dg2.parkingOccupiedCount >= 1, 'digest 反映停车占用');
+    wD1.close(); wD2.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

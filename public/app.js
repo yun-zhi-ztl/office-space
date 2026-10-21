@@ -431,6 +431,10 @@ function renderDash(){
     ['今日打卡', ((S.DB.attendance&&S.DB.attendance.stats&&S.DB.attendance.stats.checkedIn)||0), '🕒'],
     ['今日工位', dig.deskTodayCount||0, '🪑'],
     ['外出中', dig.oooActiveCount||0, '🧳'],
+    ['待取包裹', (S.DB.parcels&&S.DB.parcels.parcels||[]).filter(p=>p.status==='incoming').length, '📬'],
+    ['占用储物柜', (S.DB.lockers&&S.DB.lockers.reservations||[]).filter(r=>r.status==='reserved'||r.status==='checked_in').length, '🗄️'],
+    ['行驶车辆', (S.DB.vehicles&&S.DB.vehicles.reservations||[]).filter(r=>r.status==='checked_in').length, '🚗'],
+    ['停车占用', (S.DB.parking&&S.DB.parking.reservations||[]).filter(r=>r.status==='checked_in').length, '🅿️'],
   ];
   $('#main').innerHTML = `<div class="topbar"><div><h1>概览 <span class="view-tag">${esc(S.space?S.space.name:'')}</span></h1><div class="sub">空间内的公共资源使用概览</div></div></div>
     ${mvp?`<div class="row" style="border-color:var(--yellow)"><span><span class="who">👑 本周之星</span> <b>${esc(mvp.username)}</b> · 本周活跃 ${mvp.weekly} 次</span><span class="badge ok">MVP</span></div>`:''}
@@ -449,6 +453,11 @@ function renderDash(){
       ${dig.attendanceCheckedIn?`<div class="row"><span>🕒 今日打卡 ${dig.attendanceCheckedIn} 人${dig.attendanceLate?`（迟到 ${dig.attendanceLate} 人）`:''}</span></div>`:''}
       ${dig.oooActiveCount?`<div class="row"><span>🧳 外出中 ${dig.oooActiveCount} 人${dig.activeOoo&&dig.activeOoo.length?`（${dig.activeOoo.map(o=>esc(o.name)+'·'+esc(o.category)).join('、')}）`:''}</span></div>`:''}
       ${dig.todayBorrowMinutes?`<div class="row"><span>📅 今日归还借用累计 ${Math.round(dig.todayBorrowMinutes/60)} 小时</span></div>`:''}
+      ${dig.incomingParcelsCount?`<div class="row"><span>📬 待取包裹 ${dig.incomingParcelsCount}${dig.overdueParcelsCount?` <span class="badge bad">逾期 ${dig.overdueParcelsCount}</span>`:''}</span></div>`:''}
+      ${dig.activeLockersCount?`<div class="row"><span>🗄️ 占用储物柜 ${dig.activeLockersCount}/${dig.lockerTotal||0}</span></div>`:''}
+      ${dig.vehiclesInUseCount?`<div class="row"><span>🚗 行驶车辆 ${dig.vehiclesInUseCount}${dig.todayVehicleBookingsCount?` · 今日预借 ${dig.todayVehicleBookingsCount}${dig.vehiclesInUseCount===0?`（${dig.todayVehicleBookings.map(v=>esc(v.vehicle)).join('、')}）`:''}`:''}</span></div>`:''}
+      ${dig.maintenanceVehiclesCount?`<div class="row"><span>🛠️ 保养中车辆 ${dig.maintenanceVehiclesCount}</span></div>`:''}
+      ${dig.parkingOccupiedCount?`<div class="row"><span>🅿️ 停车占用 ${dig.parkingOccupiedCount}/${dig.parkingTotal||0}</span></div>`:''}
     </div>`:''}
     <h3 style="margin:22px 0 10px">🟢 在线状态</h3>
     <div class="fs">${(d.users||[]).map(u=>`<span class="badge info">${esc(u.avatar||'' )} ${esc(u.display||u.username)}${u.emergencyMode?' 🆘':''}${u.status&&u.status.emoji?' '+esc(u.status.emoji):''} ${u.status?esc(u.status.label):'在岗'}</span>`).join('')||'<span class="hint">仅自己在线</span>'}</div>

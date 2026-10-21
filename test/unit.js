@@ -1588,6 +1588,31 @@ assert(api.spaceSearch(ssh, sshInfo, '甲甲').hits.some((h) => h.type === 'user
 assertEq(api.spaceSearch(ssh, sshInfo, '').hits.length, 0, '空关键词返回空');
 assertEq(api.spaceSearch(ssh, sshInfo, '不存在的词xyz').hits.length, 0, '无匹配返回空');
 
+// ---------- 概览运营看板（新模块指标） ----------
+console.log('\n📋 59. 概览运营看板（包裹/储物柜/车辆/停车指标）');
+const dSp = api.createSpace('s59', '运营空间', 1, 1);
+const dUser = { account: 'alice', nickname: '甲' };
+dSp.parcels.set('p1', { id: 'p1', status: 'incoming', expectedAt: Date.now() - 1000, lastRemindedAt: 0 });
+dSp.parcels.set('p2', { id: 'p2', status: 'incoming', expectedAt: 0, lastRemindedAt: 0 });
+dSp.parcels.set('p3', { id: 'p3', status: 'picked' });
+dSp.lockers.push({ id: 'lk1', name: '柜1', total: 4, available: 2 });
+dSp.lockerReservations.set('lr1', { id: 'lr1', lockerId: 'lk1', status: 'checked_in' });
+dSp.vehicles.push({ id: 'vh1', name: '商务车', type: 'van', maintenance: false });
+dSp.vehicles.push({ id: 'vh2', name: '保养车', type: 'sedan', maintenance: true });
+dSp.vehicleReservations.set('vr1', { id: 'vr1', vehicleId: 'vh1', status: 'checked_in', date: api.todayKey(Date.now()), startAt: Date.now(), endAt: Date.now() + 3600000 });
+dSp.parkingSpots.push({ id: 'pk1', name: '车位1', total: 2, available: 1 });
+dSp.parkingReservations.set('pr1', { id: 'pr1', spotId: 'pk1', status: 'checked_in' });
+const dg = api.buildDigest(dSp, dUser, Date.now());
+assertEq(dg.incomingParcelsCount, 2, 'digest 统计待取包裹');
+assertEq(dg.overdueParcelsCount, 1, 'digest 统计逾期包裹');
+assertEq(dg.activeLockersCount, 1, 'digest 统计占用储物柜');
+assertEq(dg.lockerTotal, 1, 'digest 统计柜位总数');
+assertEq(dg.vehiclesInUseCount, 1, 'digest 统计行驶车辆');
+assertEq(dg.todayVehicleBookingsCount, 1, 'digest 统计今日预借车辆');
+assertEq(dg.maintenanceVehiclesCount, 1, 'digest 统计保养中车辆');
+assertEq(dg.parkingOccupiedCount, 1, 'digest 统计停车占用');
+assertEq(dg.parkingTotal, 1, 'digest 统计车位总数');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);
