@@ -2104,6 +2104,7 @@ function createContext() {
     const upcomingDesk = [...space.deskReservations.values()].filter((r) => r.account === user.account && r.status === 'pending' && r.startAt >= nowMs && r.startAt <= nowMs + 60 * 60000);
     const activeOoo = [...space.ooo.values()].filter((r) => r.account === user.account && r.status === 'active');
     const upcomingEvents = [...space.events.values()].filter((e) => !e.cancelled && e.startAt >= nowMs && e.startAt <= nowMs + 60 * 60000 && (e.rsvps && e.rsvps.get(user.account) === 'going' || e.hostAccount === user.account));
+    const myReminders = [...space.reminders.values()].filter((x) => x.account === user.account && x.enabled && x.nextAt);
     return {
       overdueCount: overdue.length,
       overdue: overdue.map((b) => ({ id: b.id, toolId: b.toolId, qty: b.qty, dueAt: b.dueAt || null, days: Math.floor((nowMs - (b.borrowedAt || nowMs)) / 86400000) })),
@@ -2121,6 +2122,8 @@ function createContext() {
       activeOoo: activeOoo.map((r) => ({ id: r.id, category: r.category, expectedReturnAt: r.expectedReturnAt || null })),
       upcomingEventCount: upcomingEvents.length,
       upcomingEvents: upcomingEvents.map((e) => ({ id: e.id, title: e.title, startAt: e.startAt, endAt: e.endAt, host: e.hostAccount === user.account })),
+      remindersCount: myReminders.length,
+      reminders: myReminders.sort((a, b) => (a.nextAt - b.nextAt)).slice(0, 10).map((x) => ({ id: x.id, text: x.text, nextAt: x.nextAt, repeat: x.repeat || 'none' })),
     };
   }
 

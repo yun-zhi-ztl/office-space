@@ -2783,6 +2783,9 @@ async function runTests() {
     let mm = last(wB, 'reminders');
     assert(mm && mm.reminders.length === 1 && mm.reminders[0].text === '清冰箱' && mm.reminders[0].repeat === 'weekly', '成员创建重复提醒');
     const memoId = mm.reminders[0].id;
+    await sendMsg(wB, { type: 'getMyReminders' });
+    const myr = last(wB, 'myReminders');
+    assert(myr && myr.reminders && myr.reminders.remindersCount === 1 && myr.reminders.reminders[0].text === '清冰箱', '我的待办聚合本人备忘');
     await sendMsg(wB, { type: 'reminderToggle', id: memoId });
     mm = last(wB, 'reminders');
     assert(mm.reminders.find(r => r.id === memoId).enabled === false, '可停用提醒');

@@ -183,6 +183,7 @@
   - `repeat`：`none`（一次性）/ `daily`（每天）/ `weekly`（每周）/ `monthly`（每月）。
   - `reminderCreate` 任意成员创建（内容 + 时间 + 重复）；`reminderDelete` / `reminderToggle` 仅本人或管理员。
   - `dueRecurReminders(space, now)` 由服务端周期任务调用：一次性提醒触发后停用，每天 / 每周 / 每月按周期自动推进 `nextAt`；到点经 `reminderDue` 单发推送给本人。列表按 `getReminders` 仅返回本人提醒。
+- `buildMyReminders`（我的待办）新增 `remindersCount` / `reminders`，把本人启用中的备忘聚合进个人待办看板。
 
 ### 物资申领（materials）
 - `material_request`: `{ id, requesterAccount, requesterName, name, qty, unit, reason, priority, status, handlerAccount?, handlerName?, createdAt, handledAt? }`

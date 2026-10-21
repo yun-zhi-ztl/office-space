@@ -1848,6 +1848,18 @@ assert(mms.reminders.get('rm').nextAt > mmNow, '每月提醒推进');
 const memoPub = api.remindersPublic(mms, new Map([['a', { display: '甲' }], ['b', { display: '乙' }]]));
 assertEq(memoPub.length, 4, 'remindersPublic 返回全部提醒');
 
+// ---------- 我的待办纳入备忘 ----------
+console.log('\n📋 69. 我的待办纳入备忘提醒');
+const remSP = api.createSpace('s69', '我的备忘', 1, 1);
+const remMemoUser = { account: 'alice' };
+remSP.reminders.set('m1', { id: 'm1', account: 'alice', text: '清冰箱', nextAt: Date.now() + 3600000, repeat: 'weekly', enabled: true });
+remSP.reminders.set('m2', { id: 'm2', account: 'bob', text: '别人的', nextAt: Date.now() + 3600000, repeat: 'none', enabled: true });
+remSP.reminders.set('m3', { id: 'm3', account: 'alice', text: '停用的', nextAt: Date.now() - 1000, repeat: 'daily', enabled: false });
+const mym = api.buildMyReminders(remSP, remMemoUser, Date.now());
+assertEq(mym.remindersCount, 1, '只含本人启用中的备忘');
+assert(mym.reminders[0] && mym.reminders[0].text === '清冰箱' && mym.reminders[0].repeat === 'weekly', '返回本人备忘内容与重复类型');
+assertEq(api.buildMyReminders(remSP, { account: 'bob' }, Date.now()).remindersCount, 1, '各用户返回各自的启用备忘');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);
