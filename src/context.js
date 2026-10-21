@@ -33,6 +33,7 @@ function createContext() {
   const LOCKER_TYPES = ['regular', 'valuable', 'temporary'];
   const VEHICLE_TYPES = ['sedan', 'suv', 'van', 'bus'];
   const LOST_CATEGORIES = ['证件', '电子设备', '钥匙', '衣物', '水杯', '雨伞', '其它'];
+  const PRINTER_STATUSES = ['ok', 'offline', 'maintenance'];
   const POLL_MAX_OPTIONS = 5;
   const KNOWLEDGE_CATEGORIES = ['规章制度', '操作指引', '设备说明', '常见问题', '其他'];
   const TASK_PRIORITIES = ['high', 'normal', 'low'];
@@ -274,6 +275,8 @@ function createContext() {
       else if (r.kind === 'vehicle') sp.vehicles.push(data);
       else if (r.kind === 'vehicle_reservation') sp.vehicleReservations.set(data.id, data);
       else if (r.kind === 'lost_found') sp.lostFound.push(data);
+      else if (r.kind === 'printer') sp.printers.push(data);
+      else if (r.kind === 'print_job') sp.printJobs.set(data.id, data);
       else if (r.kind === 'notice') { sp.notices.push(data); sp.notices.sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
       else if (r.kind === 'invite') { ensureInvites(sp).set(data.id, data); }
       else if (r.kind === 'audit_log') { if (!sp.auditLogs) sp.auditLogs = []; sp.auditLogs.push(data); sp.auditLogs.sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
@@ -616,6 +619,7 @@ function createContext() {
       lockers: [], lockerReservations: new Map(),
       vehicles: [], vehicleReservations: new Map(),
       lostFound: [],
+      printers: [], printJobs: new Map(),
       requireInvite: false,
       auditLogs: [],
     };
@@ -1347,6 +1351,30 @@ function createContext() {
     return { total: all.length, open: open.length, openLost: open.filter((x) => x.type === 'lost').length, openFound: open.filter((x) => x.type === 'found').length, resolved: all.filter((x) => x.status === 'resolved').length };
   }
 
+  // ---------- 文印 / 共享打印机序列化 ----------
+  function printersPublic(space, info) {
+    return space.printers.map((p) => {
+      const pending = [...space.printJobs.values()].filter((j) => j.printerId === p.id && j.status === 'pending').length;
+      return { id: p.id, name: p.name, location: p.location || '', color: !!p.color, duplex: !!p.duplex, status: p.status || 'ok', note: p.note || '', pendingJobs: pending, createdAt: p.createdAt || 0 };
+    });
+  }
+  function printJobsPublic(space, info) {
+    const rank = (s) => (s === 'pending' ? 0 : s === 'done' ? 1 : 2);
+    return [...space.printJobs.values()].sort((a, b) => (rank(a.status) - rank(b.status)) || (b.createdAt - a.createdAt)).map((j) => {
+      const pr = space.printers.find((x) => x.id === j.printerId);
+      const u = info.get(j.account);
+      return { id: j.id, printerId: j.printerId, printerName: pr ? pr.name : '', fileName: j.fileName, pages: j.pages, copies: j.copies, color: !!j.color, duplex: !!j.duplex, note: j.note || '', status: j.status, account: j.account, requesterName: u ? u.display : (j.requesterName || j.account), createdAt: j.createdAt || 0, doneAt: j.doneAt || 0, pickedAt: j.pickedAt || 0 };
+    });
+  }
+  function printStats(space, now) {
+    const nowMs = now == null ? Date.now() : now;
+    const day0 = new Date(nowMs); day0.setHours(0, 0, 0, 0);
+    const t0 = day0.getTime(), t1 = t0 + 86400000;
+    const all = [...space.printJobs.values()];
+    const byStatus = { ok: space.printers.filter((p) => (p.status || 'ok') === 'ok').length, offline: space.printers.filter((p) => p.status === 'offline').length, maintenance: space.printers.filter((p) => p.status === 'maintenance').length };
+    return { printers: space.printers.length, byStatus, pendingJobs: all.filter((j) => j.status === 'pending').length, pendingToday: all.filter((j) => j.createdAt >= t0 && j.status === 'pending').length, doneToday: all.filter((j) => j.doneAt && j.doneAt >= t0 && j.doneAt < t1).length };
+  }
+
   // 统一空间检索：跨会议室/设备/申领/报修/待办/知识库/公告/资产/人员做包含匹配
   function spaceSearch(space, info, q, now) {
     const s = String(q == null ? '' : q).trim().toLowerCase();
@@ -1651,6 +1679,10 @@ function createContext() {
     const info = spaceUserInfo(sp.id);
     broadcast(sp.id, 'lostFound', { items: lostPublic(sp, info), stats: lostStats(sp) });
   }
+  function printBroadcast(sp) {
+    const info = spaceUserInfo(sp.id);
+    broadcast(sp.id, 'print', { printers: printersPublic(sp, info), jobs: printJobsPublic(sp, info), stats: printStats(sp) });
+  }
   function broadcastStalls(sp) {
     const info = spaceUserInfo(sp.id);
     broadcast(sp.id, 'stalls', { squat_count: sp.squatCount, urinal_count: sp.urinalCount, stalls: stallsPublic(sp, info) });
@@ -1800,6 +1832,7 @@ function createContext() {
     lockersBroadcast(sp);
     vehiclesBroadcast(sp);
     lostBroadcast(sp);
+    printBroadcast(sp);
     roomStatsBroadcast(sp);
     attendanceBroadcast(sp);
     desksBroadcast(sp);
@@ -2139,7 +2172,7 @@ function createContext() {
     // 状态
     spaces, users, accounts, tokens, profiles,
     // 访问器
-    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, ROOM_APPROVAL_SLA_MS, LEAVE_APPROVAL_SLA_MS, MEETING_ONTIME_GRACE_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, LEAVE_CATEGORIES, MEETING_NOTE_MAX_LEN, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, EVENT_CATEGORIES, DUTY_CATEGORIES, ASSET_CATEGORIES, ASSET_STATUSES, ASSET_CONDITIONS, KEY_CATEGORIES, KEY_SECURITY, PARKING_TYPES, PARCEL_STATUSES, LOCKER_TYPES, VEHICLE_TYPES, LOST_CATEGORIES, POLL_MAX_OPTIONS, KNOWLEDGE_CATEGORIES, TASK_PRIORITIES, TASK_STATUSES, NOTIFICATION_LEVELS, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
+    LIST_PAGE, RESERVE_CONFIRM_WINDOW_MS, OVERDUE_REMIND_THROTTLE_MS, ROOM_REMIND_WINDOW_MS, ROOM_APPROVAL_SLA_MS, LEAVE_APPROVAL_SLA_MS, MEETING_ONTIME_GRACE_MS, BORROW_SOON_WINDOW_MS, OOO_RETURN_WINDOW_MS, OOO_RETURN_REMIND_THROTTLE_MS, VISIT_REMIND_WINDOW_MS, REPAIR_SLA_MS, MATERIAL_SLA_MS, REPAIR_ESCALATE_MS, VISIT_TOKEN_TTL_MS, WS_PING_MS, REPAIR_CATEGORIES, REPAIR_PRIORITIES, TOOL_CATEGORIES, INVENTORY_CATEGORIES, OOO_CATEGORIES, LEAVE_CATEGORIES, MEETING_NOTE_MAX_LEN, FEEDBACK_CATEGORIES, MATERIAL_PRIORITIES, MOOD_EMOJIS, EVENT_CATEGORIES, DUTY_CATEGORIES, ASSET_CATEGORIES, ASSET_STATUSES, ASSET_CONDITIONS, KEY_CATEGORIES, KEY_SECURITY, PARKING_TYPES, PARCEL_STATUSES, LOCKER_TYPES, VEHICLE_TYPES, LOST_CATEGORIES, PRINTER_STATUSES, POLL_MAX_OPTIONS, KNOWLEDGE_CATEGORIES, TASK_PRIORITIES, TASK_STATUSES, NOTIFICATION_LEVELS, ATTEND_DEFAULT_WORK_START, ATTEND_DEFAULT_WORK_END, ATTEND_DEFAULT_LATE_MINUTES,
     pool,
     get pgEnabled() { return usePg; },
     set pgEnabled(v) { usePg = v; },
@@ -2153,9 +2186,9 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueRoomApprovalReminders, dueLeaveSlaReminders, dueDutyReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser, ensureInvites, genInviteCode, createInvite, useInvite, revokeInvite, invitesPublic, inviteStatus, auditLog, auditLogsPublic,
     // 序列化
-    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, dutiesPublic, dutyStats, assetsPublic, assetsStats, keysPublic, keysStats, keyRequestsPublic, fridgeItemsPublic, fridgeStats, fridgeLogsPublic, parkingSpotsPublic, parkingStats, parkingReservationsPublic, parcelsPublic, parcelStats, lockersPublic, lockerStats, lockerReservationsPublic, vehiclesPublic, vehicleStats, vehicleReservationsPublic, spaceSearch, lostPublic, lostStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, dutiesPublic, dutyStats, assetsPublic, assetsStats, keysPublic, keysStats, keyRequestsPublic, fridgeItemsPublic, fridgeStats, fridgeLogsPublic, parkingSpotsPublic, parkingStats, parkingReservationsPublic, parcelsPublic, parcelStats, lockersPublic, lockerStats, lockerReservationsPublic, vehiclesPublic, vehicleStats, vehicleReservationsPublic, spaceSearch, lostPublic, lostStats, printersPublic, printJobsPublic, printStats, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
     // 广播
-    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, dutyBroadcast, eventsBroadcast, pollsBroadcast, knowledgeBroadcast, tasksBroadcast, leavesBroadcast, meetingNotesBroadcast, notificationsBroadcast, noticesBroadcast, pushNotification, pushNotice, visitorsBroadcast, parcelsBroadcast, lockersBroadcast, vehiclesBroadcast, lostBroadcast,
+    broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, dutyBroadcast, eventsBroadcast, pollsBroadcast, knowledgeBroadcast, tasksBroadcast, leavesBroadcast, meetingNotesBroadcast, notificationsBroadcast, noticesBroadcast, pushNotification, pushNotice, visitorsBroadcast, parcelsBroadcast, lockersBroadcast, vehiclesBroadcast, lostBroadcast, printBroadcast,
     // 坑位辅助
     activeStallCount, checkAchievements, notifyUrge, ACHIEVEMENT_DEFS,
     achievementProgress, achievementDefsPublic,

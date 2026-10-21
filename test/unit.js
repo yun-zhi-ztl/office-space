@@ -11,6 +11,7 @@ const parcelsModule = require('../src/modules/parcels');
 const lockersModule = require('../src/modules/lockers');
 const vehiclesModule = require('../src/modules/vehicles');
 const lostFoundModule = require('../src/modules/lostfound');
+const printerModule = require('../src/modules/printer');
 const extrasModule = require('../src/modules/extras');
 
 let passed = 0;
@@ -1649,6 +1650,56 @@ assert(lfSent.some((m) => m.message && m.message.includes('仅管理员')), '非
 lostModule2.handleLostFound({}, { account: 'admin' }, lfSpace, { type: 'lostDelete', id: i1.id });
 assertEq(lfSpace.lostFound.length, 1, '管理员可删除记录');
 assertEq(lfApi.lostStats(lfSpace).openFound, 1, 'lostStats 统计捡到待认领');
+
+// ---------- 文印 / 共享打印机 ----------
+console.log('\n📋 61. 文印服务');
+const prSent = [];
+let prSeq = 0;
+const prApi = {
+  spaceUserInfo: () => new Map([['alice', { display: '甲' }], ['bob', { display: '乙' }], ['carol', { display: '丙' }]]),
+  printersPublic: (space) => space.printers,
+  printJobsPublic: (space) => [...space.printJobs.values()],
+  printStats: (space) => ({ printers: space.printers.length, pendingJobs: [...space.printJobs.values()].filter((j) => j.status === 'pending').length, byStatus: {} }),
+  printBroadcast: () => {},
+  isAdmin: (space, account) => account === 'admin',
+  sendTo: (ws, obj) => { prSent.push(obj); },
+  serError: (m) => ({ type: 'error', message: m }),
+  genId: () => `pr${prSeq++}`,
+  saveEntity: () => {},
+  deleteEntity: () => {},
+  PRINTER_STATUSES: ['ok', 'offline', 'maintenance'],
+};
+const printerModule2 = printerModule(prApi);
+const prSpace = { id: 's61', printers: [], printJobs: new Map() };
+printerModule2.handlePrint({}, { account: 'admin' }, prSpace, { type: 'printerCreate', name: '激光机', color: true, duplex: true });
+const prtA = prSpace.printers[0];
+assert(prtA && prtA.color === true && prtA.duplex === true && prtA.status === 'ok', 'printerCreate 新增打印机');
+printerModule2.handlePrint({}, { account: 'user' }, prSpace, { type: 'printerCreate', name: '越权' });
+assert(prSent.some((m) => m.message && m.message.includes('仅管理员')), '非管理员新增打印机被拒');
+printerModule2.handlePrint({}, { account: 'bob' }, prSpace, { type: 'printSubmit', printerId: prtA.id, fileName: '周报.pdf', pages: 3, copies: 2 });
+const prtJob = [...prSpace.printJobs.values()][0];
+assert(prtJob && prtJob.status === 'pending' && prtJob.pages === 3 && prtJob.copies === 2, 'printSubmit 提交打印任务');
+printerModule2.handlePrint({}, { account: 'bob' }, prSpace, { type: 'printPick', id: prtJob.id });
+assert(prSent.some((m) => m.message && m.message.includes('待打印完成')), '未打印完成不能取走');
+printerModule2.handlePrint({}, { account: 'bob' }, prSpace, { type: 'printDone', id: prtJob.id });
+assert(prSent.some((m) => m.message && m.message.includes('仅管理员')), '普通成员不能标记已打印');
+printerModule2.handlePrint({}, { account: 'admin' }, prSpace, { type: 'printDone', id: prtJob.id });
+assertEq(prtJob.status, 'done', '管理员标记已打印');
+printerModule2.handlePrint({}, { account: 'carol' }, prSpace, { type: 'printPick', id: prtJob.id });
+assert(prSent.some((m) => m.message && m.message.includes('只能取走自己的')), '他人不能取走别人的任务');
+printerModule2.handlePrint({}, { account: 'bob' }, prSpace, { type: 'printPick', id: prtJob.id });
+assertEq(prtJob.status, 'picked', '本人取走任务');
+printerModule2.handlePrint({}, { account: 'admin' }, prSpace, { type: 'printerUpdate', id: prtA.id, status: 'maintenance' });
+assertEq(prtA.status, 'maintenance', 'printerUpdate 标记维护中');
+printerModule2.handlePrint({}, { account: 'bob' }, prSpace, { type: 'printSubmit', printerId: prtA.id, fileName: 'x.pdf', pages: 1, copies: 1 });
+assert(prSent.some((m) => m.message && m.message.includes('不可用')), '维护中打印机不可提交');
+printerModule2.handlePrint({}, { account: 'admin' }, prSpace, { type: 'printerDelete', id: prtA.id });
+assertEq(prSpace.printers.length, 0, '无在途任务时可删除打印机');
+printerModule2.handlePrint({}, { account: 'admin' }, prSpace, { type: 'printerCreate', name: '喷墨机' });
+const prtB = prSpace.printers[0];
+printerModule2.handlePrint({}, { account: 'alice' }, prSpace, { type: 'printSubmit', printerId: prtB.id, fileName: 'a.pdf', pages: 1, copies: 1 });
+printerModule2.handlePrint({}, { account: 'admin' }, prSpace, { type: 'printerDelete', id: prtB.id });
+assert(prSent.some((m) => m.message && m.message.includes('无法删除')), '有待打印任务时不能删除打印机');
 
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);

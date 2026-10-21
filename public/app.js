@@ -41,9 +41,10 @@ const S = {
   lockers:{lockers:[],stats:{},reservations:[]},
   vehicles:{vehicles:[],stats:{},reservations:[]},
   lost:{items:[],stats:{}},
+  print:{printers:[],jobs:[],stats:{}},
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'],['schedule','我的日程','🗓️'],['cal','空间日历','📅'],['assets','资产台账','🗄️'],['keys','钥匙门禁','🔑'],['fridge','冰箱食品','🥤'],['parking','车辆停车','🚗'],['parcels','包裹快递','📦'],['lockers','储物柜','🗄️'],['vehicles','用车申请','🚘'],['lost','失物招领','🧢'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'],['schedule','我的日程','🗓️'],['cal','空间日历','📅'],['assets','资产台账','🗄️'],['keys','钥匙门禁','🔑'],['fridge','冰箱食品','🥤'],['parking','车辆停车','🚗'],['parcels','包裹快递','📦'],['lockers','储物柜','🗄️'],['vehicles','用车申请','🚘'],['lost','失物招领','🧢'],['print','文印服务','🖨️'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -98,6 +99,7 @@ function dispatch(m){
     case 'lockers': S.DB.lockers={lockers:m.lockers||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
     case 'vehicles': S.DB.vehicles={vehicles:m.vehicles||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
     case 'lostFound': S.DB.lost={items:m.items||[],stats:m.stats||{}}; break;
+    case 'print': S.DB.print={printers:m.printers||[],jobs:m.jobs||[],stats:m.stats||{}}; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; S.DB.repairStats=m.stats||null; break;
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
     case 'page': handlePage(m); break;
@@ -220,17 +222,17 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceCalendar','spaceTrend','notices','digest','assets','keys','fridge','parking','parcels','lockers','vehicles','lostFound'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceCalendar','spaceTrend','notices','digest','assets','keys','fridge','parking','parcels','lockers','vehicles','lostFound','print'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); else if(S.module==='cal') renderSpaceCalendar(); else if(S.module==='assets') renderAssets(); else if(S.module==='keys') renderKeys(); else if(S.module==='fridge') renderFridge(); else if(S.module==='parking') renderParking(); else if(S.module==='parcels') renderParcels(); else if(S.module==='lockers') renderLockers(); else if(S.module==='vehicles') renderVehicles(); else if(S.module==='lost') renderLost(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); else if(S.module==='cal') renderSpaceCalendar(); else if(S.module==='assets') renderAssets(); else if(S.module==='keys') renderKeys(); else if(S.module==='fridge') renderFridge(); else if(S.module==='parking') renderParking(); else if(S.module==='parcels') renderParcels(); else if(S.module==='lockers') renderLockers(); else if(S.module==='vehicles') renderVehicles(); else if(S.module==='lost') renderLost(); else if(S.module==='print') renderPrint(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
   else { b.style.display='none'; }
 }
 function renderAll(){ render(); }
-function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); if(mod==='keys') wsSend({type:'getKeys'}); if(mod==='fridge') wsSend({type:'getFridge'}); if(mod==='parking') wsSend({type:'getParking'}); if(mod==='parcels') wsSend({type:'getParcels'}); if(mod==='lockers') wsSend({type:'getLockers'}); if(mod==='vehicles') wsSend({type:'getVehicles'}); if(mod==='lost') wsSend({type:'getLost'}); }
+function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); if(mod==='keys') wsSend({type:'getKeys'}); if(mod==='fridge') wsSend({type:'getFridge'}); if(mod==='parking') wsSend({type:'getParking'}); if(mod==='parcels') wsSend({type:'getParcels'}); if(mod==='lockers') wsSend({type:'getLockers'}); if(mod==='vehicles') wsSend({type:'getVehicles'}); if(mod==='lost') wsSend({type:'getLost'}); if(mod==='print') wsSend({type:'getPrint'}); }
 
 /* 分页：广播已按最近 PAGE 下发，前端按 offset 加载更多 */
 const PAGE = 30;
@@ -2100,6 +2102,63 @@ function submitLostReport(){ wsSend({type:'lostReport',lostType:$('#lfType').val
 function lostResolve(id){ if(confirm('确认标记为已解决（已找回 / 已归还）？')) wsSend({type:'lostResolve',id}); }
 function lostReopen(id){ if(confirm('重新开启该记录？')) wsSend({type:'lostReopen',id}); }
 function lostDelete(id){ if(confirm('确认删除该失物招领记录？')) wsSend({type:'lostDelete',id}); }
+/* 文印 / 共享打印机 */
+function renderPrint(){
+  const pr=S.DB.print||{printers:[],jobs:[],stats:{}}; const st=pr.stats||{};
+  const pStatusLabel={ok:'可用',offline:'离线',maintenance:'维护中'};
+  const pStatusBadge={ok:'ok',offline:'bad',maintenance:'warn'};
+  const jStatusLabel={pending:'待打印',done:'待领取',picked:'已取走',cancelled:'已取消'};
+  const jStatusBadge={pending:'warn',done:'info',picked:'ok',cancelled:'bad'};
+  const myJobs=pr.jobs.filter(j=>j.account===S.me.account);
+  $('#main').innerHTML = `<div class="topbar"><div><h1>🖨️ 文印服务</h1><div class="sub">共享打印机登记、打印任务队列、已打印待取闭环</div></div>
+    ${S.admin?'<button class="btn pri" onclick="openPrinterCreate()">新增打印机</button>':''}</div>
+    <div class="cards">
+      <div class="card"><h3>🖨️ 打印机</h3><div class="num">${st.printers||0}</div><div class="meta">可用 ${st.byStatus?.ok||0} · 离线 ${st.byStatus?.offline||0} · 维护 ${st.byStatus?.maintenance||0}</div></div>
+      <div class="card"><h3>📥 待打印</h3><div class="num">${st.pendingJobs||0}</div><div class="meta">今日新任务 ${st.pendingToday||0}</div></div>
+      <div class="card"><h3>✅ 今日已打印</h3><div class="num">${st.doneToday||0}</div><div class="meta">我的待取 ${myJobs.filter(j=>j.status==='done').length} 件</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">🖨️ 打印机清单</h3>
+    <div class="list">${pr.printers.length?pr.printers.map(x=>`
+      <div class="row"><span><span class="who">${esc(x.name)} <span class="badge ${pStatusBadge[x.status]||''}">${pStatusLabel[x.status]||x.status}</span></span>
+        <div class="meta">${x.color?'🖍️ 彩色':'⚫ 黑白'}${x.duplex?' · 📄 双面':''}${x.location?' · '+esc(x.location):''}${x.pendingJobs?` · 排队 ${x.pendingJobs}`:''}</div>
+      </span><span class="fs">${S.admin?`<button class="btn sm" onclick="openPrinterEdit('${x.id}')">编辑</button><button class="btn danger sm" onclick="deletePrinter('${x.id}')">删除</button>`:''}${x.status==='ok'?`<button class="btn sm" onclick="openPrintSubmit('${x.id}')">打印</button>`:''}</span></div>`).join(''):'<div class="empty">暂无打印机</div>'}</div>
+    <h3 style="margin:22px 0 10px">📋 打印队列</h3>
+    <div class="list">${pr.jobs.length?pr.jobs.map(j=>`
+      <div class="row"><span><span class="who">${esc(j.fileName)} <span class="badge ${jStatusBadge[j.status]||''}">${jStatusLabel[j.status]||j.status}</span></span>
+        <div class="meta">${esc(j.printerName)} · ${j.pages}页 ×${j.copies}份${j.color?' · 彩色':''}${j.duplex?' · 双面':''}${j.requesterName?' · '+esc(j.requesterName):''}${j.createdAt?' · '+fmtTime(j.createdAt):''}</div>
+      </span><span class="fs">${S.admin&&j.status==='pending'?`<button class="btn pri sm" onclick="printDone('${j.id}')">标记已打印</button>`:''}${j.status==='done'&&(j.account===S.me.account||S.admin)?`<button class="btn pri sm" onclick="printPick('${j.id}')">取走</button>`:''}${(S.admin)&&(j.status==='pending'||j.status==='done')?`<button class="btn danger sm" onclick="printCancel('${j.id}')">取消</button>`:''}</span></div>`).join(''):'<div class="empty">暂无打印任务</div>'}</div>`;
+}
+function openPrinterCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>新增打印机</h2><div class="form">
+  <div class="fld"><label>名称</label><input id="psName" placeholder="如：3F 激光打印机"></div>
+  <div class="fld"><label>位置</label><input id="psLoc" placeholder="如：3F 茶水间旁"></div>
+  <div class="fld"><label><input type="checkbox" id="psColor"> 支持彩色</label></div>
+  <div class="fld"><label><input type="checkbox" id="psDuplex"> 支持双面</label></div>
+  <div class="fld"><label>初始状态</label><select id="psStatus"><option value="ok">可用</option><option value="offline">离线</option><option value="maintenance">维护中</option></select></div>
+  <div class="fld"><label>备注</label><input id="psNote" placeholder="可选"></div>
+  <button class="btn pri" onclick="submitPrinterCreate()">创建</button></div>`); }
+function submitPrinterCreate(){ wsSend({type:'printerCreate',name:$('#psName').value,location:$('#psLoc').value,color:$('#psColor').checked,duplex:$('#psDuplex').checked,status:$('#psStatus').value,note:$('#psNote').value}); closeModal(); }
+function openPrinterEdit(id){ const p=(S.DB.print&&S.DB.print.printers||[]).find(x=>x.id===id); if(!p) return; openModal(`<span class="close" onclick="closeModal()">×</span><h2>编辑打印机 · ${esc(p.name)}</h2><div class="form">
+  <div class="fld"><label>名称</label><input id="psName" value="${esc(p.name)}"></div>
+  <div class="fld"><label>位置</label><input id="psLoc" value="${esc(p.location||'')}"></div>
+  <div class="fld"><label><input type="checkbox" id="psColor" ${p.color?'checked':''}> 支持彩色</label></div>
+  <div class="fld"><label><input type="checkbox" id="psDuplex" ${p.duplex?'checked':''}> 支持双面</label></div>
+  <div class="fld"><label>状态</label><select id="psStatus"><option value="ok" ${p.status==='ok'?'selected':''}>可用</option><option value="offline" ${p.status==='offline'?'selected':''}>离线</option><option value="maintenance" ${p.status==='maintenance'?'selected':''}>维护中</option></select></div>
+  <div class="fld"><label>备注</label><input id="psNote" value="${esc(p.note||'')}"></div>
+  <button class="btn pri" onclick="submitPrinterEdit('${id}')">保存</button></div>`); }
+function submitPrinterEdit(id){ wsSend({type:'printerUpdate',id,name:$('#psName').value,location:$('#psLoc').value,color:$('#psColor').checked,duplex:$('#psDuplex').checked,status:$('#psStatus').value,note:$('#psNote').value}); closeModal(); }
+function deletePrinter(id){ const p=(S.DB.print&&S.DB.print.printers||[]).find(x=>x.id===id); if(confirm('确认删除打印机「'+(p?p.name:'')+'」？')) wsSend({type:'printerDelete',id}); }
+function openPrintSubmit(id){ const p=(S.DB.print&&S.DB.print.printers||[]).find(x=>x.id===id); openModal(`<span class="close" onclick="closeModal()">×</span><h2>提交打印 · ${esc(p?p.name:'')}</h2><div class="form">
+  <div class="fld"><label>文件名</label><input id="pjFile" placeholder="如：周报-0915.pdf"></div>
+  <div class="fld"><label>页数</label><input id="pjPages" type="number" value="1" min="1"></div>
+  <div class="fld"><label>份数</label><input id="pjCopies" type="number" value="1" min="1" max="99"></div>
+  <div class="fld"><label><input type="checkbox" id="pjColor"> 彩色（打印机支持时）</label></div>
+  <div class="fld"><label><input type="checkbox" id="pjDuplex"> 双面（打印机支持时）</label></div>
+  <div class="fld"><label>备注</label><input id="pjNote" placeholder="选填"></div>
+  <button class="btn pri" onclick="submitPrint('${id}')">提交打印</button></div>`); }
+function submitPrint(id){ wsSend({type:'printSubmit',printerId:id,fileName:$('#pjFile').value,pages:+$('#pjPages').value||1,copies:+$('#pjCopies').value||1,color:$('#pjColor').checked,duplex:$('#pjDuplex').checked,note:$('#pjNote').value}); closeModal(); }
+function printDone(id){ wsSend({type:'printDone',id}); }
+function printPick(id){ if(confirm('确认取走这份打印件？')) wsSend({type:'printPick',id}); }
+function printCancel(id){ if(confirm('确认取消该打印任务？')) wsSend({type:'printCancel',id}); }
 /* 统一空间搜索 */
 const SEARCH_MOD = { rooms:'rooms', tools:'tools', materials:'materials', repairs:'repairs', tasks:'tasks', knowledge:'knowledge', notices:'dash', assets:'assets', users:null };
 const SEARCH_LABEL = { rooms:'会议室', tools:'设备', materials:'申领', repairs:'报修', tasks:'待办', knowledge:'知识库', notices:'公告', assets:'资产', users:'人员' };

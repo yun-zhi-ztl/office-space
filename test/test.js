@@ -2646,6 +2646,37 @@ async function runTests() {
     wL1.close(); wL2.close();
   }
 
+  // ========== 测试61: 文印服务 ==========
+  console.log('\n📋 测试61: 文印服务（打印机/提交/已打印/取走/维护）');
+  {
+    const spPr = (await httpJson('POST', '/api/spaces', { name: '文印办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aPr = 'pr_a_' + runKey, bPr = 'pr_b_' + runKey;
+    await reg(aPr, 'pw', '文印管理员'); await reg(bPr, 'pw', '文印成员');
+    const wP1 = await createWSClient(); await loginTo(wP1, spPr.id, aPr, 'pw');
+    const wP2 = await createWSClient(); await loginTo(wP2, spPr.id, bPr, 'pw');
+    await sendMsg(wP1, { type: 'printerCreate', name: '3F 激光机', location: '茶水间', color: true, duplex: true });
+    let pr0 = last(wP2, 'print');
+    assert(pr0 && pr0.printers.length === 1 && pr0.printers[0].status === 'ok', 'admin 新增打印机');
+    const prId = pr0.printers[0].id;
+    await sendMsg(wP2, { type: 'printSubmit', printerId: prId, fileName: '周报.pdf', pages: 3, copies: 2 });
+    pr0 = last(wP2, 'print');
+    const jobId = pr0.jobs.find(j => j.fileName === '周报.pdf').id;
+    assert(pr0.jobs.some(j => j.id === jobId && j.status === 'pending'), '成员提交打印任务');
+    await sendMsg(wP2, { type: 'printPick', id: jobId });
+    const errPk = mk(wP2, 'error').pop();
+    assert(errPk && errPk.message.includes('待打印完成'), '未打印完成不能取走');
+    await sendMsg(wP1, { type: 'printDone', id: jobId });
+    pr0 = last(wP1, 'print');
+    assert(pr0.jobs.find(j => j.id === jobId).status === 'done', '管理员标记已打印');
+    await sendMsg(wP1, { type: 'printerUpdate', id: prId, status: 'maintenance' });
+    pr0 = last(wP1, 'print');
+    assert(pr0.printers[0].status === 'maintenance', '标记打印机维护中');
+    await sendMsg(wP1, { type: 'printSubmit', printerId: prId, fileName: 'x.pdf', pages: 1, copies: 1 });
+    const errMaint = mk(wP1, 'error').pop();
+    assert(errMaint && errMaint.message.includes('不可用'), '维护中打印机不可提交');
+    wP1.close(); wP2.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);
