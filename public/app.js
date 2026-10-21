@@ -483,6 +483,9 @@ function renderDash(){
     ${S.weeklyReport?`<h3 style="margin:22px 0 10px">📅 本周空间周报 <span class="badge info">${fmtTime(S.weeklyReport.weekStart)}</span></h3><div class="list">
       <div class="row"><span>会议 ${S.weeklyReport.meetings} 场 / ${Math.round(S.weeklyReport.meetingMinutes/60)}h</span></div>
       <div class="row"><span>借用 ${S.weeklyReport.borrows} · 申领 ${S.weeklyReport.requests}（已满足 ${S.weeklyReport.fulfilledMaterials}） · 报修 ${S.weeklyReport.repairs}（已解决 ${S.weeklyReport.resolvedRepairs}） · 访客 ${S.weeklyReport.visitors} · 工位 ${S.weeklyReport.desks||0} · 外出 ${S.weeklyReport.ooo||0}</span></div>
+      <div class="row"><span>新到包裹 ${S.weeklyReport.parcels||0}（已取 ${S.weeklyReport.parcelsPicked||0}） · 储物柜 ${S.weeklyReport.lockers||0} · 停车 ${S.weeklyReport.parking||0} · 用车 ${S.weeklyReport.vehicles||0} · 文印 ${S.weeklyReport.printJobs||0}（已打印 ${S.weeklyReport.printDone||0}） · 失物 ${S.weeklyReport.lost||0}（找回 ${S.weeklyReport.lostResolved||0}）</span></div>
+      ${S.weeklyReport.parcelsOverdue?`<div class="row"><span>📬 当前逾期包裹 ${S.weeklyReport.parcelsOverdue}</span></div>`:''}
+      ${S.weeklyReport.vehiclesInUse?`<div class="row"><span>🚘 当前行驶车辆 ${S.weeklyReport.vehiclesInUse}</span></div>`:''}
       ${S.weeklyReport.openRepairsCount?`<div class="row"><span>⏳ 未办结报修 ${S.weeklyReport.openRepairsCount}</span></div>`:''}
       ${S.weeklyReport.pendingMaterialsCount?`<div class="row"><span>⏳ 待处理申领 ${S.weeklyReport.pendingMaterialsCount}</span></div>`:''}
       ${(S.weeklyReport.lowStockTools||[]).length?`<div class="row"><span>⚠️ 库存告急：${S.weeklyReport.lowStockTools.map(t=>`${esc(t.name)} ${t.available}/${t.minAvailable}`).join('、')}</span></div>`:''}

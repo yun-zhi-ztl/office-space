@@ -2234,6 +2234,17 @@ function createContext() {
     const openRepairs = [...space.repairs.values()].filter((r) => r.status === 'reported' || r.status === 'in_progress');
     const pendingMaterials = [...space.materialRequests.values()].filter((m) => m.status === 'pending');
     const meetingMinutes = meetings.reduce((s, r) => s + Math.max(0, Math.round((Math.min(r.endAt, weekEnd) - r.startAt) / 60000)), 0);
+    // 新模块本周统计
+    const parcelsNew = [...space.parcels.values()].filter((p) => inWeek(p.createdAt));
+    const parcelsPicked = [...space.parcels.values()].filter((p) => p.pickedAt && inWeek(p.pickedAt));
+    const lockers = [...space.lockerReservations.values()].filter((r) => inWeek(r.createdAt));
+    const parkingRs = [...space.parkingReservations.values()].filter((r) => inWeek(r.createdAt));
+    const vehicles = [...space.vehicleReservations.values()].filter((r) => inWeek(r.createdAt));
+    const vehiclesInUse = [...space.vehicleReservations.values()].filter((r) => r.status === 'checked_in');
+    const printJobs = [...space.printJobs.values()].filter((j) => inWeek(j.createdAt));
+    const printDone = [...space.printJobs.values()].filter((j) => j.doneAt && inWeek(j.doneAt));
+    const lost = [...space.lostFound].filter((x) => inWeek(x.createdAt));
+    const lostResolved = [...space.lostFound].filter((x) => x.status === 'resolved' && x.resolvedAt && inWeek(x.resolvedAt));
     return {
       weekStart, weekEnd,
       meetings: meetings.length, meetingMinutes,
@@ -2246,6 +2257,11 @@ function createContext() {
       desks: desks.length,
       events: events.length,
       polls: polls.length,
+      parcels: parcelsNew.length, parcelsPicked: parcelsPicked.length, parcelsOverdue: parcelStats(space).overdue,
+      lockers: lockers.length, parking: parkingRs.length,
+      vehicles: vehicles.length, vehiclesInUse: vehiclesInUse.length,
+      printJobs: printJobs.length, printDone: printDone.length,
+      lost: lost.length, lostResolved: lostResolved.length,
       openRepairsCount: openRepairs.length,
       pendingMaterialsCount: pendingMaterials.length,
       lowStockTools: lowStock,

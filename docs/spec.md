@@ -176,6 +176,7 @@
 - `spaceRiskBoard(space, now)`：聚合空间内全部迟检 / 逾期 / 待处理项——迟检资产、逾期包裹、逾期未还设备、逾期未清储物柜、待审批会议预约、未办结报修、待处理申领、待审批请假，逐项带 `type` / `priority`（高 / 中）/ `title` / `sub` / `ts`。
 - 按高优先级在前、时间倒序返回 `{ total, items(≤50) }`；概览 `digest` 暴露 `riskCount`。
 - `dueDailyRiskReminder(space, now)`：每空间每天（按 `todayKey` 去重）把仍有风险项的汇总推送给管理员，消息类型 `dailyRiskReminder`（含 `board`：总数 / 按类型计数 / 前 8 条），无风险项当天不触发。
+- `buildWeeklyReport` 在本周会议 / 借用 / 申领 / 报修 / 访客等基础上，新增新模块统计：`parcels`（本周新到）/ `parcelsPicked` / `parcelsOverdue`（当前逾期）/ `lockers` / `parking` / `vehicles` / `vehiclesInUse` / `printJobs` / `printDone` / `lost` / `lostResolved`。
 
 ### 物资申领（materials）
 - `material_request`: `{ id, requesterAccount, requesterName, name, qty, unit, reason, priority, status, handlerAccount?, handlerName?, createdAt, handledAt? }`

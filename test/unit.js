@@ -1804,6 +1804,30 @@ assert(ex.data.admins.includes('boss'), '导出管理员列表');
 const exJson = JSON.stringify(ex);
 assert(exJson.includes('顺丰') && exJson.includes('going'), '结果可安全 JSON 序列化');
 
+// ---------- 空间周报纳入新模块 ----------
+console.log('\n📋 67. 空间周报纳入新模块');
+const wrNow = Date.now();
+const wrs = api.createSpace('s67', '周报空间', 1, 1);
+wrs.parcels.set('p1', { id: 'p1', courier: '顺丰', status: 'incoming', createdAt: wrNow - 3600000, pickedAt: wrNow, lastRemindedAt: 0 });
+wrs.parcels.set('p2', { id: 'p2', courier: '中通', status: 'incoming', createdAt: wrNow - 3600000, expectedAt: wrNow - 1000, lastRemindedAt: 0 });
+wrs.lockerReservations.set('lr1', { id: 'lr1', lockerId: 'lk1', status: 'reserved', createdAt: wrNow - 1000 });
+wrs.parkingReservations.set('pr1', { id: 'pr1', spotId: 'pk1', status: 'reserved', createdAt: wrNow - 1000 });
+wrs.vehicleReservations.set('vr1', { id: 'vr1', vehicleId: 'vh1', status: 'checked_in', createdAt: wrNow - 1000 });
+wrs.printJobs.set('pj1', { id: 'pj1', printerId: 'prt1', status: 'done', createdAt: wrNow - 1000, doneAt: wrNow - 500 });
+wrs.lostFound.push({ id: 'lf1', status: 'resolved', createdAt: wrNow - 1000, resolvedAt: wrNow - 500 });
+const wr = api.buildWeeklyReport(wrs, wrNow);
+assertEq(wr.parcels, 2, '周报统计本周新到包裹');
+assertEq(wr.parcelsPicked, 1, '周报统计本周已取包裹');
+assert(wr.parcelsOverdue >= 1, '周报统计当前逾期包裹');
+assertEq(wr.lockers, 1, '周报统计储物柜使用');
+assertEq(wr.parking, 1, '周报统计停车使用');
+assertEq(wr.vehicles, 1, '周报统计用车');
+assertEq(wr.vehiclesInUse, 1, '周报统计行驶车辆');
+assertEq(wr.printJobs, 1, '周报统计文印任务');
+assertEq(wr.printDone, 1, '周报统计已打印');
+assertEq(wr.lost, 1, '周报统计失物');
+assertEq(wr.lostResolved, 1, '周报统计找回失物');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);
