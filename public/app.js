@@ -97,6 +97,9 @@ function dispatch(m){
     case 'parking': S.DB.parking={spots:m.spots||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
     case 'parcels': S.DB.parcels={parcels:m.parcels||[],total:m.total||0,stats:m.stats||{}}; break;
     case 'dailyRiskReminder': { const b=m.board||{}; const parts=Object.entries(b.byType||{}).map(([k,v])=>`${RISK_LABEL[k]||k} ${v}`).join('、'); toast('⚠️ 今日风险待办 '+(b.total||0)+' 项'+(parts?'：'+parts:''),'warn'); break; }
+    case 'spaceExport': {
+      const ex=m.export; if(ex&&ex.data){ const blob=new Blob([JSON.stringify(ex,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=(S.space?S.space.name:'office')+'-backup-'+Date.now()+'.json'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); toast('💾 空间数据已导出，请查收下载','success'); } break;
+    }
     case 'searchResults': renderSearchResult(m); break;
     case 'lockers': S.DB.lockers={lockers:m.lockers||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
     case 'vehicles': S.DB.vehicles={vehicles:m.vehicles||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
@@ -316,6 +319,7 @@ function renderSidebar(){
       </select></div>
       <button class="btn sm ${em?'danger':''}" onclick="toggleEmergency()">🆘 紧急模式</button>
       ${S.admin?`<button class="btn sm" onclick="openSpaceSettings()">⚙️ 空间设置</button>`:''}
+      ${S.admin?`<button class="btn sm" onclick="exportSpace()">💾 导出备份</button>`:''}
       ${badgeCount?`<div class="hint" style="margin-bottom:8px">🏅 徽章 ${badgeCount} 枚</div>`:''}
       <button class="btn sm" onclick="openProfile()">个人资料</button>
       <button class="btn sm" onclick="doLogout()">退出登录</button>
@@ -2214,6 +2218,7 @@ function renderRisk(){
 }
 function refreshRisk(){ wsSend({type:'getRisk'}); }
 function jumpRisk(type){ const mod=RISK_JUMP[type]; if(mod) switchModule(mod); }
+function exportSpace(){ wsSend({type:'spaceExport'}); }
 /* 统一空间搜索 */
 const SEARCH_MOD = { rooms:'rooms', tools:'tools', materials:'materials', repairs:'repairs', tasks:'tasks', knowledge:'knowledge', notices:'dash', assets:'assets', users:null };
 const SEARCH_LABEL = { rooms:'会议室', tools:'设备', materials:'申领', repairs:'报修', tasks:'待办', knowledge:'知识库', notices:'公告', assets:'资产', users:'人员' };

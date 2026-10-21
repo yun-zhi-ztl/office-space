@@ -2751,6 +2751,26 @@ async function runTests() {
     wA.close(); wB.close();
   }
 
+  // ========== 测试65: 空间数据导出 ==========
+  console.log('\n📋 测试65: 空间数据导出（JSON 备份，管理员限定）');
+  {
+    const spX = (await httpJson('POST', '/api/spaces', { name: '导出办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aX = 'ex_a_' + runKey, bX = 'ex_b_' + runKey;
+    await reg(aX, 'pw', '导出管理员'); await reg(bX, 'pw', '导出成员');
+    const wA = await createWSClient(); await loginTo(wA, spX.id, aX, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spX.id, bX, 'pw');
+    await sendMsg(wA, { type: 'roomCreate', name: '导出A', capacity: 4 });
+    await sendMsg(wB, { type: 'spaceExport' });
+    const errX = mk(wB, 'error').pop();
+    assert(errX && errX.message.includes('仅管理员'), '非管理员导出被拒');
+    await sendMsg(wA, { type: 'spaceExport' });
+    const exMsg = last(wA, 'spaceExport');
+    assert(exMsg && exMsg.export && exMsg.export.meta && exMsg.export.meta.id === spX.id, '管理员可导出空间 JSON');
+    assert(Array.isArray(exMsg.export.data.rooms) && exMsg.export.data.rooms.some(r => r.name === '导出A'), '导出含会议室数据');
+    assert(typeof exMsg.export.meta.exportedAt === 'number', '导出含时间戳');
+    wA.close(); wB.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

@@ -1785,6 +1785,25 @@ assert(d3 && d3.total >= 2, '次日重新催办');
 const okSp = api.createSpace('s65b', '干净空间', 1, 1);
 assertEq(api.dueDailyRiskReminder(okSp, drNow), null, '无风险项不触发催办');
 
+// ---------- 空间数据导出 ----------
+console.log('\n📋 66. 空间数据导出（JSON 备份）');
+const xsp = api.createSpace('s66', '导出空间', 1, 1);
+xsp.rooms.push({ id: 'rm1', name: 'Rm1', capacity: 4 });
+xsp.tools.push({ id: 'tl1', name: '手机' });
+xsp.events.set('ev1', { id: 'ev1', title: '团建', hostAccount: 'a', rsvps: new Map([['a', 'going'], ['b', 'maybe']]) });
+xsp.parcels.set('pc1', { id: 'pc1', courier: '顺丰', status: 'incoming' });
+xsp.materialRequests.set('mr1', { id: 'mr1', name: '电池', status: 'pending' });
+xsp.admins.add('boss');
+const ex = api.spaceExport(xsp);
+assert(ex && ex.meta && ex.meta.id === xsp.id && ex.meta.exportedAt, '导出含元信息');
+assert(ex.data.rooms.length === 1 && ex.data.tools.length === 1, '导出数组集合');
+assert(ex.data.parcels.pc1 && ex.data.parcels.pc1.courier === '顺丰', '导出 Map 集合转对象');
+assert(ex.data.events.ev1.rsvps && ex.data.events.ev1.rsvps.a === 'going', '导出嵌套 Map 转对象');
+assert(ex.data.materialRequests.mr1 && ex.data.materialRequests.mr1.name === '电池', '导出多个 Map 集合');
+assert(ex.data.admins.includes('boss'), '导出管理员列表');
+const exJson = JSON.stringify(ex);
+assert(exJson.includes('顺丰') && exJson.includes('going'), '结果可安全 JSON 序列化');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);
