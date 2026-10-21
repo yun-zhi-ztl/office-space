@@ -101,6 +101,7 @@ function dispatch(m){
     case 'spaceExport': {
       const ex=m.export; if(ex&&ex.data){ const blob=new Blob([JSON.stringify(ex,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=(S.space?S.space.name:'office')+'-backup-'+Date.now()+'.json'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); toast('💾 空间数据已导出，请查收下载','success'); } break;
     }
+    case 'spaceImported': if(m.result&&m.result.ok){ toast('📥 已导入 '+m.result.count+' 个集合','success'); } else { toast('📥 导入失败：'+(m.result&&m.result.error||'格式错误'),'error'); } break;
     case 'searchResults': renderSearchResult(m); break;
     case 'lockers': S.DB.lockers={lockers:m.lockers||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
     case 'vehicles': S.DB.vehicles={vehicles:m.vehicles||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
@@ -325,6 +326,7 @@ function renderSidebar(){
       <button class="btn sm ${em?'danger':''}" onclick="toggleEmergency()">🆘 紧急模式</button>
       ${S.admin?`<button class="btn sm" onclick="openSpaceSettings()">⚙️ 空间设置</button>`:''}
       ${S.admin?`<button class="btn sm" onclick="exportSpace()">💾 导出备份</button>`:''}
+      ${S.admin?`<button class="btn sm" onclick="openSpaceImport()">📥 导入备份</button>`:''}
       ${badgeCount?`<div class="hint" style="margin-bottom:8px">🏅 徽章 ${badgeCount} 枚</div>`:''}
       <button class="btn sm" onclick="openProfile()">个人资料</button>
       <button class="btn sm" onclick="doLogout()">退出登录</button>
@@ -2265,6 +2267,18 @@ function renderSuggestSlots(slots){
   box.innerHTML=slots.length?`<div class="list">${slots.map(s=>`<div class="row"><span><span class="who">${s.date} ${fmtTime(s.startAt)} → ${fmtTime(s.endAt)}</span></span></div>`).join('')}</div><div class="hint">共 ${slots.length} 个可用时段</div>`:'<div class="hint">未来几天暂无可用时段，试试加长天数或缩短时长</div>';
 }
 function exportSpace(){ wsSend({type:'spaceExport'}); }
+/* 空间数据导入（覆盖恢复到当前空间） */
+function openSpaceImport(){
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>导入空间备份</h2><div class="form">
+    <div class="fld"><label>选择备份文件（.json）</label><input id="impFile" type="file" accept=".json,application/json" onchange="submitSpaceImportFile(this.files[0])"></div>
+    <div class="hint">⚠️ 导入会用备份内容覆盖当前空间的对应集合（用于迁移 / 恢复）。仅管理员可操作。</div></div>`);
+}
+function submitSpaceImportFile(file){
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=()=>{ try { const backup=JSON.parse(reader.result); wsSend({type:'spaceImport',backup}); toast('📥 正在导入…','info'); } catch(e){ toast('📥 无法解析该备份文件','error'); } };
+  reader.readAsText(file);
+}
 /* 备忘提醒 */
 const MEMO_REPEAT = { none:'一次性', daily:'每天', weekly:'每周', monthly:'每月' };
 function renderMemo(){

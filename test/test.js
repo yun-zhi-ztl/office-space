@@ -2864,6 +2864,36 @@ async function runTests() {
     wA.close();
   }
 
+  // ========== 测试70: 空间数据导入（迁移到新空间） ==========
+  console.log('\n📋 测试70: 空间数据导入（迁移到新空间，管理员限定）');
+  {
+    // 源空间：造数据并导出
+    const spA = (await httpJson('POST', '/api/spaces', { name: '源办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aA = 'im_a_' + runKey;
+    await reg(aA, 'pw', '源管理员');
+    const wA = await createWSClient(); await loginTo(wA, spA.id, aA, 'pw');
+    await sendMsg(wA, { type: 'roomCreate', name: '迁移会议室', capacity: 4 });
+    await sendMsg(wA, { type: 'parcelCreate', recipientAccount: aA, courier: '圆通' });
+    await sendMsg(wA, { type: 'spaceExport' });
+    const backup = last(wA, 'spaceExport').export;
+    assert(backup && backup.data && Array.isArray(backup.data.rooms), '源空间可导出');
+    wA.close();
+    // 新空间：用源管理员重新注册并导入
+    const spB = (await httpJson('POST', '/api/spaces', { name: '目标办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aB = 'im_b_' + runKey;
+    await reg(aB, 'pw', '目标管理员');
+    const wB = await createWSClient(); await loginTo(wB, spB.id, aB, 'pw');
+    await sendMsg(wB, { type: 'spaceImport', backup });
+    let impRes = last(wB, 'spaceImported');
+    assert(impRes && impRes.result && impRes.result.ok, '新空间可导入备份');
+    let ex2 = null;
+    for (let k = 0; k < 3 && !ex2; k++) { await sendMsg(wB, { type: 'spaceExport' }, 500); ex2 = (last(wB, 'spaceExport') || {}).export; }
+    assert(ex2 && ex2.data && Array.isArray(ex2.data.rooms), '导入后可再次导出');
+    assert(ex2.data.rooms.some(r => r.name === '迁移会议室'), '导入后含会议室');
+    assert(ex2.data.parcels && Object.keys(ex2.data.parcels).length >= 1, '导入后含包裹');
+    wB.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

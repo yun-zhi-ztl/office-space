@@ -1928,6 +1928,30 @@ const slots2 = api.suggestFreeSlots(sugSp, 'rm1', 60, sgNow, 3);
 assert(slots2.length >= slots.length, '未来天数增多可用时段不减');
 assertEq(api.suggestFreeSlots(sugSp, 'nope', 60, sgNow, 1).length, 0, '房间不存在返回空');
 
+// ---------- 空间数据导入（恢复 / 迁移） ----------
+console.log('\n📋 73. 空间数据导入（恢复 / 迁移）');
+const impSrc = api.createSpace('s73', '源空间', 1, 1);
+impSrc.rooms.push({ id: 'rm1', name: 'Rm', capacity: 4 });
+impSrc.tools.push({ id: 'tl1', name: '手机' });
+impSrc.events.set('ev1', { id: 'ev1', title: '团建', hostAccount: 'a', rsvps: { a: 'going', b: 'maybe' } });
+impSrc.polls.set('po1', { id: 'po1', title: '午饭选哪', options: [{ id: 'o1', text: 'A' }], votes: { a: 'o1' } });
+impSrc.knowledge.set('kn1', { id: 'kn1', title: '投影操作', likes: ['a'], comments: [{ id: 'c1', account: 'a', text: 'ok' }] });
+impSrc.roomReservations.set('rr1', { id: 'rr1', roomId: 'rm1', title: '评审', ownerAccount: 'a', status: 'pending', startAt: 1, endAt: 2, attendees: ['b'] });
+impSrc.attendance.set('att::2026-10-20', { id: 'att', account: 'a', date: '2026-10-20', status: 'checked_out' });
+impSrc.borrows.set('bw1', { id: 'bw1', toolId: 'tl1', borrowerName: 'a', status: 'borrowed' });
+impSrc.admins.add('bossa');
+const bk = api.spaceExport(impSrc);
+const impDst = api.createSpace('s73b', '目标空间', 1, 1);
+const resImp = api.spaceImport(impDst, bk);
+assert(resImp.ok && resImp.count >= 3, '导入成功并返回导入集合数');
+assert(impDst.rooms.length === 1 && impDst.rooms[0].name === 'Rm', '数组集合恢复');
+assert(impDst.events instanceof Map && impDst.events.get('ev1').rsvps.a === 'going', 'Map 集合恢复且嵌套对象保持');
+assert(impDst.polls.get('po1').votes.a === 'o1' && impDst.knowledge.get('kn1').likes.includes('a'), '对象 / 数组嵌套字段恢复');
+assert(impDst.roomReservations instanceof Map && impDst.roomReservations.get('rr1').title === '评审', '会议室预约 Map 恢复');
+assert(impDst.admins instanceof Set && impDst.admins.has('bossa'), '管理员集合恢复');
+assertEq(JSON.stringify(bk.data), JSON.stringify(api.spaceExport(impDst).data), '往返导出保持一致（备份保真）');
+assert(!api.spaceImport(api.createSpace('s73c', 'x', 1, 1), null).ok, '非法备份被拒绝');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

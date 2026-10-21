@@ -169,6 +169,12 @@ wss.on('connection', (ws) => {
       if (!api.isAdmin(space, user.account)) return api.sendTo(ws, api.serError('仅管理员可导出空间数据'));
       api.sendTo(ws, { type: 'spaceExport', export: api.spaceExport(space) }); return;
     }
+    if (msg.type === 'spaceImport') {
+      if (!api.isAdmin(space, user.account)) return api.sendTo(ws, api.serError('仅管理员可导入空间数据'));
+      const result = api.spaceImport(space, msg.backup);
+      api.broadcastAll(space);
+      api.sendTo(ws, { type: 'spaceImported', result }); return;
+    }
     if (msg.type === 'getReminders') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'reminders', reminders: api.remindersPublic(space, info).filter((r) => r.account === user.account) }); return; }
     if (msg.type === 'getSpaceTrend') { api.sendTo(ws, { type: 'spaceTrend', trend: api.buildSpaceTrend(space, msg.days) }); return; }
     if (msg.type === 'getAttendanceCalendar') { api.sendTo(ws, { type: 'attendanceCalendar', calendar: api.attendanceCalendar(space, user.account, msg.year, msg.month) }); return; }
