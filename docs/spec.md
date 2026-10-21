@@ -120,6 +120,24 @@
   - `spotCancel` 仅待签到可取消并释放车位；`spotCheckin` / `spotCheckout` 由预约人或管理员操作，签出后 `available += 1`。
   - 删除车位前校验该车位无 `reserved` / `checked_in` 预约。
 
+### 包裹 / 快递（parcels）
+- `parcel`: `{ id, recipientAccount, recipientName?, courier, trackingNumber?, remark?, status, expectedAt?, pickedAt?, returnedAt?, createdAt, lastRemindedAt? }`
+  - 状态：`incoming`（待取）/ `picked`（已取）/ `returned`（已退回）/ `cancelled`（已取消）。
+  - `parcelCreate` 由管理员登记，收件人须在当前空间；`parcelPick` 本人或管理员可领取（非本人的普通成员被拒）。
+  - `parcelReturn` / `parcelCancel` 仅管理员可操作且仅限 `incoming`。
+  - 逾期催收：`parcelRemind` 一次性提醒所有 `incoming` 且已过 `expectedAt`、尚未提醒过的包裹收件人，按 `lastRemindedAt` 去重。
+  - 待取 / 已取 / 退回 / 取消 / 逾期统计由 `parcelStats` 聚合。
+
+### 储物柜 / 寄存（lockers）
+- `locker`: `{ id, name, type, total, available, location?, note? }`
+  - `type`：`regular`（普通）/ `valuable`（贵重）/ `temporary`（临时）。
+- `locker_reservation`: `{ id, lockerId, account, status, createdAt, checkedInAt?, checkedOutAt?, dueAt?, returnedAt?, lastRemindedAt? }`
+  - 状态：`reserved`（待签到）/ `checked_in`（已使用）/ `checked_out`（已归还）/ `cancelled`（已取消）。
+  - `lockerCreate` / `lockerDelete` 由管理员维护；预约时校验 `available >= 1`，成功后 `available -= 1`。
+  - `lockerReserve` / `lockerCancel` / `lockerCheckin` / `lockerCheckout` 由本人或管理员操作；签退或取消后 `available += 1`。
+  - 删除储物柜前校验该柜无 `reserved` / `checked_in` 预约。
+  - 逾期催还：`lockerRemind` 一次性提醒所有逾期未处理的预约（`dueAt` 已过且未提醒），按 `lastRemindedAt` 去重。
+
 ### 物资申领（materials）
 - `material_request`: `{ id, requesterAccount, requesterName, name, qty, unit, reason, priority, status, handlerAccount?, handlerName?, createdAt, handledAt? }`
   - 状态：`pending` / `fulfilled` / `cancelled`
@@ -338,15 +356,20 @@
 | `fridgeTake` / `fridgeRestock` / `fridgeReturn` | 取用 / 补货 / 归还冰箱物品 | member / admin / owner |
 | `spotCreate` / `spotDelete` | 新增 / 删除停车位 | admin |
 | `spotReserve` / `spotCancel` / `spotCheckin` / `spotCheckout` | 预约 / 取消 / 签到 / 签退停车位 | member / owner / admin |
+| `parcelCreate` | 登记到柜包裹（收件人 / 快递 / 运单号） | admin |
+| `parcelPick` | 领取包裹（自己 / 管理员代领） | member / owner / admin |
+| `parcelReturn` / `parcelCancel` / `parcelRemind` | 标记退回 / 取消 / 一键催收逾期 | admin |
+| `lockerCreate` / `lockerDelete` | 新增 / 删除储物柜 | admin |
+| `lockerReserve` / `lockerCancel` / `lockerCheckin` / `lockerCheckout` / `lockerRemind` | 预约 / 取消 / 签到 / 签退 / 一键催还逾期储物柜 | member / owner / admin |
 
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，
-以及 `rooms`（含 `rooms` / `reservations` / `waitlist` / `waitlistTotal`）、`tools`、`materials`（含 `requests` / `templates`）、`repairs`、`visitors`、`stalls`、`attendance`（含 `records` / `stats` / `config`）、`desks`（含 `desks` / `reservations` / `reservationTotal`）、`deskStats`、`ooo`（含 `records` / `stats`）、`leaves`（含 `leaves` / `total` / `stats`）、`meetingNotes`（含 `notes` / `stats`）、`feedback`（含 `records` / `stats`）、`mood`（含 `records` / `stats`）、`events`（含 `events` / `total` / `stats`）、`polls`（含 `polls` / `total` / `stats`）、`knowledge`（含 `knowledge` / `total` / `stats`）、`tasks`（含 `tasks` / `total` / `stats`）、`notifications`（含 `notifications` / `total` / `unreadCount`）、`users`、`leaderboard`（含 `account`、`role`、`display`）、`keys`（含 `keys` / `stats` / `requests`）、`fridge`（含 `items` / `stats` / `logs`）、`parking`（含 `spots` / `stats` / `reservations`），
-另有 `roomStats`、`spaceTrend`、`mySchedule`、`roomWaitlistPromoted`、`roomRated`、`roomFavorites`、`repairEscalated`、`repairRated`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendanceCheckedIn`、`attendanceCheckedOut`、`attendanceCalendar`、`eventReminder`、`eventRsvpChanged`、`pollVoted`、`pollClosed`、`knowledgeLiked`、`knowledgeCommented`、`taskCreated`、`taskAssigned`、`taskCompleted`、`taskCommented`、`leaveCreated`、`leaveApproved`、`leaveRejected`、`leaveSla`、`meetingNoteCreated`、`meetingNoteUpdated`、`keyRequest`、`keyApproved`、`keyRejected`、`keyMissing`、`keyOverdueReminder`、`fridgeLowStock` 等即时广播，另有 `oooBacked`、`oooReturnSoon`、`moodCheckedIn`；全量广播含 `inventory`、`keys`、`fridge`、`parking`（物资库存台账 / 钥匙门禁 / 冰箱食品 / 车辆停车位，随 `broadcastAll` 下发）；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows` / `feedback` / `events` / `polls` / `knowledge` / `tasks`）。
+以及 `rooms`（含 `rooms` / `reservations` / `waitlist` / `waitlistTotal`）、`tools`、`materials`（含 `requests` / `templates`）、`repairs`、`visitors`、`stalls`、`attendance`（含 `records` / `stats` / `config`）、`desks`（含 `desks` / `reservations` / `reservationTotal`）、`deskStats`、`ooo`（含 `records` / `stats`）、`leaves`（含 `leaves` / `total` / `stats`）、`meetingNotes`（含 `notes` / `stats`）、`feedback`（含 `records` / `stats`）、`mood`（含 `records` / `stats`）、`events`（含 `events` / `total` / `stats`）、`polls`（含 `polls` / `total` / `stats`）、`knowledge`（含 `knowledge` / `total` / `stats`）、`tasks`（含 `tasks` / `total` / `stats`）、`notifications`（含 `notifications` / `total` / `unreadCount`）、`users`、`leaderboard`（含 `account`、`role`、`display`）、`keys`（含 `keys` / `stats` / `requests`）、`fridge`（含 `items` / `stats` / `logs`）、`parking`（含 `spots` / `stats` / `reservations`）、`parcels`（含 `parcels` / `total` / `stats`）、`lockers`（含 `lockers` / `stats` / `reservations`），
+另有 `roomStats`、`spaceTrend`、`mySchedule`、`roomWaitlistPromoted`、`roomRated`、`roomFavorites`、`repairEscalated`、`repairRated`、`toolLowStock`、`inventoryLowStock`、`weeklyReport`、`attendanceCheckedIn`、`attendanceCheckedOut`、`attendanceCalendar`、`eventReminder`、`eventRsvpChanged`、`pollVoted`、`pollClosed`、`knowledgeLiked`、`knowledgeCommented`、`taskCreated`、`taskAssigned`、`taskCompleted`、`taskCommented`、`leaveCreated`、`leaveApproved`、`leaveRejected`、`leaveSla`、`meetingNoteCreated`、`meetingNoteUpdated`、`keyRequest`、`keyApproved`、`keyRejected`、`keyMissing`、`keyOverdueReminder`、`fridgeLowStock`、`parcelArrived`、`parcelPicked`、`parcelReturned`、`parcelOverdueReminder`、`lockerOverdueReminder`、`parcelRemindSent`、`lockerRemindSent` 等即时广播，另有 `oooBacked`、`oooReturnSoon`、`moodCheckedIn`；全量广播含 `inventory`、`keys`、`fridge`、`parking`、`parcels`、`lockers`（物资库存台账 / 钥匙门禁 / 冰箱食品 / 车辆停车位 / 包裹快递 / 储物柜寄存，随 `broadcastAll` 下发）；分页加载使用 `fetchPage`（支持 `rooms` / `materials` / `repairs` / `visitors` / `borrows` / `feedback` / `events` / `polls` / `knowledge` / `tasks`）。
 
 ## 5. 前端
 
-单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 物资库存 / 报修 / 访客登记 / 考勤打卡 / 工位预约 / 外出登记 / 请假审批 / 会议纪要 / 意见反馈 / 心情打卡 / 活动管理 / 投票 / 知识库 / 待办任务 / 通知中心 / 坑位看板 / 我的日程 / 空间趋势 / 资产台账 / 钥匙门禁 / 冰箱食品 / 车辆停车），
+单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 物资库存 / 报修 / 访客登记 / 考勤打卡 / 工位预约 / 外出登记 / 请假审批 / 会议纪要 / 意见反馈 / 心情打卡 / 活动管理 / 投票 / 知识库 / 待办任务 / 通知中心 / 坑位看板 / 我的日程 / 空间趋势 / 资产台账 / 钥匙门禁 / 冰箱食品 / 车辆停车 / 包裹快递 / 储物柜），
 个人资料入口位于侧栏底部；桌面与移动端响应式，原生 HTML/CSS/JS，无构建步骤；静态文件由 Express 托管；
 会议室预约支持每天 / 每周周期预约（列表按 `seriesId` 聚合展示并整组取消）；
 会议室卡片展示设备清单徽标与「维护中」标记；管理员可为会议室设置设备清单、维护时段（维护期间不可预约）；预约时可勾选实际使用设备（仅保留会议室已有设备）；

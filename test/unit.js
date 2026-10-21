@@ -7,6 +7,8 @@ const assetsModule = require('../src/modules/assets');
 const keysModule = require('../src/modules/keys');
 const fridgeModule = require('../src/modules/fridge');
 const parkingModule = require('../src/modules/parking');
+const parcelsModule = require('../src/modules/parcels');
+const lockersModule = require('../src/modules/lockers');
 const extrasModule = require('../src/modules/extras');
 
 let passed = 0;
@@ -1414,6 +1416,102 @@ assert(revOk && revOk.revokedAt, 'revokeInvite 撤销邀请码');
 assertEq(api.useInvite(invSp, invReuse.code, 'bob').ok, false, '已撤销邀请码拒绝使用');
 assertEq(api.auditLog(invSp, invAdmin, '创建邀请码', inv1.code).action, '创建邀请码', 'auditLog 写入管理日志');
 assertEq(api.auditLogsPublic(invSp, 10).length, 1, 'auditLogsPublic 返回管理日志');
+
+// ---------- 包裹 / 快递管理 ----------
+console.log('\n📋 55. 包裹 / 快递管理');
+const parcelSent = [];
+let parcelSeq = 0;
+const parcelApi = {
+  spaceUserInfo: () => new Map([['bob', { display: '乙' }]]),
+  parcelsPublic: (space) => [...space.parcels.values()],
+  parcelStats: (space) => ({
+    total: space.parcels.size,
+    incoming: [...space.parcels.values()].filter((p) => p.status === 'incoming').length,
+    picked: [...space.parcels.values()].filter((p) => p.status === 'picked').length,
+    returned: [...space.parcels.values()].filter((p) => p.status === 'returned').length,
+    cancelled: [...space.parcels.values()].filter((p) => p.status === 'cancelled').length,
+    overdue: 0,
+  }),
+  parcelsBroadcast: () => {},
+  broadcast: () => {},
+  isAdmin: (space, account) => account === 'admin',
+  sendTo: (ws, obj) => { parcelSent.push(obj); },
+  serError: (m) => ({ type: 'error', message: m }),
+  genId: () => `pc${parcelSeq++}`,
+  saveEntity: () => {},
+  deleteEntity: () => {},
+  pushNotification: () => {},
+  sendToAccount: () => {},
+  spaceId: 's55',
+};
+const parcelsModule2 = parcelsModule(parcelApi);
+const parcelSpace = { id: 's55', parcels: new Map() };
+parcelsModule2.handleParcels({}, { account: 'admin' }, parcelSpace, { type: 'parcelCreate', recipientAccount: 'bob', courier: '顺丰', trackingNumber: 'SF123' });
+const pc1 = [...parcelSpace.parcels.values()][0];
+assert(pc1 && pc1.status === 'incoming', 'parcelCreate 登记包裹为待取');
+assertEq(pc1.courier, '顺丰', '包裹记录快递公司');
+parcelsModule2.handleParcels({}, { account: 'admin' }, parcelSpace, { type: 'parcelCreate', recipientAccount: 'carol', courier: '圆通' });
+assert(parcelSent.some((m) => m.message && m.message.includes('收件人不在')), '非空间成员发件被拒');
+parcelsModule2.handleParcels({}, { account: 'user' }, parcelSpace, { type: 'parcelCreate', recipientAccount: 'bob', courier: '中通' });
+assert(parcelSent.some((m) => m.message && m.message.includes('仅管理员')), '非管理员登记包裹被拒');
+parcelsModule2.handleParcels({}, { account: 'admin' }, parcelSpace, { type: 'parcelPick', id: pc1.id });
+assertEq(pc1.status, 'picked', 'admin 可代领包裹');
+const pc2 = { id: 'pcX', recipientAccount: 'bob', courier: '韵达', status: 'incoming', expectedAt: Date.now(), lastRemindedAt: 0 };
+parcelSpace.parcels.set(pc2.id, pc2);
+parcelsModule2.handleParcels({}, { account: 'admin' }, parcelSpace, { type: 'parcelReturn', id: pc2.id });
+assertEq(pc2.status, 'returned', '管理员标记退回');
+const pc3 = { id: 'pcY', recipientAccount: 'bob', courier: '京东', status: 'incoming', lastRemindedAt: 0 };
+parcelSpace.parcels.set(pc3.id, pc3);
+parcelsModule2.handleParcels({}, { account: 'admin' }, parcelSpace, { type: 'parcelCancel', id: pc3.id });
+assertEq(pc3.status, 'cancelled', '管理员取消包裹');
+assertEq(parcelApi.parcelStats(parcelSpace).picked, 1, 'parcelStats 统计已取');
+assertEq(parcelApi.parcelStats(parcelSpace).cancelled, 1, 'parcelStats 统计取消');
+
+// ---------- 储物柜 / 寄存管理 ----------
+console.log('\n📋 56. 储物柜 / 寄存管理');
+const lockerSent = [];
+let lockerSeq = 0;
+const lockerApi = {
+  spaceUserInfo: () => new Map([['alice', { display: '甲' }], ['bob', { display: '乙' }]]),
+  lockersPublic: (space) => space.lockers,
+  lockerStats: (space) => ({
+    total: space.lockers.length,
+    active: [...space.lockerReservations.values()].filter((r) => r.status === 'reserved' || r.status === 'checked_in').length,
+    byType: {},
+  }),
+  lockerReservationsPublic: (space) => [...space.lockerReservations.values()],
+  lockersBroadcast: () => {},
+  broadcast: () => {},
+  isAdmin: (space, account) => account === 'admin',
+  sendTo: (ws, obj) => { lockerSent.push(obj); },
+  serError: (m) => ({ type: 'error', message: m }),
+  genId: () => `lk${lockerSeq++}`,
+  saveEntity: () => {},
+  deleteEntity: () => {},
+  pushNotification: () => {},
+  sendToAccount: () => {},
+  LOCKER_TYPES: ['regular', 'valuable', 'temporary'],
+};
+const lockersModule2 = lockersModule(lockerApi);
+const lockerSpace = { id: 's56', lockers: [], lockerReservations: new Map() };
+lockersModule2.handleLockers({}, { account: 'admin' }, lockerSpace, { type: 'lockerCreate', name: '3F 寄存柜', lockerType: 'valuable', total: 2 });
+const lk1 = lockerSpace.lockers[0];
+assert(lk1 && lk1.type === 'valuable', 'lockerCreate 新增贵重储物柜');
+assertEq(lk1.available, 2, '新增后可用 2');
+lockersModule2.handleLockers({}, { account: 'user' }, lockerSpace, { type: 'lockerCreate', name: '无权柜' });
+assert(lockerSent.some((m) => m.message && m.message.includes('仅管理员')), '非管理员新增储物柜被拒');
+lockersModule2.handleLockers({}, { account: 'alice' }, lockerSpace, { type: 'lockerReserve', lockerId: lk1.id });
+const lkRes = [...lockerSpace.lockerReservations.values()][0];
+assert(lkRes && lkRes.status === 'reserved', 'alice 预约储物柜');
+assertEq(lk1.available, 1, '预约后可用减 1');
+lockersModule2.handleLockers({}, { account: 'alice' }, lockerSpace, { type: 'lockerCheckin', id: lkRes.id });
+assertEq(lkRes.status, 'checked_in', '签到后已使用');
+lockersModule2.handleLockers({}, { account: 'alice' }, lockerSpace, { type: 'lockerCheckout', id: lkRes.id });
+assertEq(lkRes.status, 'checked_out', '签退后已归还');
+assertEq(lk1.available, 2, '签退后可用恢复');
+lockersModule2.handleLockers({}, { account: 'admin' }, lockerSpace, { type: 'lockerDelete', id: lk1.id });
+assertEq(lockerSpace.lockers.length, 0, '归还后可删除储物柜');
+assertEq(lockerApi.lockerStats(lockerSpace).active, 0, 'lockerStats 活跃数为 0');
 
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);

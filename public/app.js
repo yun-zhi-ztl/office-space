@@ -37,9 +37,11 @@ const S = {
   keys:[], keysStats:{}, keyRequests:[],
   fridge:{items:[],stats:{},logs:[]},
   parking:{spots:[],stats:{},reservations:[]},
+  parcels:{parcels:[],total:0,stats:{}},
+  lockers:{lockers:[],stats:{},reservations:[]},
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'],['schedule','我的日程','🗓️'],['cal','空间日历','📅'],['assets','资产台账','🗄️'],['keys','钥匙门禁','🔑'],['fridge','冰箱食品','🥤'],['parking','车辆停车','🚗'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'],['schedule','我的日程','🗓️'],['cal','空间日历','📅'],['assets','资产台账','🗄️'],['keys','钥匙门禁','🔑'],['fridge','冰箱食品','🥤'],['parking','车辆停车','🚗'],['parcels','包裹快递','📦'],['lockers','储物柜','🗄️'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -89,6 +91,8 @@ function dispatch(m){
     case 'keys': S.DB.keys=m.keys||[]; S.DB.keysStats=m.stats||{}; S.DB.keyRequests=m.requests||[]; break;
     case 'fridge': S.DB.fridge={items:m.items||[],stats:m.stats||{},logs:m.logs||[]}; break;
     case 'parking': S.DB.parking={spots:m.spots||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
+    case 'parcels': S.DB.parcels={parcels:m.parcels||[],total:m.total||0,stats:m.stats||{}}; break;
+    case 'lockers': S.DB.lockers={lockers:m.lockers||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; S.DB.repairStats=m.stats||null; break;
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
     case 'page': handlePage(m); break;
@@ -108,6 +112,8 @@ function dispatch(m){
     case 'statusSet': toast('✔ 状态已更新','success'); break;
     case 'remindSent': toast('✔ 已提醒 '+(m.count||0)+' 人','success'); break;
     case 'remindOverdueSent': toast('✔ 已批量提醒 '+(m.count||0)+' 位逾期借用人','success'); render(); break;
+    case 'parcelRemindSent': toast('✔ 已提醒 '+(m.count||0)+' 位逾期收件人','success'); render(); break;
+    case 'lockerRemindSent': toast('✔ 已提醒 '+(m.count||0)+' 位逾期储物柜预约','success'); render(); break;
     case 'borrowReminder': toast('🔔 '+(m.from||'有人')+'提醒你归还设备',"urge"); break;
     case 'overdueReminder': toast('⏰ 你借的设备已逾期，请尽快归还','urge'); break;
     case 'toolLowStock': toast('⚠️ 设备库存告急：'+(m.toolName||'')+' 可用 '+m.available+'（阈值 '+m.minAvailable+'）','warn'); render(); break;
@@ -209,17 +215,17 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceCalendar','spaceTrend','notices','digest','assets','keys','fridge','parking'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceCalendar','spaceTrend','notices','digest','assets','keys','fridge','parking','parcels','lockers'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); else if(S.module==='cal') renderSpaceCalendar(); else if(S.module==='assets') renderAssets(); else if(S.module==='keys') renderKeys(); else if(S.module==='fridge') renderFridge(); else if(S.module==='parking') renderParking(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); else if(S.module==='cal') renderSpaceCalendar(); else if(S.module==='assets') renderAssets(); else if(S.module==='keys') renderKeys(); else if(S.module==='fridge') renderFridge(); else if(S.module==='parking') renderParking(); else if(S.module==='parcels') renderParcels(); else if(S.module==='lockers') renderLockers(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
   else { b.style.display='none'; }
 }
 function renderAll(){ render(); }
-function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); if(mod==='keys') wsSend({type:'getKeys'}); if(mod==='fridge') wsSend({type:'getFridge'}); if(mod==='parking') wsSend({type:'getParking'}); }
+function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); if(mod==='keys') wsSend({type:'getKeys'}); if(mod==='fridge') wsSend({type:'getFridge'}); if(mod==='parking') wsSend({type:'getParking'}); if(mod==='parcels') wsSend({type:'getParcels'}); if(mod==='lockers') wsSend({type:'getLockers'}); }
 
 /* 分页：广播已按最近 PAGE 下发，前端按 offset 加载更多 */
 const PAGE = 30;
@@ -1905,6 +1911,78 @@ function deleteSpot(id){ if(confirm('确认删除该车位？')) wsSend({type:'s
 function spotCancel(id){ wsSend({type:'spotCancel',id}); }
 function spotCheckin(id){ wsSend({type:'spotCheckin',id}); }
 function spotCheckout(id){ wsSend({type:'spotCheckout',id}); }
+/* 包裹 / 快递管理 */
+function renderParcels(){
+  const p=S.DB.parcels||{parcels:[],stats:{}}; const st=p.stats||{};
+  const stLabel={incoming:'待取',picked:'已取',returned:'已退回',cancelled:'已取消'};
+  const stBadge={incoming:'info',picked:'ok',returned:'warn',cancelled:'bad'};
+  const overdue=st.overdue||0;
+  $('#main').innerHTML = `<div class="topbar"><div><h1>包裹 / 快递管理</h1><div class="sub">到柜包裹登记、领取与退回，逾期未取提醒</div></div>
+    ${S.admin?'<button class="btn pri" onclick="openParcelCreate()">登记包裹</button><button class="btn sm" onclick="parcelRemindAll()">催收逾期</button>':''}</div>
+    <div class="cards">
+      <div class="card"><h3>📦 包裹总数</h3><div class="num">${st.total||0}</div><div class="meta">待取 ${st.incoming||0} · 已取 ${st.picked||0} · 退回 ${st.returned||0}</div></div>
+      <div class="card"><h3>⚠️ 逾期未取</h3><div class="num">${overdue}</div><div class="meta">预计已过期待领取</div></div>
+      <div class="card"><h3>✅ 已处理</h3><div class="num">${(st.picked||0)+(st.returned||0)+(st.cancelled||0)}</div><div class="meta">已领取 / 退回 / 取消</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">📦 包裹清单</h3>
+    <div class="list">${p.parcels.length?p.parcels.map(x=>`
+      <div class="row"><span><span class="who">${esc(x.recipientName||x.recipientAccount)} <span class="badge ${stBadge[x.status]||''}">${stLabel[x.status]||x.status}</span></span>
+        <div class="meta">${esc(x.courier||'')}${x.trackingNumber?' · '+esc(x.trackingNumber):''}${x.expectedAt?' · 预计 '+fmtTime(x.expectedAt):''}${x.remark?' · '+esc(x.remark):''}</div>
+      </span><span class="fs">${x.status==='incoming'&&(x.recipientAccount===S.me.account||S.admin)?`<button class="btn sm" onclick="parcelPick('${x.id}')">领取</button>`:''}${S.admin&&x.status==='incoming'?`<button class="btn sm" onclick="parcelReturn('${x.id}')">退回</button><button class="btn danger sm" onclick="parcelCancel('${x.id}')">取消</button>`:''}</span></div>`).join(''):'<div class="empty">暂无包裹</div>'}</div>`;
+}
+function openParcelCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>登记包裹</h2><div class="form">
+  <div class="fld"><label>收件人账号</label><input id="pcRecipient" placeholder="收件人账号，需在空间内"></div>
+  <div class="fld"><label>快递公司</label><input id="pcCourier" placeholder="如：顺丰"></div>
+  <div class="fld"><label>运单号（可选）</label><input id="pcTrack" placeholder="可选"></div>
+  <div class="fld"><label>预计到达（可选）</label><input id="pcExp" type="datetime-local"></div>
+  <div class="fld"><label>备注（可选）</label><input id="pcRemark" placeholder="如：易碎品"></div>
+  <button class="btn pri" onclick="submitParcelCreate()">登记</button></div>`); }
+function submitParcelCreate(){ const exp=$('#pcExp').value; wsSend({type:'parcelCreate',recipientAccount:$('#pcRecipient').value,courier:$('#pcCourier').value,trackingNumber:$('#pcTrack').value,expectedAt:exp?new Date(exp).getTime():0,remark:$('#pcRemark').value}); closeModal(); }
+function parcelPick(id){ wsSend({type:'parcelPick',id}); }
+function parcelReturn(id){ if(confirm('确认将该包裹标记为退回？')) wsSend({type:'parcelReturn',id}); }
+function parcelCancel(id){ if(confirm('确认取消该包裹登记？')) wsSend({type:'parcelCancel',id}); }
+function parcelRemindAll(){ if(confirm('对全部逾期未取包裹批量提醒收件人？')) wsSend({type:'parcelRemind'}); }
+/* 储物柜 / 寄存管理 */
+function renderLockers(){
+  const l=S.DB.lockers||{lockers:[],stats:{},reservations:[]}; const st=l.stats||{};
+  const typeLabel={regular:'普通',valuable:'贵重',temporary:'临时'};
+  const resLabel={reserved:'待签到',checked_in:'已使用',checked_out:'已归还',cancelled:'已取消'};
+  const resBadge={reserved:'info',checked_in:'ok',checked_out:'grey',cancelled:'bad'};
+  $('#main').innerHTML = `<div class="topbar"><div><h1>储物柜 / 寄存</h1><div class="sub">共享储物柜预约、签到签退，逾期提醒</div></div>
+    ${S.admin?'<button class="btn pri" onclick="openLockerCreate()">新增储物柜</button><button class="btn sm" onclick="lockerRemindAll()">催还逾期</button>':''}</div>
+    <div class="cards">
+      <div class="card"><h3>🗄️ 柜位总数</h3><div class="num">${st.total||0}</div><div class="meta">普通 ${st.byType?.regular||0} · 贵重 ${st.byType?.valuable||0} · 临时 ${st.byType?.temporary||0}</div></div>
+      <div class="card"><h3>🔒 当前占用</h3><div class="num">${st.active||0}</div><div class="meta">在预约 / 已使用</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">🗄️ 柜位清单</h3>
+    <div class="list">${l.lockers.length?l.lockers.map(x=>`
+      <div class="row"><span><span class="who">${esc(x.name)} <span class="badge ${x.type==='valuable'?'warn':''}">${typeLabel[x.type]||x.type}</span></span>
+        <div class="meta">可用 ${x.available}/${x.total}${x.location?' · '+esc(x.location):''}</div>
+      </span><span class="fs">${S.admin?`<button class="btn danger sm" onclick="deleteLocker('${x.id}')">删除</button>`:''}<button class="btn sm" onclick="lockerReserve('${x.id}')">预约</button></span></div>`).join(''):'<div class="empty">暂无储物柜</div>'}</div>
+    <h3 style="margin:22px 0 10px">📋 预约记录</h3>
+    <div class="list">${l.reservations.length?l.reservations.map(r=>`
+      <div class="row"><span><span class="who">${esc(r.lockerName||'储物柜')} <span class="badge ${resBadge[r.status]||''}">${resLabel[r.status]||r.status}</span></span>
+        <div class="meta">${esc(r.name||r.account)}${r.dueAt?' · 到期 '+fmtTime(r.dueAt):''}${r.checkedInAt?' · '+fmtTime(r.checkedInAt)+' 签到':''}</div>
+      </span><span class="fs">${r.status==='reserved'&&(r.account===S.me.account||S.admin)?`<button class="btn sm" onclick="lockerCancel('${r.id}')">取消</button><button class="btn pri sm" onclick="lockerCheckin('${r.id}')">签到</button>`:''}${r.status==='checked_in'&&(r.account===S.me.account||S.admin)?`<button class="btn sm" onclick="lockerCheckout('${r.id}')">签退</button>`:''}</span></div>`).join(''):'<div class="empty">暂无预约</div>'}</div>`;
+}
+function openLockerCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>新增储物柜</h2><div class="form">
+  <div class="fld"><label>名称</label><input id="lkName" placeholder="如：3F 东侧寄存柜"></div>
+  <div class="fld"><label>类型</label><select id="lkType"><option value="regular">普通</option><option value="valuable">贵重</option><option value="temporary">临时</option></select></div>
+  <div class="fld"><label>格位数量</label><input id="lkTotal" type="number" value="6" min="1"></div>
+  <div class="fld"><label>位置</label><input id="lkLoc" placeholder="可选"></div>
+  <div class="fld"><label>备注</label><input id="lkNote" placeholder="可选"></div>
+  <button class="btn pri" onclick="submitLockerCreate()">创建</button></div>`); }
+function submitLockerCreate(){ wsSend({type:'lockerCreate',name:$('#lkName').value,lockerType:$('#lkType').value,total:+$('#lkTotal').value||1,location:$('#lkLoc').value,note:$('#lkNote').value}); closeModal(); }
+function deleteLocker(id){ if(confirm('确认删除该储物柜？')) wsSend({type:'lockerDelete',id}); }
+function lockerReserve(id){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>预约储物柜</h2><div class="form">
+  <div class="fld"><label>到期时间（可选）</label><input id="lkDue" type="datetime-local"></div>
+  <div class="hint">到期后未签退可被管理员催还</div>
+  <button class="btn pri" onclick="submitLockerReserve('${id}')">预约</button></div>`); }
+function submitLockerReserve(id){ const due=$('#lkDue').value; wsSend({type:'lockerReserve',lockerId:id,dueAt:due?new Date(due).getTime():0}); closeModal(); }
+function lockerCancel(id){ if(confirm('确认取消该储物柜预约？')) wsSend({type:'lockerCancel',id}); }
+function lockerCheckin(id){ wsSend({type:'lockerCheckin',id}); }
+function lockerCheckout(id){ if(confirm('确认签退归还可用的储物柜？')) wsSend({type:'lockerCheckout',id}); }
+function lockerRemindAll(){ if(confirm('对全部逾期未处理的储物柜预约批量提醒？')) wsSend({type:'lockerRemind'}); }
 setInterval(()=>{ if(S.module==='stalls' && S.me && document.visibilityState==='visible') renderStalls(); }, 1000);
 function openReserve(id,type){
   const opts = type==='urinal' ? [['1分钟',1],['2分钟',2],['5分钟',5]] : [['15分钟',15],['30分钟',30],['45分钟',45]];

@@ -2440,6 +2440,76 @@ async function runTests() {
     wP1.close(); wP2.close();
   }
 
+  // ========== 测试55: 包裹 / 快递管理 ==========
+  console.log('\n📋 测试55: 包裹 / 快递管理（登记/领取/退回/取消）');
+  {
+    const spPa = (await httpJson('POST', '/api/spaces', { name: '包裹办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aPa = 'paa_' + runKey, bPa = 'pab_' + runKey;
+    await reg(aPa, 'pw', '包裹管理员'); await reg(bPa, 'pw', '包裹成员');
+    const wQ1 = await createWSClient(); await loginTo(wQ1, spPa.id, aPa, 'pw');
+    const wQ2 = await createWSClient(); await loginTo(wQ2, spPa.id, bPa, 'pw');
+    await sendMsg(wQ1, { type: 'parcelCreate', recipientAccount: bPa, courier: '顺丰', trackingNumber: 'SF' + runKey, expectedAt: Date.now() + 86400000 });
+    let pc0 = last(wQ2, 'parcels');
+    assert(pc0 && pc0.parcels.length === 1 && pc0.parcels[0].status === 'incoming', 'admin 登记包裹为待取');
+    const parcelId = pc0.parcels[0].id;
+    await sendMsg(wQ2, { type: 'parcelPick', id: parcelId });
+    pc0 = last(wQ2, 'parcels');
+    const pSelf0 = pc0.parcels.find(p => p.id === parcelId);
+    assert(pSelf0 && pSelf0.status === 'picked', '成员领取自己的包裹');
+    // 非管理员不能领取他人包裹
+    await sendMsg(wQ1, { type: 'parcelCreate', recipientAccount: aPa, courier: '韵达' });
+    pc0 = last(wQ1, 'parcels');
+    const pidOwn = pc0.parcels.find(p => p.status === 'incoming' && p.recipientAccount === aPa).id;
+    await sendMsg(wQ2, { type: 'parcelPick', id: pidOwn });
+    const errPa = mk(wQ2, 'error').pop();
+    assert(errPa && errPa.message.includes('只能领取自己的'), '成员不能领取他人包裹');
+    // 管理员退回与取消
+    await sendMsg(wQ1, { type: 'parcelCreate', recipientAccount: bPa, courier: '圆通' });
+    pc0 = last(wQ1, 'parcels');
+    const pid2 = pc0.parcels.find(p => p.status === 'incoming').id;
+    await sendMsg(wQ1, { type: 'parcelReturn', id: pid2 });
+    pc0 = last(wQ1, 'parcels');
+    assert(pc0.parcels.find(p => p.id === pid2).status === 'returned', '管理员标记退回');
+    await sendMsg(wQ1, { type: 'parcelCreate', recipientAccount: bPa, courier: '中通' });
+    pc0 = last(wQ1, 'parcels');
+    const pid3 = pc0.parcels.find(p => p.status === 'incoming').id;
+    await sendMsg(wQ1, { type: 'parcelCancel', id: pid3 });
+    pc0 = last(wQ1, 'parcels');
+    assert(pc0.parcels.find(p => p.id === pid3).status === 'cancelled', '管理员取消包裹');
+    assert(pc0.stats.picked >= 1 && pc0.stats.cancelled >= 1, 'parcelStats 统计已取/取消');
+    wQ1.close(); wQ2.close();
+  }
+
+  // ========== 测试56: 储物柜 / 寄存管理 ==========
+  console.log('\n📋 测试56: 储物柜 / 寄存（新增/预约/签到/签退/删除）');
+  {
+    const spLk = (await httpJson('POST', '/api/spaces', { name: '寄存办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aLk = 'lka_' + runKey, bLk = 'lkb_' + runKey;
+    await reg(aLk, 'pw', '寄存管理员'); await reg(bLk, 'pw', '寄存成员');
+    const wL1 = await createWSClient(); await loginTo(wL1, spLk.id, aLk, 'pw');
+    const wL2 = await createWSClient(); await loginTo(wL2, spLk.id, bLk, 'pw');
+    await sendMsg(wL1, { type: 'lockerCreate', name: '3F 寄存柜', lockerType: 'valuable', total: 2 });
+    let lk0 = last(wL2, 'lockers');
+    assert(lk0 && lk0.lockers.length === 1 && lk0.lockers[0].available === 2, 'admin 新增储物柜');
+    const lockerId = lk0.lockers[0].id;
+    await sendMsg(wL2, { type: 'lockerReserve', lockerId });
+    lk0 = last(wL2, 'lockers');
+    assert(lk0.reservations[0] && lk0.reservations[0].status === 'reserved', '成员预约储物柜');
+    assert(lk0.lockers[0].available === 1, '预约后可用减 1');
+    const lkResId = lk0.reservations[0].id;
+    await sendMsg(wL2, { type: 'lockerCheckin', id: lkResId });
+    lk0 = last(wL2, 'lockers');
+    assert(lk0.reservations.find(r => r.id === lkResId).status === 'checked_in', '签到后已使用');
+    await sendMsg(wL2, { type: 'lockerCheckout', id: lkResId });
+    lk0 = last(wL2, 'lockers');
+    assert(lk0.reservations.find(r => r.id === lkResId).status === 'checked_out', '签退后已归还');
+    assert(lk0.lockers[0].available === 2, '签退后可用恢复');
+    await sendMsg(wL1, { type: 'lockerDelete', id: lockerId });
+    lk0 = last(wL1, 'lockers');
+    assert(lk0.lockers.length === 0, '管理员删除储物柜');
+    wL1.close(); wL2.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);
