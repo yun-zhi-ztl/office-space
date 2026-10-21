@@ -2829,6 +2829,23 @@ async function runTests() {
     wA.close(); wB.close(); wC.close();
   }
 
+  // ========== 测试68: 空间健康分 ==========
+  console.log('\n📋 测试68: 空间健康分（随隐患下降）');
+  {
+    const spHc = (await httpJson('POST', '/api/spaces', { name: '健康办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aH = 'hc_a_' + runKey, bH = 'hc_b_' + runKey;
+    await reg(aH, 'pw', '健康管理员'); await reg(bH, 'pw', '健康成员');
+    const wA = await createWSClient(); await loginTo(wA, spHc.id, aH, 'pw');
+    const dg0 = last(wA, 'digest').digest;
+    assert(dg0 && typeof dg0.healthScore === 'number' && dg0.healthScore === 100, '干净空间 digest 健康分 100');
+    await sendMsg(wA, { type: 'repairCreate', category: '灯光', location: '走廊', description: '灯不亮' });
+    await sendMsg(wA, { type: 'parcelCreate', recipientAccount: aH, courier: '顺丰' });
+    const wB = await createWSClient(); await loginTo(wB, spHc.id, bH, 'pw');
+    const dg1 = last(wB, 'digest').digest;
+    assert(dg1 && typeof dg1.healthScore === 'number' && dg1.healthScore > 0 && dg1.healthScore < 100, '有报修/待取时健康分下降');
+    wA.close(); wB.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

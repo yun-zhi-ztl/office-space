@@ -566,7 +566,7 @@ const spRi = api.createSpace('s8c', '会议室洞察空间', 1, 0);
 spRi.rooms.push({ id: 'ri1', name: '好评间', capacity: 4 });
 spRi.rooms.push({ id: 'ri2', name: '差评间', capacity: 4 });
 spRi.rooms.push({ id: 'ri3', name: '无评间', capacity: 4 });
-const nowRi = Date.now();
+const nowRi = new Date((new Date().setHours(12, 0, 0, 0))).getTime();
 spRi.roomReservations.set('rv1', { id: 'rv1', roomId: 'ri1', ownerAccount: 'alice', startAt: nowRi, endAt: nowRi + 60 * 60000, status: 'completed', rating: 5 });
 spRi.roomReservations.set('rv2', { id: 'rv2', roomId: 'ri2', ownerAccount: 'bob', startAt: nowRi, endAt: nowRi + 30 * 60000, status: 'completed', rating: 2 });
 spRi.roomReservations.set('rv3', { id: 'rv3', roomId: 'ri2', ownerAccount: 'carol', startAt: nowRi + 60 * 60000, endAt: nowRi + 90 * 60000, status: 'completed', rating: 1 });
@@ -1882,6 +1882,35 @@ assert(api.spaceSearch(sx, si, '乙').hits.some((h) => h.type === 'tools'), '搜
 assert(api.spaceSearch(sx, si, '年假').hits.some((h) => h.type === 'leave'), '搜索命中请假');
 assert(api.spaceSearch(sx, si, '共享工位').hits.some((h) => h.type === 'desks'), '搜索命中工位');
 assert(api.spaceSearch(sx, si, '环境').hits.some((h) => h.type === 'duties'), '搜索命中值班');
+
+// ---------- 空间健康分 ----------
+console.log('\n📋 71. 空间健康分');
+const hsNow = Date.now();
+assertEq(api.spaceHealthScore(api.createSpace('s71', '健康', 1, 1), hsNow).score, 100, '干净空间健康分 100');
+const badHS = api.createSpace('s71b', '隐患', 1, 1);
+badHS.repairs.set('r1', { id: 'r1', status: 'reported' });
+badHS.materialRequests.set('m1', { id: 'm1', status: 'pending' });
+badHS.borrows.set('b1', { id: 'b1', borrowedAt: hsNow - 10 * 86400000, dueAt: hsNow - 1000, returnedAt: null, status: 'borrowed' });
+badHS.parcels.set('p1', { id: 'p1', status: 'incoming', expectedAt: hsNow - 1000, lastRemindedAt: 0 });
+badHS.lockerReservations.set('lr1', { id: 'lr1', lockerId: 'lk1', status: 'checked_in', dueAt: hsNow - 1000 });
+badHS.assets.set('a1', { id: 'a1', inspectIntervalDays: 30, lastCheckAt: 0 });
+badHS.roomReservations.set('rr1', { id: 'rr1', status: 'pending_approval' });
+const hsBad = api.spaceHealthScore(badHS, hsNow);
+assert(hsBad.score < 100 && hsBad.score > 0, '有隐患时健康分下降');
+assert(hsBad.deductions.some((d) => d.label === '未办结报修') && hsBad.deductions.some((d) => d.label === '逾期借用') && hsBad.deductions.some((d) => d.label === '迟检资产'), '扣分明细含各类');
+const capHS = api.createSpace('s71c', '封顶', 1, 1);
+for (let i = 0; i < 20; i++) capHS.repairs.set('r' + i, { id: 'r' + i, status: 'reported' });
+assertEq(api.spaceHealthScore(capHS, hsNow).deductions.find((d) => d.label === '未办结报修').points, 20, '单项扣分封顶（10 单位权重）');
+const floodHS = api.createSpace('s71d', '爆表', 1, 1);
+for (let i = 0; i < 15; i++) {
+  floodHS.repairs.set('r' + i, { id: 'r' + i, status: 'reported' });
+  floodHS.borrows.set('b' + i, { id: 'b' + i, borrowedAt: hsNow - 9 * 86400000, dueAt: hsNow - 1000, returnedAt: null, status: 'borrowed' });
+  floodHS.parcels.set('p' + i, { id: 'p' + i, status: 'incoming', expectedAt: hsNow - 1000, lastRemindedAt: 0 });
+  floodHS.assets.set('a' + i, { id: 'a' + i, inspectIntervalDays: 30, lastCheckAt: 0 });
+  floodHS.materialRequests.set('m' + i, { id: 'm' + i, status: 'pending' });
+  floodHS.lockerReservations.set('lr' + i, { id: 'lr' + i, lockerId: 'lk', status: 'checked_in', dueAt: hsNow - 1000 });
+}
+assertEq(api.spaceHealthScore(floodHS, hsNow).score, 0, '多类隐患爆表时健康分截断为 0');
 
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);

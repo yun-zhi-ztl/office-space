@@ -475,7 +475,7 @@ function renderDash(){
       ${dig.maintenanceVehiclesCount?`<div class="row"><span>🛠️ 保养中车辆 ${dig.maintenanceVehiclesCount}</span></div>`:''}
       ${dig.parkingOccupiedCount?`<div class="row"><span>🅿️ 停车占用 ${dig.parkingOccupiedCount}/${dig.parkingTotal||0}</span></div>`:''}
       ${dig.inspectOverdueCount?`<div class="row"><span>🔍 迟检资产 ${dig.inspectOverdueCount} 项</span></div>`:''}
-      ${dig.riskCount?`<div class="row"><span>⚠️ 风险台账待办 ${dig.riskCount} 项 <button class="btn sm" onclick="switchModule('risk')">查看</button></span></div>`:''}
+      ${dig.healthScore!=null?`<div class="row"><span>💚 空间健康分 ${dig.healthScore}/100${dig.riskCount?` · 待办 ${dig.riskCount} 项 <button class="btn sm" onclick="switchModule('risk')">查看</button>`:''}</span></div>`:(dig.riskCount?`<div class="row"><span>⚠️ 风险台账待办 ${dig.riskCount} 项 <button class="btn sm" onclick="switchModule('risk')">查看</button></span></div>`:'')}
     </div>`:''}
     <h3 style="margin:22px 0 10px">🟢 在线状态</h3>
     <div class="fs">${(d.users||[]).map(u=>`<span class="badge info">${esc(u.avatar||'' )} ${esc(u.display||u.username)}${u.emergencyMode?' 🆘':''}${u.status&&u.status.emoji?' '+esc(u.status.emoji):''} ${u.status?esc(u.status.label):'在岗'}</span>`).join('')||'<span class="hint">仅自己在线</span>'}</div>
@@ -2232,9 +2232,12 @@ const RISK_ICON = { inspection:'🔍', parcels:'📬', tools:'⏰', lockers:'�
 function renderRisk(){
   const r=S.DB.risk||{items:[],total:0};
   const inspCount=r.items.filter(i=>i.type==='inspection').length;
+  const hs=(S.digest&&S.digest.healthScore!=null)?S.digest.healthScore:null;
+  const hsColor = hs==null?'':(hs>=80?'ok':(hs>=50?'warn':'bad'));
   $('#main').innerHTML = `<div class="topbar"><div><h1>风险台账</h1><div class="sub">聚合空间内迟检 / 逾期 / 待处理项，一点跳转处理</div></div>
     <button class="btn sm" onclick="refreshRisk()">刷新</button></div>
     <div class="cards">
+      <div class="card"><h3>💚 空间健康分</h3><div class="num">${hs==null?'--':hs+'<span style="font-size:14px">/100</span>'}</div><div class="meta">${hs==null?'登录取健康分后展示':(hs>=80?'优秀':'待改进')}</div></div>
       <div class="card"><h3>⚠️ 待办总数</h3><div class="num">${r.total||0}</div><div class="meta">高优先级优先</div></div>
       <div class="card"><h3>🔍 迟检资产</h3><div class="num">${inspCount}</div><div class="meta">纳入巡检但已逾期</div></div>
       <div class="card"><h3>📥 逾期 / 待处理</h3><div class="num">${(r.total||0)-inspCount}</div><div class="meta">报修 / 申领 / 审批 / 借用等</div></div>
