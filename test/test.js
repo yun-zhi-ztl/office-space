@@ -2894,6 +2894,27 @@ async function runTests() {
     wB.close();
   }
 
+  // ========== 测试71: 找空闲工位 ==========
+  console.log('\n📋 测试71: 找空闲工位（占用排除 / 取消不计）');
+  {
+    const spFd = (await httpJson('POST', '/api/spaces', { name: '工位办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aFd = 'fd_a_' + runKey;
+    await reg(aFd, 'pw', '工位管理员');
+    const wA = await createWSClient(); await loginTo(wA, spFd.id, aFd, 'pw');
+    await sendMsg(wA, { type: 'deskCreate', name: '工位A' });
+    await sendMsg(wA, { type: 'deskCreate', name: '工位B' });
+    const dl = last(wA, 'desks').desks;
+    const dkA = dl.find(x => x.name === '工位A').id, dkB = dl.find(x => x.name === '工位B').id;
+    const fWinS = Date.now() + 86400000, fWinE = fWinS + 3600000;
+    await sendMsg(wA, { type: 'deskReserve', deskId: dkA, startAt: fWinS, endAt: fWinE });
+    await sendMsg(wA, { type: 'suggestDesks', startAt: fWinS, endAt: fWinE });
+    const dd = last(wA, 'suggestDesks');
+    assert(dd && Array.isArray(dd.desks) && dd.desks.length === 1 && dd.desks[0].id === dkB, '返回空闲工位并排除已占用');
+    await sendMsg(wA, { type: 'suggestDesks', startAt: 0, endAt: 0 });
+    assert(Array.isArray(last(wA, 'suggestDesks').desks) && last(wA, 'suggestDesks').desks.length === 0, '无效时段返回空');
+    wA.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

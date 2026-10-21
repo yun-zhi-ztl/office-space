@@ -164,6 +164,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'getPrint') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'print', printers: api.printersPublic(space, info), jobs: api.printJobsPublic(space, info), stats: api.printStats(space) }); return; }
     if (msg.type === 'getBookingHeatmap') { api.sendTo(ws, { type: 'bookingHeatmap', heatmap: api.bookingHeatmap(space) }); return; }
     if (msg.type === 'suggestSlots') { api.sendTo(ws, { type: 'suggestSlots', slots: api.suggestFreeSlots(space, msg.roomId, msg.durationMin, Date.now(), msg.days) }); return; }
+    if (msg.type === 'suggestDesks') { api.sendTo(ws, { type: 'suggestDesks', desks: api.suggestFreeDesks(space, msg.startAt, msg.endAt) }); return; }
     if (msg.type === 'getRisk') { api.sendTo(ws, { type: 'riskBoard', board: api.spaceRiskBoard(space) }); return; }
     if (msg.type === 'spaceExport') {
       if (!api.isAdmin(space, user.account)) return api.sendTo(ws, api.serError('仅管理员可导出空间数据'));

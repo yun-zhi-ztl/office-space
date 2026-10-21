@@ -109,6 +109,7 @@ function dispatch(m){
     case 'print': S.DB.print={printers:m.printers||[],jobs:m.jobs||[],stats:m.stats||{}}; break;
     case 'bookingHeatmap': S.DB.bookingHeatmap=m.heatmap||null; break;
     case 'suggestSlots': renderSuggestSlots(m.slots||[]); break;
+    case 'suggestDesks': renderFreeDesks(m.desks||[]); break;
     case 'riskBoard': S.DB.risk={items:m.board.items||[],total:m.board.total||0}; break;
     case 'reminders': S.DB.memo={items:m.reminders||[]}; break;
     case 'reminderDue': toast('⏰ 备忘提醒：'+(m.text||''),'warn'); render(); break;
@@ -1213,6 +1214,7 @@ function renderDesks(){
   const d=S.DB.desks||{desks:[],reservations:[]};
   const me=S.me.account, now=Date.now();
   $('#main').innerHTML = `<div class="topbar"><div><h1>工位预约</h1><div class="sub">开放工位 / 共享座位的时段预约，实时占用</div></div>
+    <button class="btn sm" onclick="openFreeDesk()">找空闲工位</button>
     ${deskHeatmapHtml()}
     ${S.admin?'<button class="btn pri" onclick="openDeskCreate()">＋ 新增工位</button>':''}</div>
     <div class="cards">${(d.desks||[]).map(k=>{
@@ -2265,6 +2267,25 @@ function submitFreeSuggest(roomId){ wsSend({type:'suggestSlots',roomId,durationM
 function renderSuggestSlots(slots){
   const box=$('#sugg-list'); if(!box) return;
   box.innerHTML=slots.length?`<div class="list">${slots.map(s=>`<div class="row"><span><span class="who">${s.date} ${fmtTime(s.startAt)} → ${fmtTime(s.endAt)}</span></span></div>`).join('')}</div><div class="hint">共 ${slots.length} 个可用时段</div>`:'<div class="hint">未来几天暂无可用时段，试试加长天数或缩短时长</div>';
+}
+/* 找空闲工位 */
+function openFreeDesk(){
+  const n=new Date(); n.setMinutes(n.getMinutes()+30);
+  const iso=(x)=new Date(x-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>找空闲工位</h2><div class="form">
+    <div class="fld"><label>开始</label><input id="fdkStart" type="datetime-local" value="${iso(n.getTime())}"></div>
+    <div class="fld"><label>结束</label><input id="fdkEnd" type="datetime-local" value="${iso(n.getTime()+3600000)}"></div>
+    <button class="btn pri" onclick="submitFreeDesk()">查询空闲工位</button>
+    <div id="fdk-list" class="hint">选好时段后点查询，会列出该时段可用的工位</div></div>`);
+}
+function submitFreeDesk(){
+  const s=new Date($('#fdkStart').value).getTime(), e=new Date($('#fdkEnd').value).getTime();
+  if(!(e>s)){ toast('请选择有效起止时间','error'); return; }
+  wsSend({type:'suggestDesks',startAt:s,endAt:e});
+}
+function renderFreeDesks(desks){
+  const box=$('#fdk-list'); if(!box) return;
+  box.innerHTML=desks.length?`<div class="list">${desks.map(x=>`<div class="row"><span><span class="who">${esc(x.name)}</span>${x.location?'<span class="meta">'+esc(x.location)+'</span>':''}</span></div>`).join('')}</div><div class="hint">共 ${desks.length} 个空闲工位</div>`:'<div class="hint">该时段没有空闲工位</div>';
 }
 function exportSpace(){ wsSend({type:'spaceExport'}); }
 /* 空间数据导入（覆盖恢复到当前空间） */

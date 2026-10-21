@@ -1952,6 +1952,19 @@ assert(impDst.admins instanceof Set && impDst.admins.has('bossa'), '管理员集
 assertEq(JSON.stringify(bk.data), JSON.stringify(api.spaceExport(impDst).data), '往返导出保持一致（备份保真）');
 assert(!api.spaceImport(api.createSpace('s73c', 'x', 1, 1), null).ok, '非法备份被拒绝');
 
+// ---------- 找空闲工位 ----------
+console.log('\n📋 74. 找空闲工位');
+const fdNow = Date.now();
+const fdSp = api.createSpace('s74', '工位空间', 1, 1);
+fdSp.desks.push({ id: 'dk1', name: 'A', location: '3F' }, { id: 'dk2', name: 'B', location: '3F' });
+const winS = fdNow + 86400000, winE = winS + 3600000;
+fdSp.deskReservations.set('r1', { id: 'r1', deskId: 'dk2', startAt: winS, endAt: winE, status: 'pending' });
+fdSp.deskReservations.set('r2', { id: 'r2', deskId: 'dk1', startAt: winS + 1800000, endAt: winE, status: 'cancelled' });
+const freeDesks = api.suggestFreeDesks(fdSp, winS, winE);
+assert(freeDesks.some((d) => d.id === 'dk1') && !freeDesks.some((d) => d.id === 'dk2'), '被占用工位被排除、取消预约不计');
+assertEq(freeDesks.length, 1, '仅返回未占用工位');
+assertEq(api.suggestFreeDesks(fdSp, 0, 0).length, 0, '无效时段返回空');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);
