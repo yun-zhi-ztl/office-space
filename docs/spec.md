@@ -178,6 +178,12 @@
 - `dueDailyRiskReminder(space, now)`：每空间每天（按 `todayKey` 去重）把仍有风险项的汇总推送给管理员，消息类型 `dailyRiskReminder`（含 `board`：总数 / 按类型计数 / 前 8 条），无风险项当天不触发。
 - `buildWeeklyReport` 在本周会议 / 借用 / 申领 / 报修 / 访客等基础上，新增新模块统计：`parcels`（本周新到）/ `parcelsPicked` / `parcelsOverdue`（当前逾期）/ `lockers` / `parking` / `vehicles` / `vehiclesInUse` / `printJobs` / `printDone` / `lost` / `lostResolved`。
 
+### 备忘提醒（memo）
+- `reminder`: `{ id, account, text, nextAt, repeat, enabled, createdAt, lastRemindedAt? }`
+  - `repeat`：`none`（一次性）/ `daily`（每天）/ `weekly`（每周）/ `monthly`（每月）。
+  - `reminderCreate` 任意成员创建（内容 + 时间 + 重复）；`reminderDelete` / `reminderToggle` 仅本人或管理员。
+  - `dueRecurReminders(space, now)` 由服务端周期任务调用：一次性提醒触发后停用，每天 / 每周 / 每月按周期自动推进 `nextAt`；到点经 `reminderDue` 单发推送给本人。列表按 `getReminders` 仅返回本人提醒。
+
 ### 物资申领（materials）
 - `material_request`: `{ id, requesterAccount, requesterName, name, qty, unit, reason, priority, status, handlerAccount?, handlerName?, createdAt, handledAt? }`
   - 状态：`pending` / `fulfilled` / `cancelled`
@@ -412,6 +418,8 @@
 | `getBookingHeatmap` | 获取今日会议室忙闲热图，返回 `bookingHeatmap` | member |
 | `getRisk` | 获取空间风险台账（迟检 / 逾期 / 待处理聚合），返回 `riskBoard` | member |
 | `spaceExport` | 管理员导出整个空间数据为 JSON 备份，返回 `spaceExport`（含 `meta` 与 `data` 全集合） | admin |
+| `reminderCreate` / `reminderDelete` / `reminderToggle` | 创建 / 删除 / 停用启用备忘提醒 | member |
+| `getReminders` | 获取本人的备忘提醒列表，返回 `reminders` | member |
 
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，
@@ -420,7 +428,7 @@
 
 ## 5. 前端
 
-单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 物资库存 / 报修 / 访客登记 / 考勤打卡 / 工位预约 / 外出登记 / 请假审批 / 会议纪要 / 意见反馈 / 心情打卡 / 活动管理 / 投票 / 知识库 / 待办任务 / 通知中心 / 坑位看板 / 我的日程 / 空间趋势 / 资产台账 / 钥匙门禁 / 冰箱食品 / 车辆停车 / 包裹快递 / 储物柜 / 用车申请 / 失物招领 / 文印服务 / 风险台账），
+单页应用：左侧导航（概览 / 会议室 / 工具借用 / 物资申领 / 物资库存 / 报修 / 访客登记 / 考勤打卡 / 工位预约 / 外出登记 / 请假审批 / 会议纪要 / 意见反馈 / 心情打卡 / 活动管理 / 投票 / 知识库 / 待办任务 / 通知中心 / 坑位看板 / 我的日程 / 空间趋势 / 资产台账 / 钥匙门禁 / 冰箱食品 / 车辆停车 / 包裹快递 / 储物柜 / 用车申请 / 失物招领 / 文印服务 / 风险台账 / 备忘提醒），
 个人资料入口位于侧栏底部；桌面与移动端响应式，原生 HTML/CSS/JS，无构建步骤；静态文件由 Express 托管；
 会议室预约支持每天 / 每周周期预约（列表按 `seriesId` 聚合展示并整组取消）；
 会议室卡片展示设备清单徽标与「维护中」标记；管理员可为会议室设置设备清单、维护时段（维护期间不可预约）；预约时可勾选实际使用设备（仅保留会议室已有设备）；

@@ -2771,6 +2771,30 @@ async function runTests() {
     wA.close(); wB.close();
   }
 
+  // ========== 测试66: 备忘提醒 ==========
+  console.log('\n📋 测试66: 备忘提醒（创建/停用/删除）');
+  {
+    const spMm = (await httpJson('POST', '/api/spaces', { name: '备忘办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aMm = 'mm_a_' + runKey, bMm = 'mm_b_' + runKey;
+    await reg(aMm, 'pw', '备忘管理员'); await reg(bMm, 'pw', '备忘成员');
+    const wA = await createWSClient(); await loginTo(wA, spMm.id, aMm, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spMm.id, bMm, 'pw');
+    await sendMsg(wB, { type: 'reminderCreate', text: '清冰箱', nextAt: Date.now() + 3600000, repeat: 'weekly' });
+    let mm = last(wB, 'reminders');
+    assert(mm && mm.reminders.length === 1 && mm.reminders[0].text === '清冰箱' && mm.reminders[0].repeat === 'weekly', '成员创建重复提醒');
+    const memoId = mm.reminders[0].id;
+    await sendMsg(wB, { type: 'reminderToggle', id: memoId });
+    mm = last(wB, 'reminders');
+    assert(mm.reminders.find(r => r.id === memoId).enabled === false, '可停用提醒');
+    await sendMsg(wB, { type: 'reminderCreate', text: '一次性备忘', nextAt: Date.now() + 1000 });
+    mm = last(wB, 'reminders');
+    assert(mm.reminders.length === 2 && mm.reminders.some(r => r.repeat === 'none'), '可再建一次性提醒');
+    await sendMsg(wB, { type: 'reminderDelete', id: memoId });
+    mm = last(wB, 'reminders');
+    assert(mm.reminders.length === 1, '可删除提醒');
+    wA.close(); wB.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

@@ -1828,6 +1828,26 @@ assertEq(wr.printDone, 1, '周报统计已打印');
 assertEq(wr.lost, 1, '周报统计失物');
 assertEq(wr.lostResolved, 1, '周报统计找回失物');
 
+// ---------- 备忘提醒 ----------
+console.log('\n📋 68. 备忘提醒（一次性/重复/推进）');
+const mmNow = Date.now();
+const mms = api.createSpace('s68', '备忘空间', 1, 1);
+mms.reminders.set('r1', { id: 'r1', account: 'a', text: '一次性', nextAt: mmNow - 1000, repeat: 'none', enabled: true, lastRemindedAt: 0 });
+mms.reminders.set('r2', { id: 'r2', account: 'a', text: '每天', nextAt: mmNow - 1000, repeat: 'daily', enabled: true, lastRemindedAt: 0 });
+mms.reminders.set('r3', { id: 'r3', account: 'b', text: '未来', nextAt: mmNow + 9999999, repeat: 'weekly', enabled: true, lastRemindedAt: 0 });
+const due1 = api.dueRecurReminders(mms, mmNow);
+assertEq(due1.length, 2, '到期两笔：一次性 + 每天');
+assertEq(mms.reminders.get('r1').enabled, false, '一次性提醒触发后停用');
+assert(mms.reminders.get('r2').nextAt > mmNow, '每天提醒排下一次');
+assertEq(api.dueRecurReminders(mms, mmNow + 1000).length, 0, '推进后同刻不再重复触发');
+const r3 = mms.reminders.get('r3'); r3.nextAt = mmNow - 1000;
+assert(api.dueRecurReminders(mms, mmNow).some((x) => x.id === 'r3') && r3.nextAt > mmNow, '每周提醒推进');
+mms.reminders.set('rm', { id: 'rm', account: 'a', text: '月', nextAt: mmNow - 1000, repeat: 'monthly', enabled: true, lastRemindedAt: 0 });
+api.dueRecurReminders(mms, mmNow);
+assert(mms.reminders.get('rm').nextAt > mmNow, '每月提醒推进');
+const memoPub = api.remindersPublic(mms, new Map([['a', { display: '甲' }], ['b', { display: '乙' }]]));
+assertEq(memoPub.length, 4, 'remindersPublic 返回全部提醒');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

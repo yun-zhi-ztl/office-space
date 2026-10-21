@@ -43,9 +43,10 @@ const S = {
   lost:{items:[],stats:{}},
   print:{printers:[],jobs:[],stats:{}},
   risk:{items:[],total:0},
+  memo:{items:[]},
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'],['schedule','我的日程','🗓️'],['cal','空间日历','📅'],['assets','资产台账','🗄️'],['keys','钥匙门禁','🔑'],['fridge','冰箱食品','🥤'],['parking','车辆停车','🚗'],['parcels','包裹快递','📦'],['lockers','储物柜','🗄️'],['vehicles','用车申请','🚘'],['lost','失物招领','🧢'],['print','文印服务','🖨️'],['risk','风险台账','⚠️'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'],['schedule','我的日程','🗓️'],['cal','空间日历','📅'],['assets','资产台账','🗄️'],['keys','钥匙门禁','🔑'],['fridge','冰箱食品','🥤'],['parking','车辆停车','🚗'],['parcels','包裹快递','📦'],['lockers','储物柜','🗄️'],['vehicles','用车申请','🚘'],['lost','失物招领','🧢'],['print','文印服务','🖨️'],['risk','风险台账','⚠️'],['memo','备忘提醒','⏰'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -107,6 +108,8 @@ function dispatch(m){
     case 'print': S.DB.print={printers:m.printers||[],jobs:m.jobs||[],stats:m.stats||{}}; break;
     case 'bookingHeatmap': S.DB.bookingHeatmap=m.heatmap||null; break;
     case 'riskBoard': S.DB.risk={items:m.board.items||[],total:m.board.total||0}; break;
+    case 'reminders': S.DB.memo={items:m.reminders||[]}; break;
+    case 'reminderDue': toast('⏰ 备忘提醒：'+(m.text||''),'warn'); render(); break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; S.DB.repairStats=m.stats||null; break;
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
     case 'page': handlePage(m); break;
@@ -229,17 +232,17 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceCalendar','spaceTrend','notices','digest','assets','keys','fridge','parking','parcels','lockers','vehicles','lostFound','print','bookingHeatmap','riskBoard'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceCalendar','spaceTrend','notices','digest','assets','keys','fridge','parking','parcels','lockers','vehicles','lostFound','print','bookingHeatmap','riskBoard','reminders'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); else if(S.module==='cal') renderSpaceCalendar(); else if(S.module==='assets') renderAssets(); else if(S.module==='keys') renderKeys(); else if(S.module==='fridge') renderFridge(); else if(S.module==='parking') renderParking(); else if(S.module==='parcels') renderParcels(); else if(S.module==='lockers') renderLockers(); else if(S.module==='vehicles') renderVehicles(); else if(S.module==='lost') renderLost(); else if(S.module==='print') renderPrint(); else if(S.module==='risk') renderRisk(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); else if(S.module==='cal') renderSpaceCalendar(); else if(S.module==='assets') renderAssets(); else if(S.module==='keys') renderKeys(); else if(S.module==='fridge') renderFridge(); else if(S.module==='parking') renderParking(); else if(S.module==='parcels') renderParcels(); else if(S.module==='lockers') renderLockers(); else if(S.module==='vehicles') renderVehicles(); else if(S.module==='lost') renderLost(); else if(S.module==='print') renderPrint(); else if(S.module==='risk') renderRisk(); else if(S.module==='memo') renderMemo(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
   else { b.style.display='none'; }
 }
 function renderAll(){ render(); }
-function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); if(mod==='keys') wsSend({type:'getKeys'}); if(mod==='fridge') wsSend({type:'getFridge'}); if(mod==='parking') wsSend({type:'getParking'}); if(mod==='parcels') wsSend({type:'getParcels'}); if(mod==='lockers') wsSend({type:'getLockers'}); if(mod==='vehicles') wsSend({type:'getVehicles'}); if(mod==='lost') wsSend({type:'getLost'}); if(mod==='print') wsSend({type:'getPrint'}); if(mod==='risk') wsSend({type:'getRisk'}); if(mod==='rooms') wsSend({type:'getBookingHeatmap'}); if(mod==='desks') wsSend({type:'getBookingHeatmap'}); }
+function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); if(mod==='keys') wsSend({type:'getKeys'}); if(mod==='fridge') wsSend({type:'getFridge'}); if(mod==='parking') wsSend({type:'getParking'}); if(mod==='parcels') wsSend({type:'getParcels'}); if(mod==='lockers') wsSend({type:'getLockers'}); if(mod==='vehicles') wsSend({type:'getVehicles'}); if(mod==='lost') wsSend({type:'getLost'}); if(mod==='print') wsSend({type:'getPrint'}); if(mod==='risk') wsSend({type:'getRisk'}); if(mod==='memo') wsSend({type:'getReminders'}); if(mod==='rooms') wsSend({type:'getBookingHeatmap'}); if(mod==='desks') wsSend({type:'getBookingHeatmap'}); }
 
 /* 分页：广播已按最近 PAGE 下发，前端按 offset 加载更多 */
 const PAGE = 30;
@@ -2222,6 +2225,31 @@ function renderRisk(){
 function refreshRisk(){ wsSend({type:'getRisk'}); }
 function jumpRisk(type){ const mod=RISK_JUMP[type]; if(mod) switchModule(mod); }
 function exportSpace(){ wsSend({type:'spaceExport'}); }
+/* 备忘提醒 */
+const MEMO_REPEAT = { none:'一次性', daily:'每天', weekly:'每周', monthly:'每月' };
+function renderMemo(){
+  const it=(S.DB.memo&&S.DB.memo.items)||[];
+  $('#main').innerHTML = `<div class="topbar"><div><h1>备忘提醒</h1><div class="sub">一次性或每天/每周/每月重复的自定义提醒，到点自动推送本人</div></div>
+    <button class="btn pri" onclick="openMemoCreate()">＋ 新建提醒</button></div>
+    <div class="cards">
+      <div class="card"><h3>⏰ 我的提醒</h3><div class="num">${it.length}</div><div class="meta">启用 ${it.filter(i=>i.enabled).length} 条</div></div>
+      <div class="card"><h3>🔁 重复提醒</h3><div class="num">${it.filter(i=>i.repeat!=='none').length}</div><div class="meta">每天 / 每周 / 每月</div></div>
+      <div class="card"><h3>⏳ 最近一条</h3><div class="num" style="font-size:16px">${it.length?esc(it[0].text):'--'}</div><div class="meta">${it.length?'下次 '+fmtTime(it[0].nextAt):'还没有提醒'}</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">⏰ 提醒列表</h3>
+    <div class="list">${it.length?it.map(r=>`
+      <div class="row"><span><span class="who">${esc(r.text)} <span class="badge ${r.enabled?'info':'bad'}">${r.enabled?'启用':'停用'}</span> <span class="badge grey">${MEMO_REPEAT[r.repeat]||r.repeat}</span></span>
+        <div class="meta">下次 ${fmtTime(r.nextAt)}${r.repeat!=='none'?' · 按周期自动排下一次':''}</div>
+      </span><span class="fs"><button class="btn sm" onclick="toggleMemo('${r.id}')">${r.enabled?'停用':'启用'}</button><button class="btn danger sm" onclick="deleteMemo('${r.id}')">删除</button></span></div>`).join(''):'<div class="empty">还没有提醒，点右上角新建</div>'}</div>`;
+}
+function openMemoCreate(){ const n=new Date(); n.setMinutes(n.getMinutes()+10); const iso=new Date(n.getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16); openModal(`<span class="close" onclick="closeModal()">×</span><h2>新建备忘提醒</h2><div class="form">
+  <div class="fld"><label>内容</label><input id="memText" placeholder="如：周五清空冰箱"></div>
+  <div class="fld"><label>时间</label><input id="memAt" type="datetime-local" value="${iso}"></div>
+  <div class="fld"><label>重复</label><select id="memRepeat"><option value="none">一次性</option><option value="daily">每天</option><option value="weekly">每周</option><option value="monthly">每月</option></select></div>
+  <button class="btn pri" onclick="submitMemoCreate()">创建</button></div>`); }
+function submitMemoCreate(){ const at=$('#memAt').value; wsSend({type:'reminderCreate',text:$('#memText').value,nextAt:at?new Date(at).getTime():0,repeat:$('#memRepeat').value}); closeModal(); }
+function toggleMemo(id){ wsSend({type:'reminderToggle',id}); }
+function deleteMemo(id){ if(confirm('删除该提醒？')) wsSend({type:'reminderDelete',id}); }
 /* 统一空间搜索 */
 const SEARCH_MOD = { rooms:'rooms', tools:'tools', materials:'materials', repairs:'repairs', tasks:'tasks', knowledge:'knowledge', notices:'dash', assets:'assets', users:null };
 const SEARCH_LABEL = { rooms:'会议室', tools:'设备', materials:'申领', repairs:'报修', tasks:'待办', knowledge:'知识库', notices:'公告', assets:'资产', users:'人员' };

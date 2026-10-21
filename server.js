@@ -44,6 +44,7 @@ const lockersModule = require('./src/modules/lockers');
 const vehiclesModule = require('./src/modules/vehicles');
 const lostFoundModule = require('./src/modules/lostfound');
 const printerModule = require('./src/modules/printer');
+const remindersModule = require('./src/modules/reminders');
 
 // ---------- 上下文 ----------
 const api = createContext();
@@ -102,6 +103,7 @@ const lockers = lockersModule(api);
 const vehicles = vehiclesModule(api);
 const lostFound = lostFoundModule(api);
 const printer = printerModule(api);
+const reminders = remindersModule(api);
 
 // ---------- 分页加载 ----------
 function handleFetchPage(ws, user, space, msg) {
@@ -166,6 +168,7 @@ wss.on('connection', (ws) => {
       if (!api.isAdmin(space, user.account)) return api.sendTo(ws, api.serError('仅管理员可导出空间数据'));
       api.sendTo(ws, { type: 'spaceExport', export: api.spaceExport(space) }); return;
     }
+    if (msg.type === 'getReminders') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'reminders', reminders: api.remindersPublic(space, info).filter((r) => r.account === user.account) }); return; }
     if (msg.type === 'getSpaceTrend') { api.sendTo(ws, { type: 'spaceTrend', trend: api.buildSpaceTrend(space, msg.days) }); return; }
     if (msg.type === 'getAttendanceCalendar') { api.sendTo(ws, { type: 'attendanceCalendar', calendar: api.attendanceCalendar(space, user.account, msg.year, msg.month) }); return; }
     if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }
@@ -231,6 +234,8 @@ wss.on('connection', (ws) => {
         lostFound.handleLostFound(ws, user, space, msg); break;
       case 'printerCreate': case 'printerUpdate': case 'printerDelete': case 'printSubmit': case 'printDone': case 'printPick': case 'printCancel':
         printer.handlePrint(ws, user, space, msg); break;
+      case 'reminderCreate': case 'reminderDelete': case 'reminderToggle':
+        reminders.handleReminders(ws, user, space, msg); break;
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
       case 'announce': extras.announce(ws, user, space, msg); break;
       case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;
@@ -499,6 +504,14 @@ setInterval(() => {
         for (const acc of sp.admins) api.sendToAccount(acc, { type: 'repairEscalated', repairId: r.id, category: r.category, location: r.location });
       }
       repairs.repairsBroadcast(sp);
+    }
+    // 自定义备忘提醒：到点推送给本人；每天/每周/每月按周期自动排下一次
+    const memoReminders = api.dueRecurReminders(sp, now);
+    if (memoReminders.length) {
+      for (const r of memoReminders) {
+        api.saveEntity(sp.id, 'reminder', r.id, r);
+        api.sendToAccount(r.account, { type: 'reminderDue', reminderId: r.id, text: r.text, repeat: r.repeat });
+      }
     }
     // 每日风险催办：把空间内迟检/逾期/待处理项汇总推给管理员（每天一次，按天去重）
     const dailyRisk = api.dueDailyRiskReminder(sp, now);
