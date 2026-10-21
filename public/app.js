@@ -93,6 +93,7 @@ function dispatch(m){
     case 'fridge': S.DB.fridge={items:m.items||[],stats:m.stats||{},logs:m.logs||[]}; break;
     case 'parking': S.DB.parking={spots:m.spots||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
     case 'parcels': S.DB.parcels={parcels:m.parcels||[],total:m.total||0,stats:m.stats||{}}; break;
+    case 'searchResults': renderSearchResult(m); break;
     case 'lockers': S.DB.lockers={lockers:m.lockers||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
     case 'vehicles': S.DB.vehicles={vehicles:m.vehicles||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; S.DB.repairStats=m.stats||null; break;
@@ -297,6 +298,7 @@ function renderSidebar(){
   $('#sidebar').innerHTML = `
     <div class="logo">OfficeSpace<small>办公空间管理</small></div>
     <div class="spacename"><b>${S.space?esc(S.space.name):'--'}</b>${S.admin?' · 管理员':''}</div>
+    <button class="btn sm" style="width:100%;margin-bottom:8px" onclick="openSearch()">🔍 搜索空间</button>
     <nav class="nav">${MODULES.map(m=>{ const badge = m[0]==='notifications' && S.notificationUnread ? `<span class="badge warn">${S.notificationUnread}</span>` : ''; return `<button data-m="${m[0]}" class="${S.module===m[0]?'active':''}" onclick="switchModule('${m[0]}')"><span class="ic">${m[2]}</span>${m[1]}${badge}</button>`; }).join('')}
       <a class="nav" href="screen.html?space=${S.space?S.space.id:''}" target="_blank" style="text-decoration:none"><button style="width:100%"><span class="ic">📺</span>电视墙大屏</button></a></nav>
     <div class="sidefoot">
@@ -2052,6 +2054,37 @@ function openVehicleCheckout(id){ openModal(`<span class="close" onclick="closeM
   <div class="fld"><label>返回里程（km）</label><input id="vhMile" type="number" min="1" placeholder="不得小于出发里程"></div>
   <button class="btn pri" onclick="submitVehicleCheckout('${id}')">确认还车</button></div>`); }
 function submitVehicleCheckout(id){ wsSend({type:'vehicleCheckout',id,mileageEnd:+$('#vhMile').value||0}); closeModal(); }
+/* 统一空间搜索 */
+const SEARCH_MOD = { rooms:'rooms', tools:'tools', materials:'materials', repairs:'repairs', tasks:'tasks', knowledge:'knowledge', notices:'dash', assets:'assets', users:null };
+const SEARCH_LABEL = { rooms:'会议室', tools:'设备', materials:'申领', repairs:'报修', tasks:'待办', knowledge:'知识库', notices:'公告', assets:'资产', users:'人员' };
+let _searchTimer = null;
+function openSearch(){
+  openModal(`<span class="close" onclick="closeModal()">×</span><h2>🔍 搜索空间</h2><div class="form">
+    <div class="fld"><input id="srk" placeholder="检索会议室 / 设备 / 申领 / 报修 / 待办 / 知识库 / 公告 / 资产 / 人员" oninput="doSearch(this.value)"></div>
+    <div id="srk-results"><div class="hint">输入关键词开始搜索</div></div></div>`);
+  setTimeout(()=>{ const i=$('#srk'); if(i) i.focus(); }, 60);
+}
+function doSearch(q){
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(()=>{ (q=(q||'').trim()) ? wsSend({type:'spaceSearch',q}) : renderSearchResult(null); }, 300);
+}
+function renderSearchResult(res){
+  const box=$('#srk-results'); if(!box) return;
+  if(!res){ box.innerHTML='<div class="hint">输入关键词开始搜索</div>'; return; }
+  const hits=res.hits||[];
+  if(!hits.length){ box.innerHTML='<div class="hint">没有匹配结果</div>'; return; }
+  const groups={}; for(const h of hits){ (groups[h.type]=groups[h.type]||[]).push(h); }
+  const html=Object.keys(groups).map((t)=>{
+    const label=SEARCH_LABEL[t]||t;
+    const rows=groups[t].map((h)=>{
+      const click=SEARCH_MOD[t] ? `style="cursor:pointer" onclick="jumpSearch('${t}')"` : 'style="cursor:default"';
+      return `<div class="row" ${click}><span><span class="who">${esc(h.title)}</span>${h.sub?`<div class="meta">${esc(h.sub)}</div>`:''}</span></div>`;
+    }).join('');
+    return `<h4 style="margin:12px 0 4px">${label}</h4><div class="list">${rows}</div>`;
+  }).join('');
+  box.innerHTML=html;
+}
+function jumpSearch(type){ const mod=SEARCH_MOD[type]; if(mod){ closeModal(); switchModule(mod); } }
 setInterval(()=>{ if(S.module==='stalls' && S.me && document.visibilityState==='visible') renderStalls(); }, 1000);
 function openReserve(id,type){
   const opts = type==='urinal' ? [['1分钟',1],['2分钟',2],['5分钟',5]] : [['15分钟',15],['30分钟',30],['45分钟',45]];

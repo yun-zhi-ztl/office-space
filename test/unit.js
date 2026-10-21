@@ -1564,6 +1564,30 @@ vehiclesModule2.handleVehicles({}, { account: 'alice' }, vhSpace, { type: 'vehic
 assertEq(vr1.status, 'checked_out', '还车后状态为已归还');
 assertEq(vr1.mileageEnd - vr1.mileageStart, 120, '记录行驶里程');
 
+// ---------- 统一空间搜索 ----------
+console.log('\n📋 58. 统一空间搜索');
+const ssh = api.createSpace('s58', '搜索空间', 1, 1);
+ssh.rooms.push({ id: 'rm1', name: '云图会议室', capacity: 8, location: '3F', description: '带投影' });
+ssh.tools.push({ id: 'tl1', name: '测试手机', category: '手机' });
+ssh.materialRequests.set('mr1', { id: 'mr1', name: '5号电池', requesterName: '甲', reason: '平板用', createdAt: 1 });
+ssh.repairs.set('rp1', { id: 'rp1', code: 'RP-001', category: '空调', location: '会议室', description: '不制冷', createdAt: 1 });
+ssh.tasks.set('tk1', { id: 'tk1', title: '布置周会', createdAt: 1 });
+ssh.knowledge.set('kn1', { id: 'kn1', title: '投影仪操作', category: '设备说明', content: '开关步骤', tags: '投影', createdAt: 1 });
+ssh.notices.push({ id: 'n1', from: '管理员', text: '下周三团建', ts: 1 });
+ssh.assets.set('a1', { id: 'a1', name: '3F 投影仪', category: '办公设备', createdAt: 1 });
+const sshInfo = new Map([['alice', { account: 'alice', display: '甲甲', role: 'member' }]]);
+assert(api.spaceSearch(ssh, sshInfo, '会议').hits.some((h) => h.type === 'rooms' && h.id === 'rm1'), '搜索命中会议室');
+assert(api.spaceSearch(ssh, sshInfo, '测试手机').hits.some((h) => h.type === 'tools' && h.id === 'tl1'), '搜索命中设备');
+assert(api.spaceSearch(ssh, sshInfo, '电池').hits.some((h) => h.type === 'materials' && h.id === 'mr1'), '搜索命中申领');
+assert(api.spaceSearch(ssh, sshInfo, '不制冷').hits.some((h) => h.type === 'repairs' && h.id === 'rp1'), '搜索命中报修描述');
+assert(api.spaceSearch(ssh, sshInfo, '周会').hits.some((h) => h.type === 'tasks' && h.id === 'tk1'), '搜索命中待办');
+assert(api.spaceSearch(ssh, sshInfo, '投影仪').hits.some((h) => h.type === 'knowledge' && h.id === 'kn1'), '搜索命中知识库');
+assert(api.spaceSearch(ssh, sshInfo, '团建').hits.some((h) => h.type === 'notices' && h.id === 'n1'), '搜索命中公告');
+assert(api.spaceSearch(ssh, sshInfo, '投影').hits.some((h) => h.type === 'assets' && h.id === 'a1'), '搜索命中资产');
+assert(api.spaceSearch(ssh, sshInfo, '甲甲').hits.some((h) => h.type === 'users' && h.id === 'alice'), '搜索命中成员');
+assertEq(api.spaceSearch(ssh, sshInfo, '').hits.length, 0, '空关键词返回空');
+assertEq(api.spaceSearch(ssh, sshInfo, '不存在的词xyz').hits.length, 0, '无匹配返回空');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

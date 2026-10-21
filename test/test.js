@@ -2554,6 +2554,28 @@ async function runTests() {
     wV1.close(); wV2.close();
   }
 
+  // ========== 测试58: 统一空间搜索 ==========
+  console.log('\n📋 测试58: 统一空间搜索');
+  {
+    const spS = (await httpJson('POST', '/api/spaces', { name: '搜索办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aS = 'sf_a_' + runKey;
+    await reg(aS, 'pw', '搜管理员');
+    const wS1 = await createWSClient(); await loginTo(wS1, spS.id, aS, 'pw');
+    await sendMsg(wS1, { type: 'roomCreate', name: '北极星会议室', capacity: 6 });
+    let lastRooms = last(wS1, 'rooms');
+    assert(lastRooms && lastRooms.rooms && lastRooms.rooms.some((r) => r.name === '北极星会议室'), 'admin 新增会议室供搜索');
+    await sendMsg(wS1, { type: 'spaceSearch', q: '北极星' });
+    let sr = last(wS1, 'searchResults');
+    assert(sr && sr.hits && sr.hits.some((h) => h.type === 'rooms' && h.title.includes('北极星')), '搜索命中会议室');
+    await sendMsg(wS1, { type: 'spaceSearch', q: '不存在的词xyz' });
+    sr = last(wS1, 'searchResults');
+    assert(sr && Array.isArray(sr.hits) && sr.hits.length === 0, '无匹配返回空');
+    await sendMsg(wS1, { type: 'spaceSearch', q: '' });
+    sr = last(wS1, 'searchResults');
+    assert(sr && sr.hits.length === 0, '空关键词返回空');
+    wS1.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

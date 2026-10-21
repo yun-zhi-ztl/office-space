@@ -1331,6 +1331,37 @@ function createContext() {
     });
   }
 
+  // 统一空间检索：跨会议室/设备/申领/报修/待办/知识库/公告/资产/人员做包含匹配
+  function spaceSearch(space, info, q, now) {
+    const s = String(q == null ? '' : q).trim().toLowerCase();
+    if (!s) return { q: '', hits: [] };
+    const m = (v) => String(v == null ? '' : v).toLowerCase().includes(s);
+    const push = (arr, type, icon, id, title, sub, ts) => {
+      if (arr.length >= 6) return;
+      arr.push({ type, icon, id, title: String(title || '').slice(0, 40), sub: String(sub == null ? '' : sub).slice(0, 60), ts: ts || 0 });
+    };
+    const hits = [];
+    // 会议室
+    for (const r of space.rooms || []) if (m(r.name) || m(r.location) || m(r.description)) push(hits, 'rooms', '🏢', r.id, r.name, (r.location ? r.location + ' · ' : '') + '容量 ' + r.capacity);
+    // 设备
+    for (const t of space.tools || []) if (m(t.name) || m(t.category) || m(t.description)) push(hits, 'tools', '🔧', t.id, t.name, t.category || '设备');
+    // 物资申领
+    for (const r of space.materialRequests ? [...space.materialRequests.values()] : []) if (m(r.name) || m(r.reason)) push(hits, 'materials', '📦', r.id, r.name, '申领 · ' + (r.requesterName || r.requesterAccount || '') + (r.reason ? ' · ' + r.reason : ''), r.createdAt);
+    // 报修
+    for (const r of space.repairs ? [...space.repairs.values()] : []) if (m(r.description) || m(r.location) || m(r.category) || m(r.code)) push(hits, 'repairs', '🛠️', r.id, (r.code || '') + (r.description ? ' ' + r.description : ''), (r.location ? r.location + ' · ' : '') + (r.category || ''), r.createdAt);
+    // 待办任务
+    for (const t of space.tasks ? [...space.tasks.values()] : []) if (m(t.title) || m(t.description)) push(hits, 'tasks', '📝', t.id, t.title, t.description || '', t.createdAt);
+    // 知识库
+    for (const k of space.knowledge ? [...space.knowledge.values()] : []) if (m(k.title) || m(k.content) || m(k.tags)) push(hits, 'knowledge', '📘', k.id, k.title, k.category || '知识库', k.createdAt);
+    // 公告
+    for (const n of space.notices || []) if (m(n.text) || m(n.from)) push(hits, 'notices', '📢', n.id, (n.from || '') + '：' + n.text, '', n.ts);
+    // 资产
+    for (const a of space.assets ? [...space.assets.values()] : []) if (m(a.name) || m(a.category) || m(a.location)) push(hits, 'assets', '🗄️', a.id, a.name, (a.category || '') + (a.location ? ' · ' + a.location : ''), a.createdAt);
+    // 人员（当前在线/在空间成员）
+    for (const d of info ? info.values() : []) if (m(d.display || d.username) || m(d.account)) push(hits, 'users', '👤', d.account, d.display || d.username, d.role === 'admin' ? '管理员' : '成员', 0);
+    return { q, hits };
+  }
+
   // 今日值班提醒：每个未完成值班每日只提醒一次（按 reminderAt 去重）
   function dueDutyReminders(space, now) {
     const key = todayKey(now);
@@ -2089,7 +2120,7 @@ function createContext() {
     // 空间
     weekKey, newWeekly, newStats, recordWeekly, weeklyScore, borrowOverdue, dueBorrowReminders, dueRoomReminders, dueRoomApprovalReminders, dueLeaveSlaReminders, dueDutyReminders, dueEventReminders, dueBorrowSoonReminders, dueOooReturnReminders, dueVisitorReminders, dueRepairSlaReminders, dueMaterialSlaReminders, dueRepairEscalations, findDuplicateRepair, createSpace, buildStalls, applyProfileToUser, ensureInvites, genInviteCode, createInvite, useInvite, revokeInvite, invitesPublic, inviteStatus, auditLog, auditLogsPublic,
     // 序列化
-    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, dutiesPublic, dutyStats, assetsPublic, assetsStats, keysPublic, keysStats, keyRequestsPublic, fridgeItemsPublic, fridgeStats, fridgeLogsPublic, parkingSpotsPublic, parkingStats, parkingReservationsPublic, parcelsPublic, parcelStats, lockersPublic, lockerStats, lockerReservationsPublic, vehiclesPublic, vehicleStats, vehicleReservationsPublic, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
+    roomPublic, roomRatingSummary, reservationPublic, roomWaitlistPublic, toolsPublic, toolWaitlistPublic, materialsPublic, materialTemplatePublic, materialsTemplatesPublic, repairsPublic, repairsStats, borrowsPublic, toolInsights, visitorsPublic, visitorCodeExpired, stallsPublic, leaderboardPublic, roomReservationsPublic, pruneRoomReservations, stallTier, expandRecurring, roomUsageStats, roomInsights, inventoryPublic, inventoryIssuesPublic, newAttendanceConfig, todayKey, parseTime, minutesOfDay, isLateAt, attendancePublic, attendanceStats, deskPublic, deskReservationsPublic, deskUsageStats, pruneDeskReservations, oooPublic, oooStats, feedbackPublic, feedbackStats, moodPublic, moodStats, dutiesPublic, dutyStats, assetsPublic, assetsStats, keysPublic, keysStats, keyRequestsPublic, fridgeItemsPublic, fridgeStats, fridgeLogsPublic, parkingSpotsPublic, parkingStats, parkingReservationsPublic, parcelsPublic, parcelStats, lockersPublic, lockerStats, lockerReservationsPublic, vehiclesPublic, vehicleStats, vehicleReservationsPublic, spaceSearch, eventPublic, eventStats, pollPublic, pollStats, knowledgePublic, knowledgeStats, tasksPublic, taskStats, leavesPublic, leavesStats, meetingNotesPublic, meetingNotesStats, notificationPublic, notificationsPublic, attendanceStreak, attendanceCalendar, attendancePerfectMonths,
     // 广播
     broadcast, broadcastAll, broadcastUsers, broadcastLeaderboard, broadcastStalls, roomStatsBroadcast, attendanceBroadcast, desksBroadcast, deskStatsBroadcast, oooBroadcast, feedbackBroadcast, moodBroadcast, dutyBroadcast, eventsBroadcast, pollsBroadcast, knowledgeBroadcast, tasksBroadcast, leavesBroadcast, meetingNotesBroadcast, notificationsBroadcast, noticesBroadcast, pushNotification, pushNotice, visitorsBroadcast, parcelsBroadcast, lockersBroadcast, vehiclesBroadcast,
     // 坑位辅助
