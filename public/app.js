@@ -39,9 +39,10 @@ const S = {
   parking:{spots:[],stats:{},reservations:[]},
   parcels:{parcels:[],total:0,stats:{}},
   lockers:{lockers:[],stats:{},reservations:[]},
+  vehicles:{vehicles:[],stats:{},reservations:[]},
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'],['schedule','我的日程','🗓️'],['cal','空间日历','📅'],['assets','资产台账','🗄️'],['keys','钥匙门禁','🔑'],['fridge','冰箱食品','🥤'],['parking','车辆停车','🚗'],['parcels','包裹快递','📦'],['lockers','储物柜','🗄️'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'],['schedule','我的日程','🗓️'],['cal','空间日历','📅'],['assets','资产台账','🗄️'],['keys','钥匙门禁','🔑'],['fridge','冰箱食品','🥤'],['parking','车辆停车','🚗'],['parcels','包裹快递','📦'],['lockers','储物柜','🗄️'],['vehicles','用车申请','🚘'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -93,6 +94,7 @@ function dispatch(m){
     case 'parking': S.DB.parking={spots:m.spots||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
     case 'parcels': S.DB.parcels={parcels:m.parcels||[],total:m.total||0,stats:m.stats||{}}; break;
     case 'lockers': S.DB.lockers={lockers:m.lockers||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
+    case 'vehicles': S.DB.vehicles={vehicles:m.vehicles||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; S.DB.repairStats=m.stats||null; break;
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
     case 'page': handlePage(m); break;
@@ -215,17 +217,17 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceCalendar','spaceTrend','notices','digest','assets','keys','fridge','parking','parcels','lockers'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceCalendar','spaceTrend','notices','digest','assets','keys','fridge','parking','parcels','lockers','vehicles'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); else if(S.module==='cal') renderSpaceCalendar(); else if(S.module==='assets') renderAssets(); else if(S.module==='keys') renderKeys(); else if(S.module==='fridge') renderFridge(); else if(S.module==='parking') renderParking(); else if(S.module==='parcels') renderParcels(); else if(S.module==='lockers') renderLockers(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); else if(S.module==='cal') renderSpaceCalendar(); else if(S.module==='assets') renderAssets(); else if(S.module==='keys') renderKeys(); else if(S.module==='fridge') renderFridge(); else if(S.module==='parking') renderParking(); else if(S.module==='parcels') renderParcels(); else if(S.module==='lockers') renderLockers(); else if(S.module==='vehicles') renderVehicles(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
   else { b.style.display='none'; }
 }
 function renderAll(){ render(); }
-function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); if(mod==='keys') wsSend({type:'getKeys'}); if(mod==='fridge') wsSend({type:'getFridge'}); if(mod==='parking') wsSend({type:'getParking'}); if(mod==='parcels') wsSend({type:'getParcels'}); if(mod==='lockers') wsSend({type:'getLockers'}); }
+function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); if(mod==='keys') wsSend({type:'getKeys'}); if(mod==='fridge') wsSend({type:'getFridge'}); if(mod==='parking') wsSend({type:'getParking'}); if(mod==='parcels') wsSend({type:'getParcels'}); if(mod==='lockers') wsSend({type:'getLockers'}); if(mod==='vehicles') wsSend({type:'getVehicles'}); }
 
 /* 分页：广播已按最近 PAGE 下发，前端按 offset 加载更多 */
 const PAGE = 30;
@@ -1983,6 +1985,73 @@ function lockerCancel(id){ if(confirm('确认取消该储物柜预约？')) wsSe
 function lockerCheckin(id){ wsSend({type:'lockerCheckin',id}); }
 function lockerCheckout(id){ if(confirm('确认签退归还可用的储物柜？')) wsSend({type:'lockerCheckout',id}); }
 function lockerRemindAll(){ if(confirm('对全部逾期未处理的储物柜预约批量提醒？')) wsSend({type:'lockerRemind'}); }
+/* 用车 / 公务车辆借用 */
+function renderVehicles(){
+  const v=S.DB.vehicles||{vehicles:[],stats:{},reservations:[]}; const st=v.stats||{};
+  const typeLabel={sedan:'轿车',suv:'SUV',van:'商务车',bus:'中巴'};
+  const resLabel={reserved:'待出车',checked_in:'行驶中',checked_out:'已归还',cancelled:'已取消'};
+  const resBadge={reserved:'info',checked_in:'ok',checked_out:'grey',cancelled:'bad'};
+  $('#main').innerHTML = `<div class="topbar"><div><h1>用车申请 / 公务车辆</h1><div class="sub">公司车辆台账、按时段借用、里程记录与保养管理</div></div>
+    ${S.admin?'<button class="btn pri" onclick="openVehicleCreate()">新增车辆</button>':''}</div>
+    <div class="cards">
+      <div class="card"><h3>🚘 车辆总数</h3><div class="num">${st.total||0}</div><div class="meta">轿车 ${st.byType?.sedan||0} · SUV ${st.byType?.suv||0} · 商务 ${st.byType?.van||0} · 中巴 ${st.byType?.bus||0}</div></div>
+      <div class="card"><h3>🛠️ 保养中</h3><div class="num">${st.maintenance||0}</div><div class="meta">辆暂不可借用</div></div>
+      <div class="card"><h3>🗓️ 今日借用</h3><div class="num">${st.todayBookings||0}</div><div class="meta">当前行驶 ${st.inUse||0} 辆</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">🚘 车辆清单</h3>
+    <div class="list">${v.vehicles.length?v.vehicles.map(x=>`
+      <div class="row"><span><span class="who">${esc(x.name)} <span class="badge ${x.type==='bus'?'warn':''}">${typeLabel[x.type]||x.type}</span> ${x.maintenance?'<span class="badge bad">保养中</span>':''}${x.inUse?'<span class="badge ok">行驶中</span>':''}${x.bookedNow?'<span class="badge info">即刻占用</span>':''}</span>
+        <div class="meta">${esc(x.plateNumber)}${x.seats?' · '+x.seats+' 座':''}${x.location?' · '+esc(x.location):''}${x.maintenance&&x.note?' · '+esc(x.note):''}</div>
+      </span><span class="fs">${S.admin?`<button class="btn sm" onclick="openVehicleEdit('${x.id}')">编辑</button><button class="btn danger sm" onclick="deleteVehicle('${x.id}')">删除</button>`:''}${!x.maintenance&&!x.bookedNow?`<button class="btn sm" onclick="openVehicleReserve('${x.id}')">预借</button>`:''}</span></div>`).join(''):'<div class="empty">暂无车辆</div>'}</div>
+    <h3 style="margin:22px 0 10px">📋 借车记录</h3>
+    <div class="list">${v.reservations.length?v.reservations.map(r=>`
+      <div class="row"><span><span class="who">${esc(r.vehicleName||'车辆')} <span class="badge ${resBadge[r.status]||''}">${resLabel[r.status]||r.status}</span></span>
+        <div class="meta">${esc(r.date)} ${fmtTime(r.startAt)}-${fmtTime(r.endAt)}${r.purpose?' · '+esc(r.purpose):''}${r.driver?' · 驾驶 '+esc(r.driver):''}${r.name?' · '+esc(r.name):''}${r.mileageStart?' · '+r.mileageStart+'km 起':''}${r.mileageEnd?' · '+r.mileageEnd+'km 止':''}</div>
+      </span><span class="fs">${r.status==='reserved'&&(r.account===S.me.account||S.admin)?`<button class="btn sm" onclick="vehicleCancel('${r.id}')">取消</button><button class="btn pri sm" onclick="openVehicleCheckin('${r.id}')">出车</button>`:''}${r.status==='checked_in'&&(r.account===S.me.account||S.admin)?`<button class="btn sm" onclick="openVehicleCheckout('${r.id}')">还车</button>`:''}</span></div>`).join(''):'<div class="empty">暂无借车记录</div>'}</div>`;
+}
+function openVehicleCreate(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>新增车辆</h2><div class="form">
+  <div class="fld"><label>车辆名称</label><input id="vhName" placeholder="如：3F 公务轿车"></div>
+  <div class="fld"><label>车牌号</label><input id="vhPlate" placeholder="如：京A·12345"></div>
+  <div class="fld"><label>类型</label><select id="vhType"><option value="sedan">轿车</option><option value="suv">SUV</option><option value="van">商务车</option><option value="bus">中巴</option></select></div>
+  <div class="fld"><label>座位数</label><input id="vhSeats" type="number" value="5" min="0"></div>
+  <div class="fld"><label>位置</label><input id="vhLoc" placeholder="如：地下 B1"></div>
+  <div class="fld"><label>备注</label><input id="vhNote" placeholder="可选"></div>
+  <div class="fld"><label><input type="checkbox" id="vhMaint"> 保养中（暂不可借用）</label></div>
+  <button class="btn pri" onclick="submitVehicleCreate()">创建</button></div>`); }
+function submitVehicleCreate(){ wsSend({type:'vehicleCreate',name:$('#vhName').value,plateNumber:$('#vhPlate').value,vehicleType:$('#vhType').value,seats:+$('#vhSeats').value||0,location:$('#vhLoc').value,note:$('#vhNote').value,maintenance:$('#vhMaint').checked}); closeModal(); }
+function openVehicleEdit(id){ const vt=(S.DB.vehicles&&S.DB.vehicles.vehicles||[]).find(x=>x.id===id); if(!vt) return; openModal(`<span class="close" onclick="closeModal()">×</span><h2>编辑车辆 · ${esc(vt.name)}</h2><div class="form">
+  <div class="fld"><label>车辆名称</label><input id="vhName" value="${esc(vt.name)}"></div>
+  <div class="fld"><label>车牌号</label><input id="vhPlate" value="${esc(vt.plateNumber)}"></div>
+  <div class="fld"><label>类型</label><select id="vhType">${['sedan','suv','van','bus'].map(t=>`<option value="${t}" ${t===vt.type?'selected':''}>${({sedan:'轿车',suv:'SUV',van:'商务车',bus:'中巴'}[t])}</option>`).join('')}</select></div>
+  <div class="fld"><label>座位数</label><input id="vhSeats" type="number" value="${vt.seats||0}" min="0"></div>
+  <div class="fld"><label>位置</label><input id="vhLoc" value="${esc(vt.location||'')}"></div>
+  <div class="fld"><label>备注</label><input id="vhNote" value="${esc(vt.note||'')}"></div>
+  <div class="fld"><label><input type="checkbox" id="vhMaint" ${vt.maintenance?'checked':''}> 保养中</label></div>
+  <button class="btn pri" onclick="submitVehicleEdit('${id}')">保存</button></div>`); }
+function submitVehicleEdit(id){ wsSend({type:'vehicleUpdate',id,name:$('#vhName').value,plateNumber:$('#vhPlate').value,vehicleType:$('#vhType').value,seats:+$('#vhSeats').value||0,location:$('#vhLoc').value,note:$('#vhNote').value,maintenance:$('#vhMaint').checked}); closeModal(); }
+function deleteVehicle(id){ const vt=(S.DB.vehicles&&S.DB.vehicles.vehicles||[]).find(x=>x.id===id); if(confirm('确认删除车辆「'+(vt?vt.name:'')+'」？')) wsSend({type:'vehicleDelete',id}); }
+function openVehicleReserve(id){ const vt=(S.DB.vehicles&&S.DB.vehicles.vehicles||[]).find(x=>x.id===id); const today=new Date(); const ymd=`${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`; openModal(`<span class="close" onclick="closeModal()">×</span><h2>借用车辆 · ${esc(vt?vt.name:'')}</h2><div class="form">
+  <div class="fld"><label>日期</label><input id="vhDate" type="date" value="${ymd}"></div>
+  <div class="fld"><label>开始时间</label><input id="vhStart" type="time" value="08:00"></div>
+  <div class="fld"><label>结束时间</label><input id="vhEnd" type="time" value="18:00"></div>
+  <div class="fld"><label>用途</label><input id="vhPurpose" placeholder="如：接送客户 / 外出办事"></div>
+  <div class="fld"><label>驾驶员（可选）</label><input id="vhDriver" placeholder="留空默认本人"></div>
+  <button class="btn pri" onclick="submitVehicleReserve('${id}')">提交借用</button></div>`); }
+function submitVehicleReserve(id){
+  const date=$('#vhDate').value, s=$('#vhStart').value, e=$('#vhEnd').value;
+  const start=new Date(date+'T'+s+':00').getTime(); const end=new Date(date+'T'+e+':00').getTime();
+  if(!(end>start)){ toast('结束时间须晚于开始时间','error'); return; }
+  wsSend({type:'vehicleReserve',vehicleId:id,date,startAt:start,endAt:end,purpose:$('#vhPurpose').value,driver:$('#vhDriver').value}); closeModal();
+}
+function vehicleCancel(id){ if(confirm('确认取消该借车预约？')) wsSend({type:'vehicleCancel',id}); }
+function openVehicleCheckin(id){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>出车登记</h2><div class="form">
+  <div class="fld"><label>出发里程（km）</label><input id="vhMile" type="number" min="1" placeholder="查看车辆仪表盘里程"></div>
+  <button class="btn pri" onclick="submitVehicleCheckin('${id}')">确认出车</button></div>`); }
+function submitVehicleCheckin(id){ wsSend({type:'vehicleCheckin',id,mileageStart:+$('#vhMile').value||0}); closeModal(); }
+function openVehicleCheckout(id){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>还车登记</h2><div class="form">
+  <div class="fld"><label>返回里程（km）</label><input id="vhMile" type="number" min="1" placeholder="不得小于出发里程"></div>
+  <button class="btn pri" onclick="submitVehicleCheckout('${id}')">确认还车</button></div>`); }
+function submitVehicleCheckout(id){ wsSend({type:'vehicleCheckout',id,mileageEnd:+$('#vhMile').value||0}); closeModal(); }
 setInterval(()=>{ if(S.module==='stalls' && S.me && document.visibilityState==='visible') renderStalls(); }, 1000);
 function openReserve(id,type){
   const opts = type==='urinal' ? [['1分钟',1],['2分钟',2],['5分钟',5]] : [['15分钟',15],['30分钟',30],['45分钟',45]];

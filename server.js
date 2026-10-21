@@ -41,6 +41,7 @@ const fridgeModule = require('./src/modules/fridge');
 const parkingModule = require('./src/modules/parking');
 const parcelsModule = require('./src/modules/parcels');
 const lockersModule = require('./src/modules/lockers');
+const vehiclesModule = require('./src/modules/vehicles');
 
 // ---------- 上下文 ----------
 const api = createContext();
@@ -96,6 +97,7 @@ const fridge = fridgeModule(api);
 const parking = parkingModule(api);
 const parcels = parcelsModule(api);
 const lockers = lockersModule(api);
+const vehicles = vehiclesModule(api);
 
 // ---------- 分页加载 ----------
 function handleFetchPage(ws, user, space, msg) {
@@ -150,6 +152,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'getParking') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'parking', spots: api.parkingSpotsPublic(space, info), stats: api.parkingStats(space), reservations: api.parkingReservationsPublic(space, info) }); return; }
     if (msg.type === 'getParcels') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'parcels', parcels: api.parcelsPublic(space, info).slice(0, api.LIST_PAGE), total: api.parcelsPublic(space, info).length, stats: api.parcelStats(space) }); return; }
     if (msg.type === 'getLockers') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'lockers', lockers: api.lockersPublic(space, info), stats: api.lockerStats(space), reservations: api.lockerReservationsPublic(space, info) }); return; }
+    if (msg.type === 'getVehicles') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'vehicles', vehicles: api.vehiclesPublic(space, info), stats: api.vehicleStats(space), reservations: api.vehicleReservationsPublic(space, info) }); return; }
     if (msg.type === 'getSpaceTrend') { api.sendTo(ws, { type: 'spaceTrend', trend: api.buildSpaceTrend(space, msg.days) }); return; }
     if (msg.type === 'getAttendanceCalendar') { api.sendTo(ws, { type: 'attendanceCalendar', calendar: api.attendanceCalendar(space, user.account, msg.year, msg.month) }); return; }
     if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }
@@ -209,6 +212,8 @@ wss.on('connection', (ws) => {
         parcels.handleParcels(ws, user, space, msg); break;
       case 'lockerCreate': case 'lockerDelete': case 'lockerReserve': case 'lockerCancel': case 'lockerCheckin': case 'lockerCheckout': case 'lockerRemind':
         lockers.handleLockers(ws, user, space, msg); break;
+      case 'vehicleCreate': case 'vehicleUpdate': case 'vehicleDelete': case 'vehicleReserve': case 'vehicleCancel': case 'vehicleCheckin': case 'vehicleCheckout':
+        vehicles.handleVehicles(ws, user, space, msg); break;
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
       case 'announce': extras.announce(ws, user, space, msg); break;
       case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;

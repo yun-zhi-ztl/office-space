@@ -2510,6 +2510,50 @@ async function runTests() {
     wL1.close(); wL2.close();
   }
 
+  // ========== 测试57: 用车 / 公务车辆 ==========
+  console.log('\n📋 测试57: 用车申请 / 公务车辆（新增/预约/冲突/出车/还车）');
+  {
+    const spVh = (await httpJson('POST', '/api/spaces', { name: '用车办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aVh = 'vha_' + runKey, bVh = 'vhb_' + runKey;
+    await reg(aVh, 'pw', '用车管理员'); await reg(bVh, 'pw', '用车成员');
+    const wV1 = await createWSClient(); await loginTo(wV1, spVh.id, aVh, 'pw');
+    const wV2 = await createWSClient(); await loginTo(wV2, spVh.id, bVh, 'pw');
+    const vhNow = Date.now();
+    await sendMsg(wV1, { type: 'vehicleCreate', name: '商务轿车', plateNumber: '京A·88888', vehicleType: 'van', seats: 5 });
+    let vh0 = last(wV2, 'vehicles');
+    assert(vh0 && vh0.vehicles.length === 1 && vh0.vehicles[0].plateNumber === '京A·88888', 'admin 新增车辆');
+    const vhId = vh0.vehicles[0].id;
+    await sendMsg(wV2, { type: 'vehicleReserve', vehicleId: vhId, date: '2026-10-20', startAt: vhNow + 86400000, endAt: vhNow + 86400000 + 3600000, purpose: '接送客户', driver: '乙' });
+    vh0 = last(wV2, 'vehicles');
+    assert(vh0.reservations[0] && vh0.reservations[0].status === 'reserved', '成员预约车辆');
+    // 同车冲突时段被拒
+    await sendMsg(wV2, { type: 'vehicleReserve', vehicleId: vhId, date: '2026-10-20', startAt: vhNow + 86400000 + 60000, endAt: vhNow + 86400000 + 3600000 + 60000 });
+    const errVh = mk(wV2, 'error').pop();
+    assert(errVh && errVh.message.includes('已被借用'), '冲突时段预借被拒');
+    // 出车需登记里程
+    await sendMsg(wV2, { type: 'vehicleCheckin', id: vh0.reservations[0].id });
+    const errVh2 = mk(wV2, 'error').pop();
+    assert(errVh2 && errVh2.message.includes('出发里程'), '未登记里程不能出车');
+    await sendMsg(wV2, { type: 'vehicleCheckin', id: vh0.reservations[0].id, mileageStart: 1000 });
+    vh0 = last(wV2, 'vehicles');
+    assert(vh0.reservations.find(r => r.id === vh0.reservations[0].id).status === 'checked_in', '出车后行驶中');
+    // 还车登记里程
+    await sendMsg(wV2, { type: 'vehicleCheckout', id: vh0.reservations[0].id, mileageEnd: 950 });
+    const errVh3 = mk(wV2, 'error').pop();
+    assert(errVh3 && errVh3.message.includes('不能小于'), '返回里程小于出发被拒');
+    await sendMsg(wV2, { type: 'vehicleCheckout', id: vh0.reservations[0].id, mileageEnd: 1120 });
+    vh0 = last(wV2, 'vehicles');
+    assert(vh0.reservations.find(r => r.id === vh0.reservations[0].id).status === 'checked_out', '还车后已归还');
+    // 保养车不可借
+    await sendMsg(wV1, { type: 'vehicleUpdate', id: vhId, maintenance: true });
+    vh0 = last(wV1, 'vehicles');
+    assert(vh0.vehicles[0].maintenance === true, '标记车辆保养中');
+    await sendMsg(wV2, { type: 'vehicleReserve', vehicleId: vhId, date: '2026-10-21', startAt: vhNow + 86400000, endAt: vhNow + 86400000 + 3600000 });
+    const errVh4 = mk(wV2, 'error').pop();
+    assert(errVh4 && errVh4.message.includes('保养中'), '保养中车辆不可借用');
+    wV1.close(); wV2.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

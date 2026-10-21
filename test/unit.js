@@ -9,6 +9,7 @@ const fridgeModule = require('../src/modules/fridge');
 const parkingModule = require('../src/modules/parking');
 const parcelsModule = require('../src/modules/parcels');
 const lockersModule = require('../src/modules/lockers');
+const vehiclesModule = require('../src/modules/vehicles');
 const extrasModule = require('../src/modules/extras');
 
 let passed = 0;
@@ -1512,6 +1513,56 @@ assertEq(lk1.available, 2, '签退后可用恢复');
 lockersModule2.handleLockers({}, { account: 'admin' }, lockerSpace, { type: 'lockerDelete', id: lk1.id });
 assertEq(lockerSpace.lockers.length, 0, '归还后可删除储物柜');
 assertEq(lockerApi.lockerStats(lockerSpace).active, 0, 'lockerStats 活跃数为 0');
+
+// ---------- 用车 / 公务车辆借用 ----------
+console.log('\n📋 57. 用车申请 / 公务车辆');
+const vhSent = [];
+let vhSeq = 0;
+const vhApi = {
+  spaceUserInfo: () => new Map([['alice', { display: '甲' }], ['bob', { display: '乙' }]]),
+  vehiclesPublic: (space) => space.vehicles,
+  vehicleStats: (space) => ({ total: space.vehicles.length, maintenance: space.vehicles.filter((v) => v.maintenance).length, inUse: [...space.vehicleReservations.values()].filter((r) => r.status === 'checked_in').length, todayBookings: [...space.vehicleReservations.values()].filter((r) => r.status === 'reserved' || r.status === 'checked_in').length, byType: {} }),
+  vehicleReservationsPublic: (space) => [...space.vehicleReservations.values()],
+  vehiclesBroadcast: () => {},
+  broadcast: () => {},
+  isAdmin: (space, account) => account === 'admin',
+  sendTo: (ws, obj) => { vhSent.push(obj); },
+  serError: (m) => ({ type: 'error', message: m }),
+  genId: () => `vh${vhSeq++}`,
+  saveEntity: () => {},
+  deleteEntity: () => {},
+  pushNotification: () => {},
+  VEHICLE_TYPES: ['sedan', 'suv', 'van', 'bus'],
+};
+const vehiclesModule2 = vehiclesModule(vhApi);
+const vhSpace = { id: 's57', vehicles: [], vehicleReservations: new Map() };
+vehiclesModule2.handleVehicles({}, { account: 'admin' }, vhSpace, { type: 'vehicleCreate', name: '公务轿车', plateNumber: '京A12345', vehicleType: 'suv' });
+const v1 = vhSpace.vehicles[0];
+assert(v1 && v1.type === 'suv' && v1.plateNumber === '京A12345', 'vehicleCreate 新增 SUV 车辆');
+vehiclesModule2.handleVehicles({}, { account: 'user' }, vhSpace, { type: 'vehicleCreate', name: '越权车', plateNumber: 'X' });
+assert(vhSent.some((m) => m.message && m.message.includes('仅管理员')), '非管理员新增车辆被拒');
+vehiclesModule2.handleVehicles({}, { account: 'alice' }, vhSpace, { type: 'vehicleReserve', vehicleId: v1.id, date: '2026-10-20', startAt: Date.now() + 86400000, endAt: Date.now() + 86400000 + 3600000, purpose: '接送客户' });
+const vr1 = [...vhSpace.vehicleReservations.values()][0];
+assert(vr1 && vr1.status === 'reserved', 'alice 预约车辆');
+// 同车时段冲突
+vehiclesModule2.handleVehicles({}, { account: 'bob' }, vhSpace, { type: 'vehicleReserve', vehicleId: v1.id, date: '2026-10-20', startAt: Date.now() + 86400000 + 60000, endAt: Date.now() + 86400000 + 3600000 + 60000, purpose: '办事' });
+assert(vhSent.some((m) => m.message && m.message.includes('已被借用')), '同车冲突时段被拒');
+// 保养车不可借
+vehiclesModule2.handleVehicles({}, { account: 'admin' }, vhSpace, { type: 'vehicleUpdate', id: v1.id, maintenance: true });
+assertEq(v1.maintenance, true, 'vehicleUpdate 标记保养中');
+vehiclesModule2.handleVehicles({}, { account: 'bob' }, vhSpace, { type: 'vehicleReserve', vehicleId: v1.id, date: '2026-10-21', startAt: Date.now() + 86400000, endAt: Date.now() + 86400000 + 3600000 });
+assert(vhSent.some((m) => m.message && m.message.includes('保养中')), '保养中车辆不可借用');
+vehiclesModule2.handleVehicles({}, { account: 'admin' }, vhSpace, { type: 'vehicleUpdate', id: v1.id, maintenance: false });
+assertEq(v1.maintenance, false, 'vehicleUpdate 解除保养');
+// 出车 / 还车 + 里程
+vehiclesModule2.handleVehicles({}, { account: 'alice' }, vhSpace, { type: 'vehicleCheckin', id: vr1.id, mileageStart: 5000 });
+assertEq(vr1.status, 'checked_in', '出车后状态为行驶中');
+assertEq(vr1.mileageStart, 5000, '记录出发里程');
+vehiclesModule2.handleVehicles({}, { account: 'alice' }, vhSpace, { type: 'vehicleCheckout', id: vr1.id, mileageEnd: 2000 });
+assert(vhSent.some((m) => m.message && m.message.includes('不能小于')), '返回里程小于出发被拒');
+vehiclesModule2.handleVehicles({}, { account: 'alice' }, vhSpace, { type: 'vehicleCheckout', id: vr1.id, mileageEnd: 5120 });
+assertEq(vr1.status, 'checked_out', '还车后状态为已归还');
+assertEq(vr1.mileageEnd - vr1.mileageStart, 120, '记录行驶里程');
 
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
