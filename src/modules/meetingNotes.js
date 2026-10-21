@@ -47,6 +47,23 @@ module.exports = function meetingNotesModule(api) {
       space.meetingNotes.delete(note.id);
       deleteEntity(space.id, 'meeting_note', note.id);
       meetingNotesBroadcast(space);
+    } else if (msg.type === 'meetingNoteToTask') {
+      // 会议纪要一键转待办：落到空间任务看板
+      const note = space.meetingNotes.get(msg.noteId);
+      if (!note) return sendTo(ws, serError('会议纪要不存在'));
+      if (note.account !== user.account && !isAdmin(space, user.account)) return sendTo(ws, serError('只能把自己创建的纪要转为任务'));
+      const res = space.roomReservations.get(note.reservationId);
+      const title = String(msg.title && String(msg.title).trim() || (note.title || (res && res.title) || '会议待办')).slice(0, 60);
+      const priority = ['high', 'normal', 'low'].includes(msg.priority) ? msg.priority : 'high';
+      const now = Date.now();
+      const rec = { id: genId('tk', null), title, description: '来自会议纪要[' + ((res && res.title) || note.title || '会议') + ']：' + (note.content || ''), creatorAccount: user.account, creatorName: user.nickname, assigneeAccount: note.account, assigneeName: '', priority, status: 'pending', dueAt: null, completedAt: null, createdAt: now, updatedAt: now, comments: [] };
+      space.tasks.set(rec.id, rec);
+      saveEntity(space.id, 'task', rec.id, rec);
+      api.tasksBroadcast(space);
+      api.recordWeekly(user, 'tasks');
+      api.checkAchievements(user);
+      api.saveProfile(user);
+      sendTo(ws, { type: 'taskCreated', taskId: rec.id, title: rec.title });
     }
   }
 

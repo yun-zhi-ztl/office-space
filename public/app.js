@@ -1392,7 +1392,7 @@ function renderMeetingNotes(){
       return `<div class="row"><span><span class="who">${esc(n.title||'（无标题）')}</span> <span class="badge">${esc(n.name||n.account)}</span>
         <div class="desc">${esc((n.content||'').slice(0,120))}${(n.content||'').length>120?'…':''}</div>
         <div class="when">${n.reservationTitle?esc(n.reservationTitle)+' · ':''}${n.roomName?esc(n.roomName):''}${who} · ${fmtTime(n.updatedAt||n.createdAt)} 更新</div>
-      </span><span class="fs">${(mine||S.admin)?`<button class="btn green sm" onclick="openMeetingNoteEdit('${n.id}')">编辑</button><button class="btn danger sm" onclick="meetingNoteRemove('${n.id}')">删除</button>`:''}</span></div>`;
+      </span><span class="fs">${(mine||S.admin)?`<button class="btn sm" onclick="meetingNoteToTask('${n.id}')">→ 待办</button><button class="btn green sm" onclick="openMeetingNoteEdit('${n.id}')">编辑</button><button class="btn danger sm" onclick="meetingNoteRemove('${n.id}')">删除</button>`:''}</span></div>`;
     }).join(''):'<div class="empty">还没有会议纪要</div>'}</div>`;
 }
 /* ============ 值班排班 ============ */
@@ -1473,6 +1473,7 @@ function submitMeetingNoteEdit(){
   closeModal();
 }
 function meetingNoteRemove(id){ wsSend({type:'meetingNoteRemove',noteId:id}); }
+function meetingNoteToTask(id){ if(confirm('把这条会议纪要转成待办任务？')) wsSend({type:'meetingNoteToTask',noteId:id}); }
 
 /* ============ 意见反馈 ============ */
 function renderFeedback(){

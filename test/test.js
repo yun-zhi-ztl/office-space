@@ -2959,6 +2959,31 @@ async function runTests() {
     wA.close(); wB.close(); wC.close();
   }
 
+  // ========== 测试74: 会议纪要一键转待办 ==========
+  console.log('\n📋 测试74: 会议纪要一键转待办');
+  {
+    const spMt = (await httpJson('POST', '/api/spaces', { name: '纪要约办', squat_count: 1, urinal_count: 1 })).json;
+    const aMt = 'mt_a_' + runKey, bMt = 'mt_b_' + runKey;
+    await reg(aMt, 'pw', '纪要管理员'); await reg(bMt, 'pw', '纪要成员');
+    const wA = await createWSClient(); await loginTo(wA, spMt.id, aMt, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spMt.id, bMt, 'pw');
+    await sendMsg(wA, { type: 'roomCreate', name: '周会间', capacity: 4 });
+    const rmList = last(wA, 'rooms').rooms;
+    const roomId = rmList[0].id;
+    const rStart = Date.now() + 86400000, rEnd = rStart + 3600000;
+    await sendMsg(wA, { type: 'roomBook', roomId, title: '周会', startAt: rStart, endAt: rEnd });
+    const rvList = last(wA, 'rooms').reservations;
+    const rvId = rvList.find(r => r.roomId === roomId).id;
+    await sendMsg(wB, { type: 'meetingNoteCreate', reservationId: rvId, title: '周会纪要', content: '确认下周预算' });
+    const ntId = last(wB, 'meetingNotes').notes.find(n => n.reservationId === rvId).id;
+    await sendMsg(wB, { type: 'meetingNoteToTask', noteId: ntId });
+    const tc = last(wB, 'taskCreated');
+    assert(tc && tc.taskId, '纪要转任务返回任务');
+    const tasks = last(wB, 'tasks').tasks || [];
+    assert(tasks.some(t => t.title.includes('周会纪要') || (t.description || '').includes('确认下周预算')), '任务看板出现来自纪要的任务');
+    wA.close(); wB.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);
