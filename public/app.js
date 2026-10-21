@@ -96,6 +96,7 @@ function dispatch(m){
     case 'fridge': S.DB.fridge={items:m.items||[],stats:m.stats||{},logs:m.logs||[]}; break;
     case 'parking': S.DB.parking={spots:m.spots||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
     case 'parcels': S.DB.parcels={parcels:m.parcels||[],total:m.total||0,stats:m.stats||{}}; break;
+    case 'dailyRiskReminder': { const b=m.board||{}; const parts=Object.entries(b.byType||{}).map(([k,v])=>`${RISK_LABEL[k]||k} ${v}`).join('、'); toast('⚠️ 今日风险待办 '+(b.total||0)+' 项'+(parts?'：'+parts:''),'warn'); break; }
     case 'searchResults': renderSearchResult(m); break;
     case 'lockers': S.DB.lockers={lockers:m.lockers||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
     case 'vehicles': S.DB.vehicles={vehicles:m.vehicles||[],stats:m.stats||{},reservations:m.reservations||[]}; break;

@@ -1770,6 +1770,21 @@ assertEq(rb.items[rIdx.repairs].priority, 'normal', '未办结报修为中优先
 assert(rb.items.every((x, i) => i === 0 || (('high' === x.priority ? 0 : 1) >= ('high' === rb.items[i - 1].priority ? 0 : 1))), '高优先级置前');
 assertEq(api.buildDigest(rsp, { account: 'x' }, rn).riskCount, 8, '概览 digest 统计风险待办')
 
+// ---------- 每日风险催办 ----------
+console.log('\n📋 65. 每日风险催办（按天去重）');
+const drSp = api.createSpace('s65', '催办空间', 1, 1);
+drSp.assets.set('a1', { id: 'a1', name: '灭火器', inspectIntervalDays: 30, lastCheckAt: 0 });
+drSp.repairs.set('rp1', { id: 'rp1', code: 'RP-1', description: '灯坏', status: 'reported', createdAt: Date.now() });
+const drNow = Date.now();
+const d1 = api.dueDailyRiskReminder(drSp, drNow);
+assert(d1 && d1.total >= 2 && d1.date === api.todayKey(drNow), '有风险项时返回每日催办');
+const d2 = api.dueDailyRiskReminder(drSp, drNow + 60000);
+assertEq(d2, null, '同一天去重不重复催办');
+const d3 = api.dueDailyRiskReminder(drSp, drNow + 86400000);
+assert(d3 && d3.total >= 2, '次日重新催办');
+const okSp = api.createSpace('s65b', '干净空间', 1, 1);
+assertEq(api.dueDailyRiskReminder(okSp, drNow), null, '无风险项不触发催办');
+
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
 console.log(`❌ 单元失败: ${failed}`);

@@ -496,6 +496,11 @@ setInterval(() => {
       }
       repairs.repairsBroadcast(sp);
     }
+    // 每日风险催办：把空间内迟检/逾期/待处理项汇总推给管理员（每天一次，按天去重）
+    const dailyRisk = api.dueDailyRiskReminder(sp, now);
+    if (dailyRisk) {
+      for (const acc of sp.admins) api.sendToAccount(acc, { type: 'dailyRiskReminder', board: dailyRisk });
+    }
     // 空间周报：每周一 09:00 汇总本周活动并广播给全员，当天只发一次
     const nowMon = new Date(now); nowMon.setHours(0, 0, 0, 0);
     const dow = (nowMon.getDay() + 6) % 7;
