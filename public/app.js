@@ -40,9 +40,10 @@ const S = {
   parcels:{parcels:[],total:0,stats:{}},
   lockers:{lockers:[],stats:{},reservations:[]},
   vehicles:{vehicles:[],stats:{},reservations:[]},
+  lost:{items:[],stats:{}},
   admin:false, sockOpen:false,
 };
-const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'],['schedule','我的日程','🗓️'],['cal','空间日历','📅'],['assets','资产台账','🗄️'],['keys','钥匙门禁','🔑'],['fridge','冰箱食品','🥤'],['parking','车辆停车','🚗'],['parcels','包裹快递','📦'],['lockers','储物柜','🗄️'],['vehicles','用车申请','🚘'] ];
+const MODULES = [ ['rooms','会议室','🏢'],['tools','工具借用','🔧'],['materials','物资申领','📦'],['inventory','物资库存','🗃️'],['repairs','报修','🛠️'],['visitors','访客登记','🚶'],['attend','考勤打卡','🕒'],['desks','工位预约','🪑'],['ooo','外出登记','🧳'],['feedback','意见反馈','💬'],['mood','心情打卡','🌈'],['leave','请假审批','📅'],['meetingNotes','会议纪要','📝'],['duties','值班排班','🛎️'],['events','活动管理','🎉'],['polls','投票','🗳️'],['knowledge','知识库','📘'],['tasks','待办任务','📝'],['notifications','通知中心','🔔'],['stalls','坑位看板','🚻'],['ach','成就墙','🏅'],['rem','我的待办','🔔'],['an','空间趋势','📈'],['audit','管理日志','🛡️'],['dash','概览','📊'],['schedule','我的日程','🗓️'],['cal','空间日历','📅'],['assets','资产台账','🗄️'],['keys','钥匙门禁','🔑'],['fridge','冰箱食品','🥤'],['parking','车辆停车','🚗'],['parcels','包裹快递','📦'],['lockers','储物柜','🗄️'],['vehicles','用车申请','🚘'],['lost','失物招领','🧢'] ];
 
 /* ============ WebSocket ============ */
 function wsSend(msg){ if(S.ws && S.ws.readyState===1) S.ws.send(JSON.stringify(msg)); else toast('未连接服务器','error'); }
@@ -96,6 +97,7 @@ function dispatch(m){
     case 'searchResults': renderSearchResult(m); break;
     case 'lockers': S.DB.lockers={lockers:m.lockers||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
     case 'vehicles': S.DB.vehicles={vehicles:m.vehicles||[],stats:m.stats||{},reservations:m.reservations||[]}; break;
+    case 'lostFound': S.DB.lost={items:m.items||[],stats:m.stats||{}}; break;
     case 'repairs': S.DB.repairs=m.repairs; S.DB.repTotal=m.total||0; S.DB.repOffset=S.DB.repairs.length; S.DB.repairStats=m.stats||null; break;
     case 'visitors': S.DB.visitors=m.visitors||[]; S.visitorTotal=m.total||0; S.visitorOffset=S.DB.visitors.length; break;
     case 'page': handlePage(m); break;
@@ -218,17 +220,17 @@ function dispatch(m){
     case 'autoRelease': case 'reservationExpired': toast('⏰ 坑位已超时释放','warn'); break;
     default: break;
   }
-  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceCalendar','spaceTrend','notices','digest','assets','keys','fridge','parking','parcels','lockers','vehicles'].includes(m.type)) render();
+  if(['rooms','tools','materials','repairs','visitors','stalls','attendance','desks','deskStats','ooo','feedback','mood','leaves','meetingNotes','roomStats','users','leaderboard','achievements','myReminders','mySchedule','spaceCalendar','spaceTrend','notices','digest','assets','keys','fridge','parking','parcels','lockers','vehicles','lostFound'].includes(m.type)) render();
 }
 /* 渲染入口：只重绘当前模块 */
-function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); else if(S.module==='cal') renderSpaceCalendar(); else if(S.module==='assets') renderAssets(); else if(S.module==='keys') renderKeys(); else if(S.module==='fridge') renderFridge(); else if(S.module==='parking') renderParking(); else if(S.module==='parcels') renderParcels(); else if(S.module==='lockers') renderLockers(); else if(S.module==='vehicles') renderVehicles(); }
+function render(){ if(!S.me) return; renderPauseBanner(); renderSidebar(); if(S.module==='dash') renderDash(); else if(S.module==='rooms') renderRooms(); else if(S.module==='tools') renderTools(); else if(S.module==='materials') renderMaterials(); else if(S.module==='inventory') renderInventory(); else if(S.module==='repairs') renderRepairs(); else if(S.module==='visitors') renderVisitors(); else if(S.module==='stalls') renderStalls(); else if(S.module==='attend') renderAttendance(); else if(S.module==='desks') renderDesks(); else if(S.module==='ooo') renderOoo(); else if(S.module==='feedback') renderFeedback(); else if(S.module==='mood') renderMood(); else if(S.module==='leave') renderLeaves(); else if(S.module==='meetingNotes') renderMeetingNotes(); else if(S.module==='duties') renderDuties(); else if(S.module==='events') renderEvents(); else if(S.module==='polls') renderPolls(); else if(S.module==='knowledge') renderKnowledge(); else if(S.module==='tasks') renderTasks(); else if(S.module==='notifications') renderNotifications(); else if(S.module==='ach') renderAchievements(); else if(S.module==='rem') renderReminders(); else if(S.module==='an') renderTrend(); else if(S.module==='audit') renderAudit(); else if(S.module==='schedule') renderSchedule(); else if(S.module==='cal') renderSpaceCalendar(); else if(S.module==='assets') renderAssets(); else if(S.module==='keys') renderKeys(); else if(S.module==='fridge') renderFridge(); else if(S.module==='parking') renderParking(); else if(S.module==='parcels') renderParcels(); else if(S.module==='lockers') renderLockers(); else if(S.module==='vehicles') renderVehicles(); else if(S.module==='lost') renderLost(); }
 function renderPauseBanner(){
   const b=$('#pause-banner'); if(!b) return;
   if(S.space && S.space.paused){ b.style.display='block'; b.innerHTML='🔒 空间已暂停：'+(S.space.pausedReason?esc(S.space.pausedReason)+' · ':'')+'暂停预约 / 借用 / 申领 / 报修 / 访客登记'; }
   else { b.style.display='none'; }
 }
 function renderAll(){ render(); }
-function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); if(mod==='keys') wsSend({type:'getKeys'}); if(mod==='fridge') wsSend({type:'getFridge'}); if(mod==='parking') wsSend({type:'getParking'}); if(mod==='parcels') wsSend({type:'getParcels'}); if(mod==='lockers') wsSend({type:'getLockers'}); if(mod==='vehicles') wsSend({type:'getVehicles'}); }
+function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); if(mod==='keys') wsSend({type:'getKeys'}); if(mod==='fridge') wsSend({type:'getFridge'}); if(mod==='parking') wsSend({type:'getParking'}); if(mod==='parcels') wsSend({type:'getParcels'}); if(mod==='lockers') wsSend({type:'getLockers'}); if(mod==='vehicles') wsSend({type:'getVehicles'}); if(mod==='lost') wsSend({type:'getLost'}); }
 
 /* 分页：广播已按最近 PAGE 下发，前端按 offset 加载更多 */
 const PAGE = 30;
@@ -2063,6 +2065,41 @@ function openVehicleCheckout(id){ openModal(`<span class="close" onclick="closeM
   <div class="fld"><label>返回里程（km）</label><input id="vhMile" type="number" min="1" placeholder="不得小于出发里程"></div>
   <button class="btn pri" onclick="submitVehicleCheckout('${id}')">确认还车</button></div>`); }
 function submitVehicleCheckout(id){ wsSend({type:'vehicleCheckout',id,mileageEnd:+$('#vhMile').value||0}); closeModal(); }
+/* 失物招领 */
+function renderLost(){
+  const l=S.DB.lost||{items:[],stats:{}}; const st=l.stats||{};
+  const typeLabel={lost:'丢失',found:'捡到'};
+  const typeIcon={lost:'🔍',found:'🎁'};
+  const statusLabel={open:'待认领',resolved:'已解决'};
+  const statusBadge={open:'warn',resolved:'ok'};
+  $('#main').innerHTML = `<div class="topbar"><div><h1>🧢 失物招领</h1><div class="sub">丢失 / 捡到物品公示，方便主人认领，找回后标记解决</div></div>
+    <button class="btn pri" onclick="openLostReport()">上报物品</button></div>
+    <div class="cards">
+      <div class="card"><h3>🧢 记录总数</h3><div class="num">${st.total||0}</div><div class="meta">待认领 ${st.open||0}</div></div>
+      <div class="card"><h3>🔍 丢失待认领</h3><div class="num">${st.openLost||0}</div><div class="meta">有人在找 ${st.openLost||0} 件物品</div></div>
+      <div class="card"><h3>🎁 捡到待认领</h3><div class="num">${st.openFound||0}</div><div class="meta">可认领 ${st.openFound||0} 件；已找回 ${st.resolved||0}</div></div>
+    </div>
+    <h3 style="margin:22px 0 10px">🧢 物品公示</h3>
+    <div class="list">${l.items.length?l.items.map(x=>`
+      <div class="row"><span><span class="who">${typeIcon[x.type]}
+        <span class="badge ${x.type==='found'?'ok':'bad'}">${typeLabel[x.type]||x.type}</span>
+        ${esc(x.name)} <span class="badge ${statusBadge[x.status]||''}">${statusLabel[x.status]||x.status}</span></span>
+        <div class="meta">${esc(x.category)}${x.location?' · '+esc(x.location):''}${x.description?' · '+esc(x.description):''}${x.contact?' · 📞 '+esc(x.contact):''}</div>
+        <div class="meta">上报 ${esc(x.reportedByName||'')} · ${fmtTime(x.createdAt)}${x.resolvedAt?' · 解决 '+fmtTime(x.resolvedAt):''}</div>
+      </span><span class="fs">${x.status==='open'&&(x.reportedByAccount===S.me.account||S.admin)?`<button class="btn pri sm" onclick="lostResolve('${x.id}')">已解决</button>`:''}${x.status==='resolved'&&(x.reportedByAccount===S.me.account||S.admin)?`<button class="btn sm" onclick="lostReopen('${x.id}')">重新开启</button>`:''}${S.admin?`<button class="btn danger sm" onclick="lostDelete('${x.id}')">删除</button>`:''}</span></div>`).join(''):'<div class="empty">还没有失物招领记录</div>'}</div>`;
+}
+function openLostReport(){ openModal(`<span class="close" onclick="closeModal()">×</span><h2>上报失物 / 拾物</h2><div class="form">
+  <div class="fld"><label>类型</label><select id="lfType"><option value="lost">丢失（我在找）</option><option value="found">捡到（可认领）</option></select></div>
+  <div class="fld"><label>物品名称</label><input id="lfName" placeholder="如：黑色钱包"></div>
+  <div class="fld"><label>类别</label><select id="lfCat">${['证件','电子设备','钥匙','衣物','水杯','雨伞','其它'].map(c=>`<option>${c}</option>`).join('')}</select></div>
+  <div class="fld"><label>位置</label><input id="lfLoc" placeholder="如：3F 食堂"></div>
+  <div class="fld"><label>描述</label><input id="lfDesc" placeholder="特征 / 时间等"></div>
+  <div class="fld"><label>联系方式</label><input id="lfContact" placeholder="选填"></div>
+  <button class="btn pri" onclick="submitLostReport()">发布</button></div>`); }
+function submitLostReport(){ wsSend({type:'lostReport',lostType:$('#lfType').value,name:$('#lfName').value,category:$('#lfCat').value,location:$('#lfLoc').value,description:$('#lfDesc').value,contact:$('#lfContact').value}); closeModal(); }
+function lostResolve(id){ if(confirm('确认标记为已解决（已找回 / 已归还）？')) wsSend({type:'lostResolve',id}); }
+function lostReopen(id){ if(confirm('重新开启该记录？')) wsSend({type:'lostReopen',id}); }
+function lostDelete(id){ if(confirm('确认删除该失物招领记录？')) wsSend({type:'lostDelete',id}); }
 /* 统一空间搜索 */
 const SEARCH_MOD = { rooms:'rooms', tools:'tools', materials:'materials', repairs:'repairs', tasks:'tasks', knowledge:'knowledge', notices:'dash', assets:'assets', users:null };
 const SEARCH_LABEL = { rooms:'会议室', tools:'设备', materials:'申领', repairs:'报修', tasks:'待办', knowledge:'知识库', notices:'公告', assets:'资产', users:'人员' };

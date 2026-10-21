@@ -10,6 +10,7 @@ const parkingModule = require('../src/modules/parking');
 const parcelsModule = require('../src/modules/parcels');
 const lockersModule = require('../src/modules/lockers');
 const vehiclesModule = require('../src/modules/vehicles');
+const lostFoundModule = require('../src/modules/lostfound');
 const extrasModule = require('../src/modules/extras');
 
 let passed = 0;
@@ -1612,6 +1613,42 @@ assertEq(dg.todayVehicleBookingsCount, 1, 'digest 统计今日预借车辆');
 assertEq(dg.maintenanceVehiclesCount, 1, 'digest 统计保养中车辆');
 assertEq(dg.parkingOccupiedCount, 1, 'digest 统计停车占用');
 assertEq(dg.parkingTotal, 1, 'digest 统计车位总数');
+
+// ---------- 失物招领 ----------
+console.log('\n📋 60. 失物招领');
+const lfSent = [];
+let lfSeq = 0;
+const lfApi = {
+  spaceUserInfo: () => new Map([['alice', { display: '甲' }], ['bob', { display: '乙' }]]),
+  lostPublic: (space) => space.lostFound,
+  lostStats: (space) => ({ total: space.lostFound.length, open: space.lostFound.filter((x) => x.status === 'open').length, openLost: space.lostFound.filter((x) => x.status === 'open' && x.type === 'lost').length, openFound: space.lostFound.filter((x) => x.status === 'open' && x.type === 'found').length, resolved: space.lostFound.filter((x) => x.status === 'resolved').length }),
+  lostBroadcast: () => {},
+  isAdmin: (space, account) => account === 'admin',
+  sendTo: (ws, obj) => { lfSent.push(obj); },
+  serError: (m) => ({ type: 'error', message: m }),
+  genId: () => `lf${lfSeq++}`,
+  saveEntity: () => {},
+  deleteEntity: () => {},
+  LOST_CATEGORIES: ['证件', '电子设备', '钥匙', '衣物', '水杯', '雨伞', '其它'],
+};
+const lostModule2 = lostFoundModule(lfApi);
+const lfSpace = { id: 's60', lostFound: [] };
+lostModule2.handleLostFound({}, { account: 'alice', nickname: '甲' }, lfSpace, { type: 'lostReport', lostType: 'lost', name: '黑色钱包', category: '证件', location: '3F' });
+const i1 = lfSpace.lostFound[0];
+assert(i1 && i1.type === 'lost' && i1.status === 'open' && i1.name === '黑色钱包', 'lostReport 上报丢失物品');
+lostModule2.handleLostFound({}, { account: 'bob', nickname: '乙' }, lfSpace, { type: 'lostReport', lostType: 'found', name: '苹果耳机', category: '电子设备' });
+assertEq(lfSpace.lostFound.length, 2, 'lostReport 上报拾物');
+lostModule2.handleLostFound({}, { account: 'bob' }, lfSpace, { type: 'lostResolve', id: i1.id });
+assert(lfSent.some((m) => m.message && m.message.includes('只能处理自己')), '他人不能处理他人记录');
+lostModule2.handleLostFound({}, { account: 'alice' }, lfSpace, { type: 'lostResolve', id: i1.id });
+assertEq(i1.status, 'resolved', '上报人可标记已解决');
+lostModule2.handleLostFound({}, { account: 'alice' }, lfSpace, { type: 'lostReopen', id: i1.id });
+assertEq(i1.status, 'open', '可重新开启');
+lostModule2.handleLostFound({}, { account: 'user' }, lfSpace, { type: 'lostDelete', id: i1.id });
+assert(lfSent.some((m) => m.message && m.message.includes('仅管理员')), '非管理员删除被拒');
+lostModule2.handleLostFound({}, { account: 'admin' }, lfSpace, { type: 'lostDelete', id: i1.id });
+assertEq(lfSpace.lostFound.length, 1, '管理员可删除记录');
+assertEq(lfApi.lostStats(lfSpace).openFound, 1, 'lostStats 统计捡到待认领');
 
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);

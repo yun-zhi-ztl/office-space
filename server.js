@@ -42,6 +42,7 @@ const parkingModule = require('./src/modules/parking');
 const parcelsModule = require('./src/modules/parcels');
 const lockersModule = require('./src/modules/lockers');
 const vehiclesModule = require('./src/modules/vehicles');
+const lostFoundModule = require('./src/modules/lostfound');
 
 // ---------- 上下文 ----------
 const api = createContext();
@@ -98,6 +99,7 @@ const parking = parkingModule(api);
 const parcels = parcelsModule(api);
 const lockers = lockersModule(api);
 const vehicles = vehiclesModule(api);
+const lostFound = lostFoundModule(api);
 
 // ---------- 分页加载 ----------
 function handleFetchPage(ws, user, space, msg) {
@@ -154,6 +156,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'getLockers') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'lockers', lockers: api.lockersPublic(space, info), stats: api.lockerStats(space), reservations: api.lockerReservationsPublic(space, info) }); return; }
     if (msg.type === 'getVehicles') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'vehicles', vehicles: api.vehiclesPublic(space, info), stats: api.vehicleStats(space), reservations: api.vehicleReservationsPublic(space, info) }); return; }
     if (msg.type === 'spaceSearch') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'searchResults', q: msg.q || '', hits: api.spaceSearch(space, info, msg.q || '').hits }); return; }
+    if (msg.type === 'getLost') { const info = api.spaceUserInfo(space.id); api.sendTo(ws, { type: 'lostFound', items: api.lostPublic(space, info), stats: api.lostStats(space) }); return; }
     if (msg.type === 'getSpaceTrend') { api.sendTo(ws, { type: 'spaceTrend', trend: api.buildSpaceTrend(space, msg.days) }); return; }
     if (msg.type === 'getAttendanceCalendar') { api.sendTo(ws, { type: 'attendanceCalendar', calendar: api.attendanceCalendar(space, user.account, msg.year, msg.month) }); return; }
     if (msg.type === 'fetchPage') { handleFetchPage(ws, user, space, msg); return; }
@@ -215,6 +218,8 @@ wss.on('connection', (ws) => {
         lockers.handleLockers(ws, user, space, msg); break;
       case 'vehicleCreate': case 'vehicleUpdate': case 'vehicleDelete': case 'vehicleReserve': case 'vehicleCancel': case 'vehicleCheckin': case 'vehicleCheckout':
         vehicles.handleVehicles(ws, user, space, msg); break;
+      case 'lostReport': case 'lostResolve': case 'lostReopen': case 'lostDelete':
+        lostFound.handleLostFound(ws, user, space, msg); break;
       case 'setStatus': extras.setStatus(ws, user, space, msg); break;
       case 'announce': extras.announce(ws, user, space, msg); break;
       case 'spaceRename': extras.renameSpace(ws, user, space, msg); break;

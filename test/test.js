@@ -2616,6 +2616,36 @@ async function runTests() {
     wD1.close(); wD2.close();
   }
 
+  // ========== 测试60: 失物招领 ==========
+  console.log('\n📋 测试60: 失物招领（上报/解决/重开/删除）');
+  {
+    const spLf = (await httpJson('POST', '/api/spaces', { name: '失物办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aLf = 'lf_a_' + runKey, bLf = 'lf_b_' + runKey;
+    await reg(aLf, 'pw', '失物管理员'); await reg(bLf, 'pw', '失物成员');
+    const wL1 = await createWSClient(); await loginTo(wL1, spLf.id, aLf, 'pw');
+    const wL2 = await createWSClient(); await loginTo(wL2, spLf.id, bLf, 'pw');
+    await sendMsg(wL2, { type: 'lostReport', lostType: 'lost', name: '黑色钱包', category: '证件', location: '3F 食堂' });
+    let lf0 = last(wL2, 'lostFound');
+    assert(lf0 && lf0.items.length === 1 && lf0.items[0].type === 'lost' && lf0.items[0].status === 'open', '成员上报丢失物品');
+    const lfId = lf0.items[0].id;
+    // 管理员上报一条，供普通成员做越权校验
+    await sendMsg(wL1, { type: 'lostReport', lostType: 'found', name: '苹果耳机', category: '电子设备' });
+    const lf2 = last(wL1, 'lostFound').items.find(x => x.type === 'found').id;
+    await sendMsg(wL2, { type: 'lostResolve', id: lf2 });
+    const errLf = mk(wL2, 'error').pop();
+    assert(errLf && errLf.message.includes('只能处理自己'), '非上报人不能处理他人记录');
+    await sendMsg(wL2, { type: 'lostResolve', id: lfId });
+    lf0 = last(wL2, 'lostFound');
+    assert(lf0.items.find(x => x.id === lfId).status === 'resolved', '上报人可标记已解决');
+    await sendMsg(wL2, { type: 'lostReopen', id: lfId });
+    lf0 = last(wL2, 'lostFound');
+    assert(lf0.items.find(x => x.id === lfId).status === 'open', '可重新开启');
+    await sendMsg(wL1, { type: 'lostDelete', id: lfId });
+    lf0 = last(wL1, 'lostFound');
+    assert(!lf0.items.some(x => x.id === lfId), '管理员可删除记录');
+    wL1.close(); wL2.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);
