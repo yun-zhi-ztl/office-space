@@ -254,6 +254,9 @@ wss.on('connection', (ws) => {
       case 'removeNotice': extras.removeNotice(ws, user, space, msg); break;
       case 'noticeReact': extras.noticeReact(ws, user, space, msg); break;
       case 'noticeUnreact': extras.noticeUnreact(ws, user, space, msg); break;
+      case 'noticeRead': extras.noticeRead(ws, user, space, msg); break;
+      case 'noticeRequire': extras.noticeRequire(ws, user, space, msg); break;
+      case 'noticeRemindUnread': extras.noticeRemindUnread(ws, user, space, msg); break;
       default:
         api.sendTo(ws, api.serError('未知操作'));
     }

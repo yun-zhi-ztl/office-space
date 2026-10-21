@@ -2803,6 +2803,32 @@ async function runTests() {
     wA.close(); wB.close();
   }
 
+  // ========== 测试67: 公告已读确认 ==========
+  console.log('\n📋 测试67: 公告已读确认（必读/已读/催未读）');
+  {
+    const spN = (await httpJson('POST', '/api/spaces', { name: '公告办公室', squat_count: 1, urinal_count: 1 })).json;
+    const aN = 'nt_a_' + runKey, bN = 'nt_b_' + runKey, cN = 'nt_c_' + runKey;
+    await reg(aN, 'pw', '公告管理员'); await reg(bN, 'pw', '公告成员甲'); await reg(cN, 'pw', '公告成员乙');
+    const wA = await createWSClient(); await loginTo(wA, spN.id, aN, 'pw');
+    const wB = await createWSClient(); await loginTo(wB, spN.id, bN, 'pw');
+    const wC = await createWSClient(); await loginTo(wC, spN.id, cN, 'pw');
+    await sendMsg(wA, { type: 'announce', text: '安全公告：请阅读消防指引' });
+    let no = last(wA, 'notices').notices;
+    assert(no && no.length === 1, '管理员发布公告');
+    const nid = no[0].id;
+    await sendMsg(wA, { type: 'noticeRequire', noticeId: nid });
+    no = last(wA, 'notices').notices;
+    assert(no.find(n => n.id === nid).requireRead === true, '管理员可设公告必读');
+    await sendMsg(wB, { type: 'noticeRead', noticeId: nid });
+    no = last(wB, 'notices').notices;
+    const readN = no.find(n => n.id === nid);
+    assert(readN.readBy && readN.readBy.includes(bN) && readN.readBy.length === 1, '成员已读后计入 readBy');
+    await sendMsg(wA, { type: 'noticeRemindUnread', noticeId: nid });
+    const rm = last(wA, 'noticeRemindSent');
+    assert(rm && rm.count >= 1, '管理员可一键提醒未读成员');
+    wA.close(); wB.close(); wC.close();
+  }
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`✅ 通过: ${passed}`);
   console.log(`❌ 失败: ${failed}`);

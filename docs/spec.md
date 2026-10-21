@@ -421,6 +421,9 @@
 | `spaceExport` | 管理员导出整个空间数据为 JSON 备份，返回 `spaceExport`（含 `meta` 与 `data` 全集合） | admin |
 | `reminderCreate` / `reminderDelete` / `reminderToggle` | 创建 / 删除 / 停用启用备忘提醒 | member |
 | `getReminders` | 获取本人的备忘提醒列表，返回 `reminders` | member |
+| `noticeRequire` | 把公告设为 / 取消「必读」 | admin |
+| `noticeRead` | 成员标记已读某公告（写入 `readBy`） | member |
+| `noticeRemindUnread` | 一键提醒公告未读成员，返回 `noticeRemindSent` | admin |
 
 ### 服务端 → 客户端
 `joined`、`loginSuccess`、`error`、`stats`，

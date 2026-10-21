@@ -225,5 +225,44 @@ module.exports = function extrasModule(api) {
     sendTo(ws, { type: 'noticeReactionUpdated', noticeId: notice.id });
   }
 
-  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace, adminSet: handleAdminSet, kick: handleKick, pause: handlePause, removeNotice: handleRemoveNotice, noticeReact: handleNoticeReact, noticeUnreact: handleNoticeUnreact, inviteCreate: handleInviteCreate, inviteRevoke: handleInviteRevoke, inviteList: handleInviteList, inviteRequire: handleInviteRequire, auditList: handleAuditList, announceEdit: handleAnnounceEdit, announcePin: handleAnnouncePin };
+  // 公告已读确认：成员标记已读 / 管理员设必读 / 管理员催未读
+  function handleNoticeRead(ws, user, space, msg) {
+    const notice = space.notices.find((n) => n.id === msg.noticeId);
+    if (!notice) return sendTo(ws, serError('公告不存在'));
+    notice.readBy = notice.readBy || [];
+    if (!notice.readBy.includes(user.account)) {
+      notice.readBy.push(user.account);
+      saveEntity(space.id, 'notice', notice.id, notice);
+      noticesBroadcast(space);
+    }
+    sendTo(ws, { type: 'noticeReadDone', noticeId: notice.id });
+  }
+  function handleNoticeRequire(ws, user, space, msg) {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可设置必读'));
+    const notice = space.notices.find((n) => n.id === msg.noticeId);
+    if (!notice) return sendTo(ws, serError('公告不存在'));
+    notice.requireRead = !notice.requireRead;
+    notice.readBy = notice.readBy || [];
+    saveEntity(space.id, 'notice', notice.id, notice);
+    noticesBroadcast(space);
+    auditLog(space, user, notice.requireRead ? '公告设为必读' : '取消公告必读', notice.text);
+  }
+  function handleNoticeRemindUnread(ws, user, space, msg) {
+    if (!isAdmin(space, user.account)) return sendTo(ws, serError('仅管理员可提醒未读'));
+    const notice = space.notices.find((n) => n.id === msg.noticeId);
+    if (!notice) return sendTo(ws, serError('公告不存在'));
+    if (!notice.requireRead) return sendTo(ws, serError('该公告未设为必读，无法提醒'));
+    const readBy = notice.readBy || [];
+    const info = api.spaceUserInfo(space.id);
+    let n = 0;
+    for (const account of info.keys()) {
+      if (readBy.includes(account)) continue;
+      api.sendToAccount(account, { type: 'noticeReadReminder', noticeId: notice.id, text: notice.text });
+      n++;
+    }
+    if (!n) return sendTo(ws, serError('无人未读'));
+    sendTo(ws, { type: 'noticeRemindSent', count: n });
+  }
+
+  return { setStatus: handleSetStatus, announce: handleAnnounce, suggestRoom: handleSuggestRoom, remindReturn: handleRemindReturn, renameSpace: handleRenameSpace, adminSet: handleAdminSet, kick: handleKick, pause: handlePause, removeNotice: handleRemoveNotice, noticeReact: handleNoticeReact, noticeUnreact: handleNoticeUnreact, inviteCreate: handleInviteCreate, inviteRevoke: handleInviteRevoke, inviteList: handleInviteList, inviteRequire: handleInviteRequire, auditList: handleAuditList, announceEdit: handleAnnounceEdit, announcePin: handleAnnouncePin, noticeRead: handleNoticeRead, noticeRequire: handleNoticeRequire, noticeRemindUnread: handleNoticeRemindUnread };
 };

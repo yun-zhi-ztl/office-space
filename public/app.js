@@ -225,6 +225,7 @@ function dispatch(m){
     case 'spaceInviteRequire': if(S.space) S.space.requireInvite=!!m.requireInvite; render(); break;
     case 'auditLogs': S.auditLogs=m.logs||[]; render(); break;
     case 'noticeUpdated': toast('✔ 公告已更新','success'); render(); break;
+    case 'noticeRemindSent': toast('📢 已提醒 '+(m.count||0)+' 位未读成员阅读公告','success'); break;
     case 'adminSet': if(S.me && m.account===S.me.account){ S.admin=!!m.admin; renderSidebar(); } render(); break;
     case 'spaceKicked': if(S.me && m.account===S.me.account){ toast('你已被管理员移除空间','warn'); S.me=null; S.admin=false; S.space=null; renderGate(); } else { toast('已移除成员 '+(m.accountName||'')+'','info'); render(); } break;
     case 'noticeRemoved': toast('公告已删除','success'); break;
@@ -480,7 +481,7 @@ function renderDash(){
     <div class="fs">${(d.users||[]).map(u=>`<span class="badge info">${esc(u.avatar||'' )} ${esc(u.display||u.username)}${u.emergencyMode?' 🆘':''}${u.status&&u.status.emoji?' '+esc(u.status.emoji):''} ${u.status?esc(u.status.label):'在岗'}</span>`).join('')||'<span class="hint">仅自己在线</span>'}</div>
     <h3 style="margin:22px 0 10px">📢 公告</h3>
     <div class="fs" style="margin-bottom:10px"><input id="annInput" placeholder="向整个空间喊一句话..."><button class="btn pri" onclick="doAnnounce()">喊话</button></div>
-    <div class="list">${(d.notices||[]).slice().sort((a,b)=>((b.pinned?1:0)-(a.pinned?1:0))||((b.ts||0)-(a.ts||0))).map(n=>`<div class="row"><span><span class="who">${n.pinned?'📌':''} ${esc(n.from)}</span> <span class="when">${fmtTime(n.ts)}</span><div>${esc(n.text)}</div><div class="fs" style="margin-top:6px">${noticeReactions(n).map(r=>`<button class="btn sm ${r.me?'pri':''}" onclick="reactNotice('${n.id}','${r.e}')">${r.e} ${r.count}</button>`).join(' ')}</div></span>${S.admin?`<button class="btn sm" onclick="doAnnounceEdit('${n.id}')">编辑</button>${n.pinned?'<button class="btn sm" onclick="doAnnouncePin(\'${n.id}\',false)">取消置顶</button>':'<button class="btn sm" onclick="doAnnouncePin(\'${n.id}\',true)">置顶</button>'}<button class="btn danger sm" onclick="removeNotice('${n.id}')">删除</button>`:''}</div>`).join('')||'<div class="empty">还没有公告</div>'}
+    <div class="list">${(d.notices||[]).slice().sort((a,b)=>((b.pinned?1:0)-(a.pinned?1:0))||((b.ts||0)-(a.ts||0))).map(n=>`<div class="row"><span><span class="who">${n.pinned?'📌':''} ${esc(n.from)} ${noticeReadHead(n)}</span> <span class="when">${fmtTime(n.ts)}</span><div>${esc(n.text)}</div>${noticeReadBadge(n)}<div class="fs" style="margin-top:6px">${noticeReactions(n).map(r=>`<button class="btn sm ${r.me?'pri':''}" onclick="reactNotice('${n.id}','${r.e}')">${r.e} ${r.count}</button>`).join(' ')}</div></span>${S.admin?`<button class="btn sm" onclick="doAnnounceEdit('${n.id}')">编辑</button>${n.pinned?'<button class="btn sm" onclick="doAnnouncePin(\'${n.id}\',false)">取消置顶</button>':'<button class="btn sm" onclick="doAnnouncePin(\'${n.id}\',true)">置顶</button>'}<button class="btn danger sm" onclick="removeNotice('${n.id}')">删除</button>`:''}</div>`).join('')||'<div class="empty">还没有公告</div>'}
     </div>
     ${overdue.length?`<h3 style="margin:22px 0 10px">⏰ 逾期借用 · 占用王</h3><div class="list">${overdue.map(b=>`<div class="row"><span>${esc(b.borrowerName)} ×${b.qty} · 已借 ${b.days} 天</span><button class="btn danger sm" onclick="remindReturn('${b.id}')">提醒归还</button></div>`).join('')}</div>`:''}
     ${S.weeklyReport?`<h3 style="margin:22px 0 10px">📅 本周空间周报 <span class="badge info">${fmtTime(S.weeklyReport.weekStart)}</span></h3><div class="list">
@@ -504,6 +505,26 @@ function submitAnnounceEdit(id){ wsSend({type:'announceEdit',noticeId:id,text:$(
 function doAnnouncePin(id, pinned){ wsSend({type:'announcePin',noticeId:id,pinned:!!pinned}); }
 const NOTICE_EMOJIS=['👍','🎉','😮','🤝','🔥'];
 function noticeReactions(n){ const arr=n.reactions||[]; return NOTICE_EMOJIS.map(e=>({e, count:arr.filter(r=>r.reaction===e).length, me:arr.some(r=>r.account===S.me.account&&r.reaction===e)})); }
+function noticeReadHead(n){
+  if(!n.requireRead) return '';
+  const readCount=(n.readBy||[]).length;
+  const myRead = S.me && (n.readBy||[]).includes(S.me.account);
+  return `<span class="badge ${myRead?'ok':'warn'}">必读·已读 ${readCount}</span>`;
+}
+function noticeReadBadge(n){
+  if(!n.requireRead) return '';
+  const rb=n.readBy||[];
+  const readCount=rb.length;
+  const all=(S.DB.users||[]);
+  const unreadNames=all.filter(u=>!rb.includes(u.account)).map(u=>u.display||u.username).slice(0,3);
+  const myRead = S.me && rb.includes(S.me.account);
+  return `<div class="meta">已读 ${readCount} 人${unreadNames.length?` · 未读 ${unreadNames.join('、')}${all.length>3?' 等':''}`:''}${
+    !S.admin ? (myRead?'':' · <button class="btn sm" onclick="noticeRead(\''+n.id+'\')">✓ 我已读</button>') : ` · <button class="btn sm" onclick="noticeRead('${n.id}')">✓ 我已读</button><button class="btn sm" onclick="noticeRequire('${n.id}')">${n.requireRead?'取消必读':'设为必读'}</button>${n.requireRead?'<button class="btn sm" onclick="noticeRemindUnread(\''+n.id+'\')">提醒未读</button>':''}`
+  }</div>`;
+}
+function noticeRead(id){ wsSend({type:'noticeRead',noticeId:id}); }
+function noticeRequire(id){ wsSend({type:'noticeRequire',noticeId:id}); }
+function noticeRemindUnread(id){ if(confirm('提醒所有未读成员阅读该公告？')) wsSend({type:'noticeRemindUnread',noticeId:id}); }
 function reactNotice(id, e){ wsSend({type:'noticeReact',noticeId:id,reaction:e}); }
 function removeNotice(id){ if(confirm('确认删除该公告？')) wsSend({type:'removeNotice',noticeId:id}); }
 function remindReturn(id){ wsSend({type:'remindReturn',borrowId:id}); }
