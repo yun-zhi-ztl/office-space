@@ -168,9 +168,9 @@
   - `assetInspect`：成员 / 管理员登记巡检结果（`pass` / `issue` / `fail`），刷新 `lastCheckAt`；不通过自动置 `damaged` 并进入 `maintenance`，单发通知资产负责人。
   - `assetCreate` / `assetUpdate` 携带 `inspectIntervalDays`；`assetsStats` 统计纳入巡检数与迟检数；`digest` 暴露 `inspectOverdueCount` 供概览展示。
 
-### 会议室忙闲热图（bookingHeatmap）
-- `api.bookingHeatmap(space, now)`：按当天小时（8:00-20:00，13 个时段）统计同时被占用的会议室间数，返回 `{ date, totalRooms, hours: [{ hour, occupied }], busiest: { hour, occupied } }`；取消 / 已过期场次不参与统计。
-- 客户端在会议室模块 `getBookingHeatmap` 拉取，前端以热力条展示峰值时段。
+### 会议室 / 工位忙闲热图（bookingHeatmap）
+- `api.bookingHeatmap(space, now)`：按当天小时（8:00-20:00，13 个时段）分别统计同时被占用的会议室与工位数，返回 `{ date, totalRooms, hours: [{hour,occupied}], busiest, deskTotal, deskHours, desksBusiest }`；取消 / 已过期场次不计。
+- 客户端在会议室 / 工位模块 `getBookingHeatmap` 拉取一次，前端以热力条展示各自峰值时段。
 
 ### 物资申领（materials）
 - `material_request`: `{ id, requesterAccount, requesterName, name, qty, unit, reason, priority, status, handlerAccount?, handlerName?, createdAt, handledAt? }`

@@ -233,7 +233,7 @@ function renderPauseBanner(){
   else { b.style.display='none'; }
 }
 function renderAll(){ render(); }
-function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); if(mod==='keys') wsSend({type:'getKeys'}); if(mod==='fridge') wsSend({type:'getFridge'}); if(mod==='parking') wsSend({type:'getParking'}); if(mod==='parcels') wsSend({type:'getParcels'}); if(mod==='lockers') wsSend({type:'getLockers'}); if(mod==='vehicles') wsSend({type:'getVehicles'}); if(mod==='lost') wsSend({type:'getLost'}); if(mod==='print') wsSend({type:'getPrint'}); if(mod==='rooms') wsSend({type:'getBookingHeatmap'}); }
+function switchModule(mod){ S.module=mod; const nav=$('#sidebar .nav button'); (nav?[...nav]:[]).forEach(b=>b.classList.toggle('active', b.dataset.m==mod)); render(); if(mod==='ach') wsSend({type:'getAchievements'}); if(mod==='rem') wsSend({type:'getMyReminders'}); if(mod==='an') wsSend({type:'getSpaceTrend',days:14}); if(mod==='attend') wsSend({type:'getAttendanceCalendar',year:new Date().getFullYear(),month:new Date().getMonth()+1}); if(mod==='schedule') wsSend({type:'getMySchedule',days:14}); if(mod==='cal') wsSend({type:'getSpaceCalendar',year:S.DB.calendar.year,month:S.DB.calendar.month}); if(mod==='assets') wsSend({type:'getAssets'}); if(mod==='keys') wsSend({type:'getKeys'}); if(mod==='fridge') wsSend({type:'getFridge'}); if(mod==='parking') wsSend({type:'getParking'}); if(mod==='parcels') wsSend({type:'getParcels'}); if(mod==='lockers') wsSend({type:'getLockers'}); if(mod==='vehicles') wsSend({type:'getVehicles'}); if(mod==='lost') wsSend({type:'getLost'}); if(mod==='print') wsSend({type:'getPrint'}); if(mod==='rooms') wsSend({type:'getBookingHeatmap'}); if(mod==='desks') wsSend({type:'getBookingHeatmap'}); }
 
 /* 分页：广播已按最近 PAGE 下发，前端按 offset 加载更多 */
 const PAGE = 30;
@@ -548,13 +548,20 @@ function renderRooms(){
       <span class="fs">${mine?`<button class="btn danger sm" onclick="cancelWaitlist('${w.id}')">取消候补</button>`:'<span class="badge warn">候补中</span>'}</span></div>`; }).join(''):'<div class="empty">暂无候补</div>'}</div>
     ${(S.DB.revOffset||0)<(S.DB.revTotal||0)?`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="loadMore('rooms')">加载更多（${S.DB.revTotal-(S.DB.revOffset||0)}）</button></div>`:''}`;
 }
-// 会议室忙闲热图
+// 忙闲热图通用渲染
+function heatmapBarHTML(hours, total, peak, icon, title){
+  if(!hours || !total) return '';
+  const max=Math.max(1,...hours.map(x=>x.occupied));
+  return `<div class="card" style="grid-column:1/-1"><h3>${icon} ${title} <span class="badge info">峰值 ${peak.hour}:00 · ${peak.occupied} 占用 / 共 ${total}</span></h3>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${hours.map(x=>{const pct=Math.round(x.occupied/max*100); const col=x.occupied===0?'#16a34a':(x.occupied>=total?'#dc2626':(pct>=60?'#f59e0b':'#0ea5e9')); return `<div style="flex:1;min-width:42px;text-align:center;border:1px solid var(--border,#334155);border-radius:8px;padding:6px 2px" title="${x.hour}:00-${x.hour+1}:00 · ${x.occupied}/${total} 占用"><div style="height:44px;display:flex;align-items:flex-end;justify-content:center"><div style="height:${Math.max(4,Math.round(38*pct/100))}px;width:70%;background:${col};border-radius:4px;opacity:.9"></div></div><div style="font-size:11px;color:var(--muted)">${x.hour}:00</div><b style="font-size:12px">${x.occupied}</b></div>`;}).join('')}</div></div>`;
+}
 function roomHeatmapHtml(){
   const hm=S.DB.bookingHeatmap||null;
-  if(!hm || !hm.hours) return '';
-  const max=Math.max(1,...hm.hours.map(x=>x.occupied));
-  return `<div class="card" style="grid-column:1/-1"><h3>📈 今日忙闲（会议室占用） <span class="badge info">峰值 ${hm.busiest.hour}:00 · ${hm.busiest.occupied} 间同时占用 / 共 ${hm.totalRooms}</span></h3>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${hm.hours.map(x=>{const pct=Math.round(x.occupied/max*100); const col=x.occupied===0?'#16a34a':(x.occupied>=hm.totalRooms?'#dc2626':(pct>=60?'#f59e0b':'#0ea5e9')); return `<div style="flex:1;min-width:42px;text-align:center;border:1px solid var(--border,#334155);border-radius:8px;padding:6px 2px" title="${x.hour}:00-${x.hour+1}:00 · ${x.occupied}/${hm.totalRooms} 间"><div style="height:44px;display:flex;align-items:flex-end;justify-content:center"><div style="height:${Math.max(4,Math.round(38*pct/100))}px;width:70%;background:${col};border-radius:4px;opacity:.9"></div></div><div style="font-size:11px;color:var(--muted)">${x.hour}:00</div><b style="font-size:12px">${x.occupied}</b></div>`;}).join('')}</div></div>`;
+  return hm ? heatmapBarHTML(hm.hours, hm.totalRooms, hm.busiest, '📈', '今日忙闲（会议室占用）') : '';
+}
+function deskHeatmapHtml(){
+  const hm=S.DB.bookingHeatmap||null;
+  return hm ? heatmapBarHTML(hm.deskHours, hm.deskTotal, hm.desksBusiest, '📈', '今日忙闲（工位占用）') : '';
 }
 // 会议室洞察：评分口碑榜 + 使用率排行
 function roomInsightsHtml(){
@@ -1168,6 +1175,7 @@ function renderDesks(){
   const d=S.DB.desks||{desks:[],reservations:[]};
   const me=S.me.account, now=Date.now();
   $('#main').innerHTML = `<div class="topbar"><div><h1>工位预约</h1><div class="sub">开放工位 / 共享座位的时段预约，实时占用</div></div>
+    ${deskHeatmapHtml()}
     ${S.admin?'<button class="btn pri" onclick="openDeskCreate()">＋ 新增工位</button>':''}</div>
     <div class="cards">${(d.desks||[]).map(k=>{
       const mine=(d.reservations||[]).filter(r=>r.deskId===k.id&&(r.account===me));

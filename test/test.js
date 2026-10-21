@@ -2721,6 +2721,11 @@ async function runTests() {
     assert(hmMsg.heatmap.totalRooms === 2, '热图统计会议室总数');
     assert(typeof hmMsg.heatmap.busiest.hour === 'number' && hmMsg.heatmap.busiest.hour >= 8 && hmMsg.heatmap.busiest.hour <= 20, '热图含峰值时段');
     assert(hmMsg.heatmap.hours.every(x => typeof x.occupied === 'number'), '每小时占用为数值');
+    await sendMsg(wH, { type: 'deskCreate', name: '共享工位' });
+    await sendMsg(wH, { type: 'getBookingHeatmap' });
+    const hm2 = last(wH, 'bookingHeatmap').heatmap;
+    assert(hm2.deskTotal >= 1, '热图含工位数据');
+    assert(hm2.deskHours && hm2.deskHours.length === 13 && typeof hm2.desksBusiest.hour === 'number', '工位热图覆盖 13 小时并含峰值');
     wH.close();
   }
 

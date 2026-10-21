@@ -1394,14 +1394,20 @@ function createContext() {
     const dayEnd = dayStart + 86400000;
     const active = [...space.roomReservations.values()].filter((r) => r.status !== 'cancelled' && r.status !== 'expired' && r.startAt < dayEnd && r.endAt > dayStart && r.endAt > r.startAt);
     const hours = [];
+    const deskActive = [...space.deskReservations.values()].filter((r) => r.status !== 'cancelled' && r.status !== 'expired' && r.startAt < dayEnd && r.endAt > dayStart && r.endAt > r.startAt);
+    const deskHours = [];
     for (let h = 8; h <= 20; h++) {
       const hs = dayStart + h * 3600000, he = hs + 3600000;
       const occ = new Set();
+      const docc = new Set();
       for (const r of active) if (r.startAt < he && r.endAt > hs) occ.add(r.roomId);
+      for (const r of deskActive) if (r.startAt < he && r.endAt > hs) docc.add(r.deskId);
       hours.push({ hour: h, occupied: occ.size });
+      deskHours.push({ hour: h, occupied: docc.size });
     }
     const busiest = hours.reduce((a, b) => (b.occupied > a.occupied ? b : a), hours[0] || { hour: 8, occupied: 0 });
-    return { date: todayKey(nowMs), totalRooms: space.rooms.length, hours, busiest: { hour: busiest.hour, occupied: busiest.occupied } };
+    const desksBusiest = deskHours.reduce((a, b) => (b.occupied > a.occupied ? b : a), deskHours[0] || { hour: 8, occupied: 0 });
+    return { date: todayKey(nowMs), totalRooms: space.rooms.length, hours, busiest: { hour: busiest.hour, occupied: busiest.occupied }, deskTotal: space.desks.length, deskHours, desksBusiest: { hour: desksBusiest.hour, occupied: desksBusiest.occupied } };
   }
 
   // 统一空间检索：跨会议室/设备/申领/报修/待办/知识库/公告/资产/人员做包含匹配

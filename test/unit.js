@@ -1736,6 +1736,17 @@ assertEq(hm.hours.find((x) => x.hour === 10).occupied, 1, '10 点一间被占用
 assertEq(hm.hours.find((x) => x.hour === 11).occupied, 1, '11 点一间被占用');
 assertEq(hm.busiest.hour, 9, '峰值时段为 9 点');
 assertEq(hm.busiest.occupied, 2, '峰值占用 2 间');
+// 工位忙闲
+hSp.desks.push({ id: 'dk1', name: 'D1' }, { id: 'dk2', name: 'D2' });
+hSp.deskReservations.set('da', { id: 'da', deskId: 'dk1', startAt: d0 + 9 * 3600000, endAt: d0 + 10 * 3600000, status: 'pending' });
+hSp.deskReservations.set('db', { id: 'db', deskId: 'dk2', startAt: d0 + 9 * 3600000 + 30 * 60000, endAt: d0 + 10 * 3600000 + 30 * 60000, status: 'pending' });
+hSp.deskReservations.set('dc', { id: 'dc', deskId: 'dk1', startAt: d0 + 11 * 3600000, endAt: d0 + 12 * 3600000, status: 'cancelled' });
+const dhm = api.bookingHeatmap(hSp, hmNow);
+assertEq(dhm.deskTotal, 2, '热图统计工位总数');
+assertEq(dhm.deskHours.length, 13, '工位热图覆盖 8:00-20:00 13 小时');
+assertEq(dhm.deskHours.find((x) => x.hour === 9).occupied, 2, '9 点两个工位被占用');
+assertEq(dhm.deskHours.find((x) => x.hour === 11).occupied, 0, '取消工位场次不计');
+assertEq(dhm.desksBusiest.hour, 9, '工位峰值时段为 9 点');
 
 console.log('\n==================================================');
 console.log(`✅ 单元通过: ${passed}`);
