@@ -18,6 +18,8 @@
   @keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
   .panel{background:rgba(30,41,59,.72);border:1px solid #334155;border-radius:16px;padding:18px;animation:fadeIn .5s;}
   .panel h2{font-size:16px;color:#94a3b8;margin-bottom:12px;letter-spacing:1px;}
+  .panel h3{color:#94a3b8;font-size:15px;letter-spacing:.5px;}
+  .panel .chips{width:100%;margin-bottom:8px;}
   .roomrow{display:flex;justify-content:space-between;align-items:center;padding:12px 4px;border-bottom:1px solid #1e293b;font-size:20px;}
   .roomrow:last-child{border-bottom:none;}
   .roomrow .now{color:#34d399;font-weight:600;}

@@ -1775,6 +1775,7 @@ function createContext() {
     broadcast(sp.id, 'visitors', { visitors: visitors.slice(0, LIST_PAGE), total: visitors.length });
     broadcast(sp.id, 'stalls', { squat_count: sp.squatCount, urinal_count: sp.urinalCount, stalls: stallsPublic(sp, info) });
     broadcast(sp.id, 'notices', { notices: sp.notices });
+    broadcast(sp.id, 'parking', { spots: parkingSpotsPublic(sp, info), stats: parkingStats(sp), reservations: parkingReservationsPublic(sp, info) });
     parcelsBroadcast(sp);
     lockersBroadcast(sp);
     vehiclesBroadcast(sp);
