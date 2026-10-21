@@ -1104,7 +1104,8 @@ function renderVisitors(){
   const d=S.DB, me=S.me.account;
   $('#main').innerHTML = `<div class="topbar"><div><h1>访客登记</h1><div class="sub">登记访客姓名、事由与预计到访，负责人可推进状态；访客凭签到码到访核销</div></div>
     <button class="btn pri" onclick="openVisitorCreate()">＋ 登记访客</button><button class="btn" onclick="openCheckin()">🔑 凭码核销</button><button class="btn" onclick="exportModuleCsv('visitors',VIS_COLS)">导出 CSV</button></div>
-    <div class="list">${d.visitors.map(v=>{
+    ${fbox('visitors','🔍 筛选访客姓名 / 事由 / 接待人')}
+    <div class="list">${listOf(d.visitors,'visitors',['visitorName','purpose','hostName']).map(v=>{
       const mine = v.hostAccount===me;
       const can = mine||S.admin;
       return `<div class="row"><span><span class="who">${esc(v.hostName)}</span> 接待 <b>${esc(v.visitorName)}</b><div class="desc">${esc(v.purpose)}${v.contact?' · 联系方式 '+esc(v.contact):''}</div><div class="when">${fmtTime(v.createdAt)}${v.expectedAt?' · 预计 '+fmtTime(v.expectedAt):''}</div>${v.code?`<span class="badge ${v.expired?'bad':v.status==='pending'?'warn':'info'}">签到码 ${esc(v.code)}${v.expiresAt?' · 到期 '+fmtTime(v.expiresAt):''}</span>`:''}</span>
@@ -1709,6 +1710,7 @@ function renderTasks(){
   const list=S.DB.tasks||[]; const st=S.taskStats||{};
   $('#main').innerHTML = `<div class="topbar"><div><h1>待办任务</h1><div class="sub">今天要做什么：发起任务、指派或认领，推动闭环</div></div>
     <button class="btn pri" onclick="openTaskCreate()">＋ 新建任务</button></div>
+    ${fbox('tasks','🔍 筛选任务标题 / 描述 / 负责人')}
     <div class="cards">
       <div class="card"><h3>📝 待办</h3><div style="font-size:30px;font-weight:800">${st.pending||0}</div><div class="meta">个未开始</div></div>
       <div class="card"><h3>⏳ 进行中</h3><div style="font-size:30px;font-weight:800">${st.in_progress||0}</div><div class="meta">个进行中</div></div>
@@ -1716,12 +1718,12 @@ function renderTasks(){
       <div class="card"><h3>🙋 开放认领</h3><div style="font-size:30px;font-weight:800">${st.open||0}</div><div class="meta">个未指派</div></div>
     </div>
     <h3 style="margin:22px 0 10px">📝 任务列表</h3>
-    <div class="list">${list.length?list.map(t=>`
+    <div class="list">${listOf(list,'tasks',['title','description','assigneeName']).map(t=>`
       <div class="row"><span><span class="who">${esc(t.title)} ${taskBadge(t)} ${t.commentCount?`<span class="badge ok">💬 ${t.commentCount}</span>`:''}</span>
         <div class="desc">${esc(t.description||'')}</div>
         <div class="when">${esc(t.creatorName||'')} ${t.assigneeAccount?'→ '+esc(t.assigneeName||''):'（开放认领）'} · ${t.dueAt?'截止 '+fmtTime(t.dueAt):'无截止时间'}${t.completedAt?' · 完成于 '+fmtTime(t.completedAt):''}</div>
         ${taskCommentListHtml(t)}
-      </span><span class="fs">${taskActions(t)}${(t.creatorAccount===me||t.assigneeAccount===me||S.admin)?`<div style="margin-top:6px"><input placeholder="评论…" maxlength="200" onkeydown="if(event.key==='Enter')taskComment('${t.id}',this.value)"/></div>`:''}</span></div>`).join(''):'<div class="empty">还没有任务，来创建第一个吧</div>'}</div>`;
+      </span><span class="fs">${taskActions(t)}${(t.creatorAccount===me||t.assigneeAccount===me||S.admin)?`<div style="margin-top:6px"><input placeholder="评论…" maxlength="200" onkeydown="if(event.key==='Enter')taskComment('${t.id}',this.value)"/></div>`:''}</span></div>`).join('')||'<div class="empty">还没有任务，来创建第一个吧</div>'}</div>`;
 }
 // 任务评论列表：展示最近评论（倒序）
 function taskCommentListHtml(t) {
